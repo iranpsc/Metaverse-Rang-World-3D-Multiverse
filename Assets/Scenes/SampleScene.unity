@@ -4184,7 +4184,7 @@ Rigidbody:
   m_GameObject: {fileID: 546380350}
   serializedVersion: 4
   m_Mass: 10
-  m_Drag: 10
+  m_Drag: 0
   m_AngularDrag: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
   m_InertiaTensor: {x: 1, y: 1, z: 1}
@@ -6349,7 +6349,7 @@ Rigidbody:
   m_GameObject: {fileID: 807051350}
   serializedVersion: 4
   m_Mass: 10
-  m_Drag: 10
+  m_Drag: 0
   m_AngularDrag: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
   m_InertiaTensor: {x: 1, y: 1, z: 1}
@@ -13023,7 +13023,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 474bcb49853aa07438625e644c072ee6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Version: 3
+  m_Version: 4
   m_UsePipelineSettings: 1
   m_AdditionalLightsShadowResolutionTier: 2
   m_LightLayerMask: 1
