@@ -1,0 +1,32 @@
+using UnityEngine;
+
+namespace Meta
+{
+    [AddComponentMenu("Meta/#SCRIPTNAME#")]
+    [HelpURL("https://google.com")]
+    public class #SCRIPTNAME# : MonoBehaviour
+    {
+
+        [Header("References")]
+
+
+        [Header("Settings")]
+
+
+        [Header("Inputs")]
+
+
+        [Header("Debugger")]
+        [SerializeField] private bool EnableLog;
+
+        void Start()
+        {
+            if (EnableLog) Debug.Log("[#SCRIPTNAME#] PutLogHere");
+        }
+
+        void Update()
+        {
+            
+        }
+    }
+}
