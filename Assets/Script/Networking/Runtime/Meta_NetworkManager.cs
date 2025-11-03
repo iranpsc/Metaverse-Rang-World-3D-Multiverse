@@ -149,7 +149,16 @@ public class Meta_NetworkManager : NetworkManager
     /// <param name="conn">Connection from client.</param>
     public override void OnServerAddPlayer(NetworkConnectionToClient conn)
     {
-        base.OnServerAddPlayer(conn);
+        //base.OnServerAddPlayer(conn);
+        // ========================== //
+
+        Transform startPos = GetStartPosition();
+        GameObject player = startPos != null
+            ? Instantiate(playerPrefab, startPos.position, startPos.rotation)
+            : Instantiate(playerPrefab);
+
+        player.name = $"{playerPrefab.name} [ID[{conn.connectionId}]";
+        NetworkServer.AddPlayerForConnection(conn, player);
     }
 
     /// <summary>

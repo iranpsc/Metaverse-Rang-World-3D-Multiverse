@@ -1,5 +1,4 @@
 using UnityEngine;
-using System.Runtime.InteropServices;
 
 namespace Meta
 {
@@ -13,21 +12,11 @@ namespace Meta
         [Header("Debugger")]
         [SerializeField] private bool EnableLog;
 
-#if UNITY_WEBGL && !UNITY_EDITOR
-        [DllImport("__Internal")]
-        private static extern int DetectMobilePlatform();
-#endif
-
         void Start()
         {
             bool _IsAndroid = false;
             bool _IsWebGL = Application.platform == RuntimePlatform.WebGLPlayer;
             bool _IsAndroidBrowser = false;
-
-#if UNITY_WEBGL && !UNITY_EDITOR
-            // Detect if WebGL was opened on Android
-            _IsAndroidBrowser = DetectMobilePlatform() == 1;
-#endif
 
             _IsAndroid = Application.platform == RuntimePlatform.Android;
 

@@ -83,7 +83,9 @@ namespace Meta.Player.Core
         [Header("References")]
         public CharacterController PlayerController;
         public Transform Player;
-        public CinemachinePanTilt Camera;
+        public Camera Camera;
+        //public Camera Camera;
+
         public Animator PlayerAnimation;
 
         [Header("Settings")]
@@ -275,8 +277,34 @@ namespace Meta.Player.Core
         }
         public virtual void RotateHandler()
         {
-            Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0);
+            if (PlayerAnimation == null)
+                return;
+
+            // Find the active Cinemachine camera under this player
+            if (Camera == null)
+            {
+                Camera = GetActiveChildCamera();
+                if (Camera == null)
+                    return;
+            }
+
+            // Use camera's Y rotation to rotate PlayerAnimation
+            float _CameraY = Camera.transform.rotation.eulerAngles.y;
+            PlayerAnimation.transform.rotation = Quaternion.Euler(0f, _CameraY, 0f);
         }
+        private Camera GetActiveChildCamera()
+        {
+            // Try to find any active camera under this player
+            Camera[] _Cameras = GetComponentsInChildren<Camera>(true);
+            foreach (Camera _Cam in _Cameras)
+            {
+                if (_Cam.isActiveAndEnabled)
+                    return _Cam;
+            }
+
+            return null;
+        }
+
         public virtual void AnimationHandler(float _DeltaTime)
         {
             bool IsRunning = PlayerInputAction.RunAction.action.IsPressed();
@@ -297,15 +325,28 @@ namespace Meta.Player.Core
 
         public virtual void ApplyMove(float _DeltaTime)
         {
+            // Movement input
             PlayerData.Direction = new Vector3(PlayerData.Horizontal, 0f, PlayerData.Vertical);
             PlayerData.Direction = Vector3.ClampMagnitude(PlayerData.Direction, 1f);
-            PlayerData.Direction = transform.TransformDirection(PlayerData.Direction);
-            PlayerData.Direction *= PlayerInputAction.RunAction.action.IsPressed()? RunSpeed : MoveSpeed;
 
-            PlayerData.Direction = new Vector3(PlayerData.Direction.x, PlayerData.JumpForce, PlayerData.Direction.z);
+            // Make it relative to PlayerAnimation’s facing direction
+            Vector3 _Forward = PlayerAnimation != null ? PlayerAnimation.transform.forward : transform.forward;
+            Vector3 _Right = PlayerAnimation != null ? PlayerAnimation.transform.right : transform.right;
 
+            Vector3 _MoveDir = (_Forward * PlayerData.Direction.z + _Right * PlayerData.Direction.x).normalized;
 
-            PlayerController.Move(PlayerData.Direction * _DeltaTime);
+            float _Speed = PlayerInputAction.RunAction.action.IsPressed() ? RunSpeed : MoveSpeed;
+            Vector3 _FinalVelocity = _MoveDir * _Speed;
+
+            // Apply jump/gravity
+            _FinalVelocity.y = PlayerData.JumpForce;
+
+            // Apply to controller
+            PlayerController.Move(_FinalVelocity * _DeltaTime);
+
+            // Store velocity for diagnostics
+            PlayerData.Velocity = _FinalVelocity;
         }
+
     }
 }

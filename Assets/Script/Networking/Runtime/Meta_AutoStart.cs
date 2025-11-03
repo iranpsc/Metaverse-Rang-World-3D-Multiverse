@@ -14,6 +14,8 @@ namespace Meta
         private void Start()
         {
             if (AutoStart) Invoke(nameof(StartNetwork), StartupDelay);
+            //NetworkManager.singleton.StartHost();
+
         }
 
         public void StartNetwork()
@@ -41,6 +43,8 @@ namespace Meta
             {
                 NetworkManager.singleton.networkAddress = "3ddevelop.irpsc.com";
                 NetworkManager.singleton.StartClient();
+                //NetworkManager.singleton.StartHost();
+
 
                 Debug.Log("[Meta_AutoStart] Client started automatically (address: root).");
             }

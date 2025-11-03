@@ -25,6 +25,6 @@ ScriptedImporter:
     sceneObjectCreation: 2
   assetDependencies:
   - type: 0
-    originalUri: Assets\_Meta_RGB\3D Model\Stand\Stand.bin
-    assetPath: Assets\_Meta_RGB\3D Model\Stand\Stand.bin
+    originalUri: Assets\Model\Stand\Stand.bin
+    assetPath: Assets\Model\Stand\Stand.bin
   reportItems: []

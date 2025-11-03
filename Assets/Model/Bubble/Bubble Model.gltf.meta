@@ -25,9 +25,9 @@ ScriptedImporter:
     sceneObjectCreation: 2
   assetDependencies:
   - type: 0
-    originalUri: Assets\_Meta_RGB\3D Model\Bubble\Bubble Model.bin
-    assetPath: Assets\_Meta_RGB\3D Model\Bubble\Bubble Model.bin
+    originalUri: Assets\Model\Bubble\Bubble Model.bin
+    assetPath: Assets\Model\Bubble\Bubble Model.bin
   - type: 1
-    originalUri: Assets\_Meta_RGB\3D Model\Bubble\Ground_Texture.png
-    assetPath: Assets\_Meta_RGB\3D Model\Bubble\Ground_Texture.png
+    originalUri: Assets\Model\Bubble\Ground_Texture.png
+    assetPath: Assets\Model\Bubble\Ground_Texture.png
   reportItems: []

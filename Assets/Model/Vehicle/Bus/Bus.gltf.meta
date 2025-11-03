@@ -1,0 +1,55 @@
+fileFormatVersion: 2
+guid: d4a052f5ba9f7ff4cbb9c472cc24838e
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 715df9372183c47e389bb6e19fbc3b52, type: 3}
+  editorImportSettings:
+    generateSecondaryUVSet: 0
+  importSettings:
+    nodeNameMethod: 1
+    animationMethod: 2
+    generateMipMaps: 1
+    defaultMinFilterMode: 9729
+    defaultMagFilterMode: 9729
+    anisotropicFilterLevel: 1
+  instantiationSettings:
+    mask: -1
+    layer: 0
+    skinUpdateWhenOffscreen: 1
+    lightIntensityFactor: 1
+    sceneObjectCreation: 2
+  assetDependencies:
+  - type: 0
+    originalUri: Assets\Model\Vehicle\Bus\Bus.bin
+    assetPath: Assets\Model\Vehicle\Bus\Bus.bin
+  - type: 1
+    originalUri: Assets\Model\Vehicle\Bus\vod-t-1.jpg
+    assetPath: Assets\Model\Vehicle\Bus\vod-t-1.jpg
+  - type: 1
+    originalUri: Assets\Model\Vehicle\Bus\vod-t.jpg
+    assetPath: Assets\Model\Vehicle\Bus\vod-t.jpg
+  - type: 1
+    originalUri: Assets\Model\Vehicle\Bus\ad-back.jpg
+    assetPath: Assets\Model\Vehicle\Bus\ad-back.jpg
+  - type: 1
+    originalUri: Assets\Model\Vehicle\Bus\ad-head.jpg
+    assetPath: Assets\Model\Vehicle\Bus\ad-head.jpg
+  - type: 1
+    originalUri: Assets\Model\Vehicle\Bus\ad-body.jpg
+    assetPath: Assets\Model\Vehicle\Bus\ad-body.jpg
+  - type: 1
+    originalUri: Assets\Model\Vehicle\Bus\Image.png
+    assetPath: Assets\Model\Vehicle\Bus\Image.png
+  - type: 1
+    originalUri: Assets\Model\Vehicle\Bus\NUMBER.jpg
+    assetPath: Assets\Model\Vehicle\Bus\NUMBER.jpg
+  reportItems:
+  - type: 2
+    code: 20
+    messages:
+    - KHR_materials_specular

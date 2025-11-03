@@ -266,7 +266,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Mirror::Mirror.NetworkIdentity
   sceneId: 0
-  _assetId: 0
+  _assetId: 640505080
   serverOnly: 0
   visibility: 0
   hasSpawned: 0
@@ -320,7 +320,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7987631583195793360}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -399,10 +399,15 @@ MonoBehaviour:
   syncDirection: 0
   syncMode: 0
   syncInterval: 0
-  Destination: {fileID: 6819537264478452400}
-  TeleportDelay: 2
-  CancelIfExit: 0
-  PortalEffect: {fileID: 7658298433391929379}
+  Base:
+    Teleport:
+      TeleportionDelay: 0
+      DestinationXYZ: {x: 0, y: 0, z: 0}
+      TeleportXYZ: 0
+      DestinationObject: {fileID: 0}
+      TeleportObject: 0
+    Effect:
+      Effect: {fileID: 0}
 --- !u!1001 &5443472896595274172
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -574,10 +579,5 @@ PrefabInstance:
 --- !u!4 &549027458627506750 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 9012302792235175062, guid: f91f1f8b248d8a44c8309566a1627b19, type: 3}
-  m_PrefabInstance: {fileID: 8830617908378721960}
-  m_PrefabAsset: {fileID: 0}
---- !u!198 &7658298433391929379 stripped
-ParticleSystem:
-  m_CorrespondingSourceObject: {fileID: 1210085023711786635, guid: f91f1f8b248d8a44c8309566a1627b19, type: 3}
   m_PrefabInstance: {fileID: 8830617908378721960}
   m_PrefabAsset: {fileID: 0}

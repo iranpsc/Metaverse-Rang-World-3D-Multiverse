@@ -35,7 +35,7 @@ namespace Meta
         private void Awake()
         {
             // On Android or VR, we still run, but disable cursor control only
-            _IsCursorControlAllowed = !(Application.platform == RuntimePlatform.Android || XRCheck.IsVRActive());
+            _IsCursorControlAllowed = !(Application.platform == RuntimePlatform.Android);
         }
 
         private void OnEnable()

@@ -14,7 +14,6 @@ ScriptedImporter:
     nodeNameMethod: 1
     animationMethod: 2
     generateMipMaps: 0
-    texturesReadable: 0
     defaultMinFilterMode: 9729
     defaultMagFilterMode: 9729
     anisotropicFilterLevel: 1
@@ -26,68 +25,68 @@ ScriptedImporter:
     sceneObjectCreation: 2
   assetDependencies:
   - type: 0
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\Mazar.bin
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\Mazar.bin
+    originalUri: Assets\Model\Mazar\Mazar.bin
+    assetPath: Assets\Model\Mazar\Mazar.bin
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\Marble_normal_xtm.jpg
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\Marble_normal_xtm.jpg
+    originalUri: Assets\Model\Mazar\Marble_normal_xtm.jpg
+    assetPath: Assets\Model\Mazar\Marble_normal_xtm.jpg
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\Marble_diffuse_xtm.jpg
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\Marble_diffuse_xtm.jpg
+    originalUri: Assets\Model\Mazar\Marble_diffuse_xtm.jpg
+    assetPath: Assets\Model\Mazar\Marble_diffuse_xtm.jpg
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\Marble_roughness_xtm.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\Marble_roughness_xtm.png
+    originalUri: Assets\Model\Mazar\Marble_roughness_xtm.png
+    assetPath: Assets\Model\Mazar\Marble_roughness_xtm.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\floor tiles_roughness_xtm.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\floor tiles_roughness_xtm.png
+    originalUri: Assets\Model\Mazar\floor tiles_roughness_xtm.png
+    assetPath: Assets\Model\Mazar\floor tiles_roughness_xtm.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\floor tiles_diffuse_xtm.jpg
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\floor tiles_diffuse_xtm.jpg
+    originalUri: Assets\Model\Mazar\floor tiles_diffuse_xtm.jpg
+    assetPath: Assets\Model\Mazar\floor tiles_diffuse_xtm.jpg
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\big plaster and floor_normal_xtm.jpg
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\big plaster and floor_normal_xtm.jpg
+    originalUri: Assets\Model\Mazar\big plaster and floor_normal_xtm.jpg
+    assetPath: Assets\Model\Mazar\big plaster and floor_normal_xtm.jpg
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\big plaster and floor_diffuse_xtm.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\big plaster and floor_diffuse_xtm.png
+    originalUri: Assets\Model\Mazar\big plaster and floor_diffuse_xtm.png
+    assetPath: Assets\Model\Mazar\big plaster and floor_diffuse_xtm.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\big plaster and floor_roughness_xtm.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\big plaster and floor_roughness_xtm.png
+    originalUri: Assets\Model\Mazar\big plaster and floor_roughness_xtm.png
+    assetPath: Assets\Model\Mazar\big plaster and floor_roughness_xtm.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\smal plaster bot Tiles_normal_xtm.jpg
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\smal plaster bot Tiles_normal_xtm.jpg
+    originalUri: Assets\Model\Mazar\smal plaster bot Tiles_normal_xtm.jpg
+    assetPath: Assets\Model\Mazar\smal plaster bot Tiles_normal_xtm.jpg
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\smal plaster bot Tiles_diffuse_xtm.jpg
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\smal plaster bot Tiles_diffuse_xtm.jpg
+    originalUri: Assets\Model\Mazar\smal plaster bot Tiles_diffuse_xtm.jpg
+    assetPath: Assets\Model\Mazar\smal plaster bot Tiles_diffuse_xtm.jpg
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\smal plaster bot Tiles_roughness_xtm.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\smal plaster bot Tiles_roughness_xtm.png
+    originalUri: Assets\Model\Mazar\smal plaster bot Tiles_roughness_xtm.png
+    assetPath: Assets\Model\Mazar\smal plaster bot Tiles_roughness_xtm.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\big building_normal.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\big building_normal.png
+    originalUri: Assets\Model\Mazar\big building_normal.png
+    assetPath: Assets\Model\Mazar\big building_normal.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\big building_diffuse.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\big building_diffuse.png
+    originalUri: Assets\Model\Mazar\big building_diffuse.png
+    assetPath: Assets\Model\Mazar\big building_diffuse.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\big building_roughness.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\big building_roughness.png
+    originalUri: Assets\Model\Mazar\big building_roughness.png
+    assetPath: Assets\Model\Mazar\big building_roughness.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\small building _normal_xtm.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\small building _normal_xtm.png
+    originalUri: Assets\Model\Mazar\small building _normal_xtm.png
+    assetPath: Assets\Model\Mazar\small building _normal_xtm.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\small building _diffuse_xtm.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\small building _diffuse_xtm.png
+    originalUri: Assets\Model\Mazar\small building _diffuse_xtm.png
+    assetPath: Assets\Model\Mazar\small building _diffuse_xtm.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\small building _roughness.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\small building _roughness.png
+    originalUri: Assets\Model\Mazar\small building _roughness.png
+    assetPath: Assets\Model\Mazar\small building _roughness.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\Grave_Texture.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\Grave_Texture.png
+    originalUri: Assets\Model\Mazar\Grave_Texture.png
+    assetPath: Assets\Model\Mazar\Grave_Texture.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\Banner.png
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\Banner.png
+    originalUri: Assets\Model\Mazar\Banner.png
+    assetPath: Assets\Model\Mazar\Banner.png
   - type: 1
-    originalUri: Assets\_Metaverse_RGB\3D Model\Mazar\sang.jpg
-    assetPath: Assets\_Metaverse_RGB\3D Model\Mazar\sang.jpg
+    originalUri: Assets\Model\Mazar\sang.jpg
+    assetPath: Assets\Model\Mazar\sang.jpg
   reportItems:
   - type: 2
     code: 20

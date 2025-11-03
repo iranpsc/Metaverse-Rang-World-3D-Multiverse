@@ -15,7 +15,7 @@ public class Meta_NetworkConfig : MonoBehaviour
     [SerializeField] private string ConfigPath;
 
     [SerializeField] private Meta_ConfigFile Config = new Meta_ConfigFile();
-    [SerializeField] private NetworkManager Manager;
+    [SerializeField, ReadOnly] private NetworkManager Manager;
 
     [SerializeField] private bool LogScript;
 
