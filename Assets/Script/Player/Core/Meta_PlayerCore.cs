@@ -24,6 +24,15 @@ namespace Meta.Player.Core
             public InputActionReference JumpAction;
         }
 
+        [Flags]
+        public enum PlayerOption : byte
+        {
+            None,
+            Windows = 1 << 0,
+            Android = 1 << 1,
+            VR = 1 << 2,
+        }
+
         [Serializable]
         public struct RuntimeData
         {
@@ -83,13 +92,14 @@ namespace Meta.Player.Core
         [Header("References")]
         public CharacterController PlayerController;
         public Transform Player;
-        public Camera Camera;
-        //public Camera Camera;
+        public CinemachinePanTilt Camera;
+        public GameObject PlayerCamera;
+        public GameObject Machine;
 
         public Animator PlayerAnimation;
 
         [Header("Settings")]
-        [Range(0,10)] public float MoveSpeed = 4f;
+        [Range(0, 10)] public float MoveSpeed = 4f;
         [Range(0, 10)] public float RunSpeed = 6f;
         [Range(0, 10)] public float JumpForce = 2.5f;
         [Range(0, 10)] public float InitialJumpSpeed = 4f;
@@ -118,7 +128,7 @@ namespace Meta.Player.Core
         protected override void OnValidate()
         {
             if (Application.isPlaying) return;
-
+            PlayerCamera?.SetActive(false);
             base.OnValidate();
             Reset();
         }
@@ -132,6 +142,12 @@ namespace Meta.Player.Core
 
             this.enabled = false;
         }
+        private void OnEnable()
+        {
+            PlayerInputAction.MoveAction.action.Enable();
+            PlayerInputAction.RunAction.action.Enable();
+            PlayerInputAction.JumpAction.action.Enable();
+        }
         private void OnDisable()
         {
             PlayerInputAction.MoveAction.action.Disable();
@@ -141,9 +157,6 @@ namespace Meta.Player.Core
         }
         public override void OnStartAuthority()
         {
-            PlayerInputAction.MoveAction.action.Enable();
-            PlayerInputAction.RunAction.action.Enable();
-            PlayerInputAction.JumpAction.action.Enable();
 
             HashPosX = Animator.StringToHash("PosX");
             HashPosZ = Animator.StringToHash("PosZ");
@@ -152,12 +165,8 @@ namespace Meta.Player.Core
             HashRunJump = Animator.StringToHash("RunJump");
 
             PlayerController.enabled = true;
-
-            if (Camera != null)
-            {
-                Camera.gameObject.SetActive(true);
-            }
-
+            Machine?.SetActive(true);
+            PlayerCamera?.SetActive(true);
             this.enabled = true;
         }
         public override void OnStopAuthority()
@@ -167,21 +176,17 @@ namespace Meta.Player.Core
             PlayerInputAction.JumpAction.action.Disable();
 
             PlayerController.enabled = false;
-
-            if (Camera != null)
-            {
-                Camera.gameObject.SetActive(false);
-            }
-
+            Machine?.SetActive(false);
+            PlayerCamera?.SetActive(false);
             this.enabled = false;
         }
-        public override void OnStartClient()
-        {
-            base.OnStartClient();
 
-            if (!isLocalPlayer && Camera != null)
+        public void Start()
+        {
+            if (!isLocalPlayer)
             {
-                Camera.gameObject.SetActive(false);
+                Machine?.SetActive(false);
+                PlayerCamera?.SetActive(false);
             }
         }
         #endregion
@@ -216,7 +221,7 @@ namespace Meta.Player.Core
                 {
                     PlayerData.PlayerGroundState = GroundState.Falling;
                 }
-            }    
+            }
 
             PlayerData.Velocity = Vector3Int.FloorToInt(PlayerController.velocity);
         }
@@ -273,44 +278,18 @@ namespace Meta.Player.Core
             else
             {
                 PlayerData.JumpForce = Physics.gravity.y * _DeltaTime;
-            }    
+            }
         }
         public virtual void RotateHandler()
         {
-            if (PlayerAnimation == null)
-                return;
-
-            // Find the active Cinemachine camera under this player
-            if (Camera == null)
-            {
-                Camera = GetActiveChildCamera();
-                if (Camera == null)
-                    return;
-            }
-
-            // Use camera's Y rotation to rotate PlayerAnimation
-            float _CameraY = Camera.transform.rotation.eulerAngles.y;
-            PlayerAnimation.transform.rotation = Quaternion.Euler(0f, _CameraY, 0f);
+            Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0);
         }
-        private Camera GetActiveChildCamera()
-        {
-            // Try to find any active camera under this player
-            Camera[] _Cameras = GetComponentsInChildren<Camera>(true);
-            foreach (Camera _Cam in _Cameras)
-            {
-                if (_Cam.isActiveAndEnabled)
-                    return _Cam;
-            }
-
-            return null;
-        }
-
         public virtual void AnimationHandler(float _DeltaTime)
         {
             bool IsRunning = PlayerInputAction.RunAction.action.IsPressed();
             bool IsJumping = PlayerInputAction.JumpAction.action.IsPressed();
 
-            Vector2 _AnimInput = PlayerData.MoveInput * (IsRunning? RunSpeed : MoveSpeed);
+            Vector2 _AnimInput = PlayerData.MoveInput * (IsRunning ? RunSpeed : MoveSpeed);
             _AnimInput *= AnimationMultiplier; // boost to match blend tree 0–4 range
 
             bool _WalkJump = !PlayerData.IsGrounded && IsJumping && !IsRunning;
@@ -325,28 +304,15 @@ namespace Meta.Player.Core
 
         public virtual void ApplyMove(float _DeltaTime)
         {
-            // Movement input
             PlayerData.Direction = new Vector3(PlayerData.Horizontal, 0f, PlayerData.Vertical);
             PlayerData.Direction = Vector3.ClampMagnitude(PlayerData.Direction, 1f);
+            PlayerData.Direction = transform.TransformDirection(PlayerData.Direction);
+            PlayerData.Direction *= PlayerInputAction.RunAction.action.IsPressed() ? RunSpeed : MoveSpeed;
 
-            // Make it relative to PlayerAnimation’s facing direction
-            Vector3 _Forward = PlayerAnimation != null ? PlayerAnimation.transform.forward : transform.forward;
-            Vector3 _Right = PlayerAnimation != null ? PlayerAnimation.transform.right : transform.right;
+            PlayerData.Direction = new Vector3(PlayerData.Direction.x, PlayerData.JumpForce, PlayerData.Direction.z);
 
-            Vector3 _MoveDir = (_Forward * PlayerData.Direction.z + _Right * PlayerData.Direction.x).normalized;
 
-            float _Speed = PlayerInputAction.RunAction.action.IsPressed() ? RunSpeed : MoveSpeed;
-            Vector3 _FinalVelocity = _MoveDir * _Speed;
-
-            // Apply jump/gravity
-            _FinalVelocity.y = PlayerData.JumpForce;
-
-            // Apply to controller
-            PlayerController.Move(_FinalVelocity * _DeltaTime);
-
-            // Store velocity for diagnostics
-            PlayerData.Velocity = _FinalVelocity;
+            PlayerController.Move(PlayerData.Direction * _DeltaTime);
         }
-
     }
 }

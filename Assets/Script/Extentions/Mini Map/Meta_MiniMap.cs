@@ -1,5 +1,6 @@
 using Mirror;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Meta
 {
@@ -10,6 +11,10 @@ namespace Meta
         [Header("References")]
         public Transform Target;
         public GameObject MiniMap;
+
+        [Header("Player Direction UI")]
+        [Tooltip("The UI Image (arrow or triangle) that shows player direction.")]
+        public Image PlayerDirectionImage;
 
         [Header("Settings")]
         public Vector3 Offset = new Vector3(0, 100, 0);
@@ -23,22 +28,37 @@ namespace Meta
         public float MaxZoom = 200f;
         private float TargetZoomY;
 
+        // Internal
+        private Transform CameraTransform;
+
         private void Start()
         {
             TargetZoomY = Offset.y;
             TryAssignTarget();
-            if (Target != null) transform.SetParent(Target.transform);
+            if (Target != null)
+                transform.SetParent(Target.transform);
         }
 
         private void TryAssignTarget()
         {
-            if (Target != null) return;
+            if (Target != null && CameraTransform != null) return;
 
             if (NetworkClient.localPlayer != null)
             {
                 Target = NetworkClient.localPlayer.transform;
-                if (Target != null)
-                    Debug.Log("[Meta] Local player assigned to minimap.");
+
+                // Find the active camera inside the player's hierarchy
+                Camera _PlayerCamera = Target.GetComponentInChildren<Camera>(true);
+                if (_PlayerCamera != null)
+                {
+                    CameraTransform = _PlayerCamera.transform;
+                    Debug.Log("[Meta] MiniMap using player camera: " + CameraTransform.name);
+                }
+                else
+                {
+                    Debug.LogWarning("[Meta] No camera found under player! MiniMap will use player root instead.");
+                    CameraTransform = Target;
+                }
             }
             else
             {
@@ -67,10 +87,13 @@ namespace Meta
             Offset.y = Mathf.Lerp(Offset.y, TargetZoomY, Time.deltaTime * 5f);
 
             // Rotation handling
-            if (RotateWithPlayer)
-                transform.rotation = Quaternion.Euler(0f, Target.eulerAngles.y, 0f);
+            if (RotateWithPlayer && CameraTransform != null)
+                transform.rotation = Quaternion.Euler(0f, CameraTransform.eulerAngles.y, 0f);
             else
-                transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                transform.rotation = Quaternion.Euler(0f, 0f, 0f);
+
+            // Update UI indicator
+            UpdateDirectionImage();
         }
 
         private void LateUpdate()
@@ -80,26 +103,16 @@ namespace Meta
         }
 
         // ======== ZOOM CONTROL ========
-
-        /// <summary>
-        /// Zooms the minimap camera in (closer to player)
-        /// </summary>
         public void ZoomIn()
         {
             TargetZoomY = Mathf.Max(MinZoom, TargetZoomY - ZoomSpeed * Time.deltaTime);
         }
 
-        /// <summary>
-        /// Zooms the minimap camera out (further away)
-        /// </summary>
         public void ZoomOut()
         {
             TargetZoomY = Mathf.Min(MaxZoom, TargetZoomY + ZoomSpeed * Time.deltaTime);
         }
 
-        /// <summary>
-        /// Instant zoom change (useful for UI buttons)
-        /// </summary>
         public void ZoomInButton()
         {
             TargetZoomY = Mathf.Max(MinZoom, TargetZoomY - 10f);
@@ -108,6 +121,18 @@ namespace Meta
         public void ZoomOutButton()
         {
             TargetZoomY = Mathf.Min(MaxZoom, TargetZoomY + 10f);
+        }
+
+        // ======== PLAYER DIRECTION INDICATOR ========
+        private void UpdateDirectionImage()
+        {
+            if (PlayerDirectionImage == null || CameraTransform == null) return;
+            if (RotateWithPlayer) return;
+            // Use camera Y rotation to match where the player is looking
+            float _YRotation = CameraTransform.eulerAngles.y;
+
+            // Invert Z rotation so arrow points correctly on minimap
+            PlayerDirectionImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -_YRotation);
         }
     }
 }

@@ -17,6 +17,8 @@ namespace Mirror.Examples.PlayerTest
         // have to cast to this type everywhere.
         public static new PlayerTestNetMan singleton => (PlayerTestNetMan)NetworkManager.singleton;
 
+
+        public bool IsClientConnection;
         /// <summary>
         /// Runs on both Server and Client
         /// Networking is NOT initialized when this fires
@@ -40,6 +42,7 @@ namespace Mirror.Examples.PlayerTest
         public override void Start()
         {
             base.Start();
+            if(IsClientConnection) singleton.StartClient();
         }
 
         /// <summary>

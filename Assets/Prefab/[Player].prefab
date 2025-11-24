@@ -6085,7 +6085,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &3411207693782073159
 Transform:
   m_ObjectHideFlags: 0
@@ -11323,17 +11323,21 @@ MonoBehaviour:
   ButtonRotateLeft: {fileID: 0}
   ButtonRotateRight: {fileID: 0}
   ObjectToSpawn: {fileID: 0}
-  CollisionMask:
-    serializedVersion: 2
-    m_Bits: 1
+  SpawnablePrefabs:
+  - {fileID: 3888161585449881471, guid: 8513d476d77ff044d8152a40830dba49, type: 3}
+  - {fileID: 3233249436331013177, guid: 738cb44073acef0488df6db84b5c962d, type: 3}
+  - {fileID: 8037816726867615689, guid: dfbf8108bde881949a40a3a361642f06, type: 3}
+  PreviewMaterial: {fileID: 0}
+  MaxDistance: 5
   MoveSpeed: 2
   RotateSpeed: 50
-  MaxDistance: 5
   Move: {fileID: -4576061141913211347, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Rotate: {fileID: 5853106377329837017, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  RotateY: {fileID: 5853106377329837017, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  RotateZ: {fileID: -7693884684829346885, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   Submit: {fileID: 8168935638292271524, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   Cancel: {fileID: 7860403197202349345, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   DebugMode: 1
+  SelectedIndex: -1
 --- !u!1 &4352406602885281053
 GameObject:
   m_ObjectHideFlags: 0
@@ -14579,6 +14583,7 @@ GameObject:
   - component: {fileID: 6991354946833136943}
   - component: {fileID: 2358817021072818215}
   - component: {fileID: 5347516884596790240}
+  - component: {fileID: 3240012396738220971}
   m_Layer: 0
   m_Name: '[Player]'
   m_TagString: Player
@@ -14744,6 +14749,29 @@ MonoBehaviour:
   - {fileID: 5353857397945110820}
   - {fileID: 2268801319652727084}
   - {fileID: 6143710495060256961}
+--- !u!114 &3240012396738220971
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5225611613301624125}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: de68596d479347547b5d4041b068e9f8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Vehicle.Meta_VehicleInteraction
+  Interact: {fileID: 4462449745125738975, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  RayDistance: 2
+  VehicleLayer:
+    serializedVersion: 2
+    m_Bits: 256
+  SeatOffset: {x: 0, y: -1, z: -0.1}
+  ExitDistance: 2
+  PlayerMove: {fileID: 2220560926058094786}
+  PlayerCollider: {fileID: 161697182502540772}
+  Controller: {fileID: 2551772813433681465}
+  PlayerModel: {fileID: 1812075125773417835}
 --- !u!1 &5264106977104794455
 GameObject:
   m_ObjectHideFlags: 0
@@ -14984,7 +15012,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &4207643317038658834
 Transform:
   m_ObjectHideFlags: 0
@@ -17770,11 +17798,14 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6143710495060256961}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7eed25b232710dd4fa04bde532f1c590, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Meta.Meta_CursorAction
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   InputProvider: {fileID: 3140517890834198267}
   CursorAction: {fileID: 4045425911998579147, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   CursorMode: 1
@@ -24514,7 +24545,9 @@ MonoBehaviour:
   syncInterval: 0
   PlayerController: {fileID: 2551772813433681465}
   Player: {fileID: 1812075125773417835}
-  Camera: {fileID: 7640047298126306908}
+  Camera: {fileID: 4146444449585203954}
+  PlayerCamera: {fileID: 5353857397945110820}
+  Machine: {fileID: 2268801319652727084}
   PlayerAnimation: {fileID: 5456824128099318057}
   MoveSpeed: 2
   RunSpeed: 6

@@ -30,7 +30,7 @@ namespace Meta
         [SerializeField] private string GetAuthenticatedUserDataUrl;
 
         [Header("Setting")]
-        [SerializeField] private bool UseLocalHostRedirect = true;
+        //[SerializeField] private bool UseLocalHostRedirect = true;
         [SerializeField] private string LocalRedirectUrl;
         [SerializeField] private string Scene;
 

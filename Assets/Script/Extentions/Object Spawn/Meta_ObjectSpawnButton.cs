@@ -5,21 +5,24 @@ using Meta;
 [RequireComponent(typeof(Button))]
 public class Meta_ObjectSpawnButton : MonoBehaviour
 {
-    public Meta_ObjectSpawnerSystem SpawnSystem;
-    public GameObject Prefab;
+    public int PrefabIndex = 0;
     private Button SpawnButton;
 
     private void Start()
     {
-        SpawnSystem = Meta_ObjectSpawnerSystem.Instance;
         SpawnButton = GetComponent<Button>();
-        SpawnButton.onClick.AddListener(Spawn); // FIXED
+        SpawnButton.onClick.AddListener(OnButtonClicked);
     }
 
-    private void Spawn()
+    private void OnButtonClicked()
     {
-        if (SpawnSystem == null) return;
-        SpawnSystem.ObjectToSpawn = Prefab;
-        SpawnSystem.DoSpawn();
+        if (Meta_ObjectSpawnerSystem.Instance == null)
+        {
+            Debug.LogError("Spawner system not found in scene!");
+            return;
+        }
+
+        Meta_ObjectSpawnerSystem.Instance.SelectedIndex = PrefabIndex;
+        Meta_ObjectSpawnerSystem.Instance.DoSpawn();
     }
 }

@@ -1,3 +1,4 @@
+using Mirror;
 using System.Collections.Generic;
 using Unity.Cinemachine;
 using UnityEngine;
@@ -9,7 +10,7 @@ namespace Meta
 {
     [AddComponentMenu("Meta/Cursor Action")]
     [HelpURL("https://google.com")]
-    public class Meta_CursorAction : MonoBehaviour
+    public class Meta_CursorAction : NetworkBehaviour
     {
         [Header("References")]
         [Tooltip("Reference to your Cinemachine Input Axis Controller component")]
@@ -32,10 +33,17 @@ namespace Meta
         private bool _WasOverUI;
         private bool _IsCursorControlAllowed;
 
-        private void Awake()
+        //private void Awake()
+        //{
+        //    // On Android or VR, we still run, but disable cursor control only
+        //    _IsCursorControlAllowed = !(Application.platform == RuntimePlatform.Android);
+        //}
+
+        protected override void OnValidate()
         {
-            // On Android or VR, we still run, but disable cursor control only
-            _IsCursorControlAllowed = !(Application.platform == RuntimePlatform.Android);
+            if (Application.isPlaying) return;
+            base.OnValidate();
+            this.enabled = false;
         }
 
         private void OnEnable()
@@ -58,6 +66,11 @@ namespace Meta
                 CursorAction.action.canceled -= OnActionCanceled;
                 CursorAction.action.Disable();
             }
+        }
+        public override void OnStartAuthority()
+        {
+            _IsCursorControlAllowed = !(Application.platform == RuntimePlatform.Android);
+            this.enabled = true;
         }
 
         private void Start()
