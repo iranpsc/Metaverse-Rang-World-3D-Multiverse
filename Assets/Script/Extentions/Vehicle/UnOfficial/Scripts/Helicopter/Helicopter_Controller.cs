@@ -1,8 +1,13 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(Rigidbody))]
 public class Helicopter_Controller : MonoBehaviour
 {
+
+    public InputActionReference Move;
+    public InputActionReference Up;
+    public InputActionReference Down;
     [Header("Helicopter Parts")]
     public Transform mainRotor;
     public Transform tailRotor;
@@ -34,7 +39,18 @@ public class Helicopter_Controller : MonoBehaviour
     private Rigidbody rb;
     private float enginePower = 0f;
     private float targetEnginePower = 0f;
-
+    private void OnEnable()
+    {
+        Move.action.Enable();
+        Up.action.Enable();
+        Down.action.Enable();
+    }
+    private void OnDisable()
+    {
+        Move.action.Disable();
+        Up.action.Disable();
+        Down.action.Disable();
+    }
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
@@ -85,11 +101,11 @@ public class Helicopter_Controller : MonoBehaviour
 
     void HandleInputs()
     {
-        if (Input.GetKey(KeyCode.Space))
+        if (Up.action.IsPressed())
         {
             targetEnginePower = maxEnginePower;
         }
-        else if (Input.GetKey(KeyCode.LeftShift))
+        else if (Down.action.IsPressed())
         {
             targetEnginePower = 0f;
         }
@@ -120,8 +136,8 @@ public class Helicopter_Controller : MonoBehaviour
 
     void ApplyMovement()
     {
-        float h = Input.GetAxis("Horizontal");
-        float v = Input.GetAxis("Vertical");
+        float h = Move.action.ReadValue<Vector2>().x;
+        float v = Move.action.ReadValue<Vector2>().y;
 
         Vector3 moveDir = transform.forward * v + transform.right * h;
         rb.AddForce(moveDir * moveForce);

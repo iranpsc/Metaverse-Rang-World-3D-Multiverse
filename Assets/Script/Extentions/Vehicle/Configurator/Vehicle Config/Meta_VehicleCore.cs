@@ -22,15 +22,15 @@ namespace Meta
                     }
                     break;
                 case VehicleType.Motorcycle:
-                    if (!gameObject.GetComponent<Meta_CarConfigurator>())
+                    if (!gameObject.GetComponent<Meta_CarSystem>())
                     {
-                        gameObject.AddComponent<Meta_CarConfigurator>();
+                        gameObject.AddComponent<Meta_CarSystem>();
                     }
                     break;
                 case VehicleType.Bus:
-                    if (!gameObject.GetComponent<Meta_CarConfigurator>())
+                    if (!gameObject.GetComponent<Meta_CarSystem>())
                     {
-                        gameObject.AddComponent<Meta_CarConfigurator>();
+                        gameObject.AddComponent<Meta_CarSystem>();
                     }
                     break;
                 case VehicleType.Jetpack:

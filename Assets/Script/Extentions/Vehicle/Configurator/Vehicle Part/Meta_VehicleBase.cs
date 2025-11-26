@@ -1,16 +1,12 @@
+using Mirror;
 using UnityEngine;
 using static Meta.Vehicle.Meta_VehicleSeat;
-using static Mirror.NetworkRuntimeProfiler;
-
 namespace Meta.Vehicle
 {
-    public class Meta_VehicleBase : MonoBehaviour
+    public class Meta_VehicleBase : NetworkBehaviour
     {
         public bool HasDriver;
-        public Transform CurrentDriver;
-        public VehicleSeat CurrentSeat;
         public Meta_VehicleSeat Seat;
-
         public VehicleSeat GetFreeSeat()
         {
             foreach (var seat in Seat.AllSeats)
@@ -18,10 +14,8 @@ namespace Meta.Vehicle
                 if (!seat.Occupied)
                     return seat;
             }
-
             return default; // empty seat means Occupied=false AND Seat=null
-        }
-
+        }
         public void MarkSeatOccupied(Transform seat)
         {
             for (int i = 0; i < Seat.AllSeats.Count; i++)
@@ -34,7 +28,6 @@ namespace Meta.Vehicle
                 }
             }
         }
-
         public void MarkSeatFree(Transform seat)
         {
             for (int i = 0; i < Seat.AllSeats.Count; i++)
@@ -47,6 +40,5 @@ namespace Meta.Vehicle
                 }
             }
         }
-
     }
 }

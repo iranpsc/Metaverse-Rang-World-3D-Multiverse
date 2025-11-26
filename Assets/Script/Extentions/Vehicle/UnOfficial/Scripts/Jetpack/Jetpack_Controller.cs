@@ -1,7 +1,15 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class Jetpack_Controller : MonoBehaviour
 {
+
+    public InputActionReference Move;
+    public InputActionReference Up;
+    public InputActionReference left;
+    public InputActionReference right;
+    public InputActionReference Down;
+
     public float moveForce = 15f;
     public float ascendForce = 10f;
     public float descendForce = 5f;
@@ -16,6 +24,24 @@ public class Jetpack_Controller : MonoBehaviour
 
     public bool HasDriver;
     public bool hidePlayerOnEnter = true;
+
+    private void OnEnable()
+    {
+        Move.action.Enable();
+        Up.action.Enable();
+        Down.action.Enable();
+        left.action.Enable();
+        right.action.Enable();
+    }
+    private void OnDisable()
+    {
+        Move.action.Disable();
+        Up.action.Disable();
+        Down.action.Disable();
+        left.action.Disable();
+        right.action.Disable();
+    }
+
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
@@ -90,7 +116,7 @@ public class Jetpack_Controller : MonoBehaviour
 
     private void HandleRotationToCamera()
     {
-        if (!playerCamera) return;
+        if (!playerCamera) playerCamera = Camera.main;
 
         Vector3 camForward = playerCamera.transform.forward;
         camForward.y = 0;
@@ -107,34 +133,33 @@ public class Jetpack_Controller : MonoBehaviour
 
     private void HandleMovement()
     {
-        Vector3 input = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
+        Vector2 Dir = Move.action.ReadValue<Vector2>();
+        Vector3 input = new Vector3(Dir.x, 0, Dir.y);
         Vector3 moveDir = transform.TransformDirection(input.normalized);
 
         // Horizontal movement (WASD)
         rb.AddForce(moveDir * moveForce, ForceMode.Acceleration);
 
         // Ascend with Space
-        if (Input.GetKey(KeyCode.Space))
+        if (Up.action.IsPressed())
             rb.AddForce(Vector3.up * ascendForce, ForceMode.Acceleration);
         else
             rb.AddForce(Vector3.down * gravityForce, ForceMode.Acceleration);
 
         // Descend with Left Shift
-        if (Input.GetKey(KeyCode.LeftShift))
+        if (Down.action.IsPressed())
             rb.AddForce(Vector3.down * descendForce, ForceMode.Acceleration);
 
         // Rotate manually with Q and E
-        if (Input.GetKey(KeyCode.Q))
+        if (left.action.IsPressed())
             transform.Rotate(0f, -rotateSpeed * Time.deltaTime, 0f);
-        if (Input.GetKey(KeyCode.E))
+        if (right.action.IsPressed())
             transform.Rotate(0f, rotateSpeed * Time.deltaTime, 0f);
     }
 
     private void HandleThrusterParticles()
     {
-        bool anyInput = Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) ||
-                        Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D) ||
-                        Input.GetKey(KeyCode.Space);
+        bool anyInput = Up.action.IsPressed();
 
         foreach (var p in particles)
         {
@@ -144,8 +169,10 @@ public class Jetpack_Controller : MonoBehaviour
                 p.Stop();
         }
 
+        Vector2 Dir = Move.action.ReadValue<Vector2>();
+
         // Update velocity over lifetime to face opposite of input direction
-        Vector3 inputDir = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical")).normalized;
+        Vector3 inputDir = new Vector3(Dir.x, 0, Dir.y).normalized;
 
         Vector3 thrustDir = transform.TransformDirection(-inputDir); // mirrored force
         foreach (var ps in particles)

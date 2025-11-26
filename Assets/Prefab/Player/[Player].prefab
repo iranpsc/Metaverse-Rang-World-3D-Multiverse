@@ -89,7 +89,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 62d54399b04b4fa48a73e121d4937dd4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Cinemachine::Unity.Cinemachine.CinemachinePanTilt
-  ReferenceFrame: 0
+  ReferenceFrame: 1
   RecenterTarget: 0
   PanAxis:
     Value: 0
@@ -517,7 +517,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &5589513189052967249
 Transform:
   m_ObjectHideFlags: 0
@@ -556,12 +556,10 @@ MonoBehaviour:
   PlayerCursor: {fileID: 7909657374451552942}
   MoveSpeed: 4
   RunSpeed: 6
-  JumpForce: 2.5
   InitialJumpSpeed: 4
   MaxJumpSpeed: 4
   JumpAcceleration: 4
   CoyoteTimeDuration: 0.2
-  LedgeTolerance: 0.2
   AnimationMultiplier: 1
   AnimationAcceleration: 2
   PlayerAction:
@@ -615,6 +613,37 @@ Transform:
   - {fileID: 2195779442914127544}
   m_Father: {fileID: 7455031920736924401}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &4252968235174518247
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1134902828969449618}
+  m_Layer: 0
+  m_Name: GameObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1134902828969449618
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4252968235174518247}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7001019875643127372}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &6698308310157809477
 GameObject:
   m_ObjectHideFlags: 0
@@ -630,7 +659,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &7001019875643127372
 Transform:
   m_ObjectHideFlags: 0
@@ -646,6 +675,7 @@ Transform:
   m_Children:
   - {fileID: 579394552829501725}
   - {fileID: 6147977188302324892}
+  - {fileID: 1134902828969449618}
   m_Father: {fileID: 7455031920736924401}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &7345323616226581446
@@ -683,6 +713,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 2229141123164440486}
   - {fileID: 6037713012003952232}
   - {fileID: 5589513189052967249}
   - {fileID: 7001019875643127372}
@@ -813,7 +844,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7345323616226581446}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0ccaba0db573e764a971c46b87398e2e, type: 3}
   m_Name: 
@@ -883,6 +914,87 @@ MonoBehaviour:
   MultiTap: 0
   IsEnable: 0
   EnableLog: 0
+--- !u!1 &8810599392271179229
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2229141123164440486}
+  - component: {fileID: 6248367272784470419}
+  m_Layer: 0
+  m_Name: '[Player] Core'
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2229141123164440486
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8810599392271179229}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7455031920736924401}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6248367272784470419
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8810599392271179229}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ee28ef7e260b267429c6be6890b2d9ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Player.Core.Meta_PlayerCore
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  PlayerController: {fileID: 858837960629266691}
+  Player: {fileID: 7455031920736924401}
+  Camera: {fileID: 7772179064669628845}
+  PlayerCamera: {fileID: 1474845251426645189}
+  Machine: {fileID: 6698308310157809477}
+  PlayerAnimation: {fileID: 5231165238354490562}
+  MoveSpeed: 2
+  RunSpeed: 6
+  JumpForce: 2.5
+  InitialJumpSpeed: 4.5
+  MaxJumpSpeed: 5
+  JumpAcceleration: 4
+  CoyoteTimeDuration: 0.2
+  AnimationMultiplier: 1
+  AnimationAcceleration: 0.05
+  PlayerData:
+    _Horizontal: 0
+    _Vertical: 0
+    _JumpForce: 0
+    _GroundState: 0
+    _Direction: {x: 0, y: 0, z: 0}
+    _MoveInput: {x: 0, y: 0}
+    _Velocity: {x: 0, y: 0, z: 0}
+    _IsGrounded: 0
+  PlayerInputAction:
+    MoveAction: {fileID: -1680190386980627800, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    RunAction: {fileID: -7471211009204490832, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    JumpAction: {fileID: -2099379676528639254, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  EnableLog: 0
+  HashPosX: 0
+  HashPosZ: 0
+  HashGrounded: 0
+  HashWalkJump: 0
+  HashRunJump: 0
 --- !u!1001 &1869627956389546323
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -943,6 +1055,14 @@ PrefabInstance:
       propertyPath: m_Controller
       value: 
       objectReference: {fileID: 9100000, guid: 98629d7f76f92fd41b4f89630510b3b5, type: 2}
+    - target: {fileID: 5866666021909216657, guid: 11d8ca0e9f02b864f9d63402d297077d, type: 3}
+      propertyPath: m_AnimatePhysics
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5866666021909216657, guid: 11d8ca0e9f02b864f9d63402d297077d, type: 3}
+      propertyPath: m_ApplyRootMotion
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

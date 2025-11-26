@@ -1,11 +1,10 @@
 using Mirror;
 using UnityEngine;
 using UnityEngine.InputSystem;
+
 namespace Meta.Vehicle
 {
-    [AddComponentMenu("Meta/Meta_CarSystem")]
-    [HelpURL("https://google.com")]
-    public class Meta_CarSystem : Meta_VehicleBase
+    public class Meta_MotorcycleSystem : Meta_VehicleBase
     {
         [Header("Input")]
         public InputActionReference Move;
@@ -21,11 +20,11 @@ namespace Meta.Vehicle
         public bool isBraking;
         public Vector3 baseCenterOfMass = new Vector3(0f, -0.3f, 0f);
         public float comLoweringFactor = 0.2f; // How much lower CoM goes at high speed
-        public float maxSpeedForCoM = 100f; // km/h or m/s depending on your units
-        public Rigidbody rb;
+        public float maxSpeedForCoM = 100f; // km/h or m/s depending on your units
+        public Rigidbody rb;
         public Meta_VehiclePart Body;
-        //public Meta_VehicleSeat Seat;
-        public Meta_VehicleWheel Wheel;
+        //public Meta_VehicleSeat Seat;
+        public Meta_VehicleWheel Wheel;
         public Meta_VehicleLight Light;
         public Meta_VehicleExhaust Exhaust;
         private void OnEnable()
@@ -99,8 +98,8 @@ namespace Meta.Vehicle
         private void ApplyMotorTorque()
         {
             float brake = isBraking ? BrakeTorque : 0f;
-            // Front Wheel Drive by default
-            for (int i = 0; i < Wheel.FrontCollider.Count; i++)
+            // Front Wheel Drive by default
+            for (int i = 0; i < Wheel.FrontCollider.Count; i++)
             {
                 var wc = Wheel.FrontCollider[i];
                 wc.motorTorque = motorInput * MotorTorque;
@@ -139,11 +138,12 @@ namespace Meta.Vehicle
         {
             if (rb == null) return;
             float speed = rb.linearVelocity.magnitude; // in m/s
-            float t = Mathf.Clamp01(speed / maxSpeedForCoM); // 0 to 1
-            // Interpolate Y offset from base value to lowered value
-            float loweredY = baseCenterOfMass.y - comLoweringFactor;
+            float t = Mathf.Clamp01(speed / maxSpeedForCoM); // 0 to 1
+                                                             // Interpolate Y offset from base value to lowered value
+            float loweredY = baseCenterOfMass.y - comLoweringFactor;
             float currentY = Mathf.Lerp(baseCenterOfMass.y, loweredY, t);
             rb.centerOfMass = new Vector3(baseCenterOfMass.x, currentY, baseCenterOfMass.z);
         }
     }
+        
 }

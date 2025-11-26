@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using static Mirror.NetworkRuntimeProfiler;
-
 namespace Meta.Vehicle
 {
     [AddComponentMenu("Meta/Meta_VehicleSeat")]
@@ -13,6 +11,7 @@ namespace Meta.Vehicle
         public List<VehicleSeat> AllSeats;
         public List<VehicleSeat> DriverSeats;
         public List<VehicleSeat> PassengerSeats;
+        
         [Serializable]
         public class VehicleSeat
         {

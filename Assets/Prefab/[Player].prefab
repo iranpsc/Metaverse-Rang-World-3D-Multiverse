@@ -11326,7 +11326,8 @@ MonoBehaviour:
   SpawnablePrefabs:
   - {fileID: 3888161585449881471, guid: 8513d476d77ff044d8152a40830dba49, type: 3}
   - {fileID: 3233249436331013177, guid: 738cb44073acef0488df6db84b5c962d, type: 3}
-  - {fileID: 8037816726867615689, guid: dfbf8108bde881949a40a3a361642f06, type: 3}
+  - {fileID: 3053828846332036720, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+  - {fileID: 2248771629769836278, guid: d9b859d5b4119c04c96fc703eed51a27, type: 3}
   PreviewMaterial: {fileID: 0}
   MaxDistance: 5
   MoveSpeed: 2
@@ -14761,6 +14762,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: de68596d479347547b5d4041b068e9f8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Meta.Vehicle.Meta_VehicleInteraction
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   Interact: {fileID: 4462449745125738975, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   RayDistance: 2
   VehicleLayer:

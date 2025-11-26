@@ -1,13 +1,19 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class Boat_Controller : MonoBehaviour
 {
     /* CUSTOM SCRIPT*/
 
-    public Vehicle_Core vehicle;
+    //public Vehicle_Core vehicle;
     public bool HasDriver;
     public bool hidePlayerOnEnter = true;
     /* CUSTOM SCRIPT*/
+
+    [Header("Input")]
+    public InputActionReference Move;
+    public InputActionReference Brake;
+
 
     [Header("Boat Movement")]
     public float maxForwardSpeed = 5f;
@@ -35,9 +41,23 @@ public class Boat_Controller : MonoBehaviour
     float currentSpeed = 0f;
     public bool onLand = false;  // Whether the boat is on land
     /* CUSTOM SCRIPT*/
+
+    private void OnEnable()
+    {
+        Move.action.Enable();
+        Brake.action.Enable();
+
+    }
+    private void OnDisable()
+    {
+        Move.action.Disable();
+        Brake.action.Disable();
+
+    }
+
     private void Start()
     {
-        vehicle = GetComponent<Vehicle_Core>();
+        //vehicle = GetComponent<Vehicle_Core>();
     }
 
     void Update()
@@ -45,10 +65,10 @@ public class Boat_Controller : MonoBehaviour
         if (!HasDriver) return;
         /* CUSTOM SCRIPT*/
         // Get input - pedals control forward/backward
-        pedalInput = Input.GetAxis("Vertical");
+        pedalInput = Move.action.ReadValue<Vector2>().x;
 
         // Steering input - left/right arrows or A/D keys
-        steeringInput = Input.GetAxis("Horizontal");
+        steeringInput = Move.action.ReadValue<Vector2>().y;
 
         // Check if the boat is on land
         CheckGround();

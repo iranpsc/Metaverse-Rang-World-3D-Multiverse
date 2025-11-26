@@ -128,6 +128,8 @@ namespace Meta.Player.Core
         protected override void OnValidate()
         {
             if (Application.isPlaying) return;
+
+            Machine?.SetActive(false);
             PlayerCamera?.SetActive(false);
             base.OnValidate();
             Reset();
@@ -147,23 +149,20 @@ namespace Meta.Player.Core
             PlayerInputAction.MoveAction.action.Enable();
             PlayerInputAction.RunAction.action.Enable();
             PlayerInputAction.JumpAction.action.Enable();
+            HashPosX = Animator.StringToHash("PosX");
+            HashPosZ = Animator.StringToHash("PosZ");
+            HashGrounded = Animator.StringToHash("IsGrounded");
+            HashWalkJump = Animator.StringToHash("WalkJump");
+            HashRunJump = Animator.StringToHash("RunJump");
         }
         private void OnDisable()
         {
             PlayerInputAction.MoveAction.action.Disable();
             PlayerInputAction.RunAction.action.Disable();
             PlayerInputAction.JumpAction.action.Disable();
-
         }
         public override void OnStartAuthority()
         {
-
-            HashPosX = Animator.StringToHash("PosX");
-            HashPosZ = Animator.StringToHash("PosZ");
-            HashGrounded = Animator.StringToHash("IsGrounded");
-            HashWalkJump = Animator.StringToHash("WalkJump");
-            HashRunJump = Animator.StringToHash("RunJump");
-
             PlayerController.enabled = true;
             Machine?.SetActive(true);
             PlayerCamera?.SetActive(true);
