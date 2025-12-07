@@ -42,19 +42,9 @@ namespace Meta.Vehicle
             SignalLeft.action.Disable();
             SignalRight.action.Disable();
         }
-        [Command]
-        public void GivePer(NetworkIdentity vehicleNetId)
-        {
-            vehicleNetId.AssignClientAuthority(connectionToClient);
-        }
-        [Command]
-        public void RemPer(NetworkIdentity vehicleNetId)
-        {
-            vehicleNetId.RemoveClientAuthority();
-        }
         public void Start()
         {
-            GivePer(gameObject.GetComponentInChildren<NetworkIdentity>());
+            //GivePer(gameObject.GetComponentInChildren<NetworkIdentity>());
             rb = GetComponent<Rigidbody>();
             GetData();
             AdjustCenterOfMassBySpeed();
@@ -74,7 +64,7 @@ namespace Meta.Vehicle
         {
             //if (!isOwned) return;
 
-            if (HasDriver)
+            if (isOwned)
             {
                 steerInput = Move.action.ReadValue<Vector2>().x;
                 motorInput = Move.action.ReadValue<Vector2>().y;
@@ -82,8 +72,7 @@ namespace Meta.Vehicle
             }
             else
             {
-                RemPer(gameObject.GetComponent<NetworkIdentity>());
-
+                //RemPer(gameObject.GetComponent<NetworkIdentity>());
                 motorInput = 0;
                 isBraking = true;
             }

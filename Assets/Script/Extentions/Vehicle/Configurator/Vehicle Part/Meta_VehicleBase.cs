@@ -5,6 +5,7 @@ namespace Meta.Vehicle
 {
     public class Meta_VehicleBase : NetworkBehaviour
     {
+        
         public bool HasDriver;
         public Meta_VehicleSeat Seat;
         public VehicleSeat GetFreeSeat()

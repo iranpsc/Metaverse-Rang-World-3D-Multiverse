@@ -281,7 +281,7 @@ namespace Meta.Player.Core
         }
         public virtual void RotateHandler()
         {
-            Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0);
+            Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0); 
         }
         public virtual void AnimationHandler(float _DeltaTime)
         {

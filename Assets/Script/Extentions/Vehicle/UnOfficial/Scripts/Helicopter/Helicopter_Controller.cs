@@ -4,7 +4,8 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Rigidbody))]
 public class Helicopter_Controller : MonoBehaviour
 {
-
+    #region Old
+    
     public InputActionReference Move;
     public InputActionReference Up;
     public InputActionReference Down;
@@ -72,7 +73,7 @@ public class Helicopter_Controller : MonoBehaviour
                 tailRotor = t;
 
         }
-        
+
     }
 
     void Update()
@@ -88,7 +89,7 @@ public class Helicopter_Controller : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (HasDriver /*|| enginePower > 0f*/)
+        if (HasDriver)
         {
             SmoothEnginePower();
             ApplyLift();
@@ -213,4 +214,47 @@ public class Helicopter_Controller : MonoBehaviour
     {
         HasDriver = state;
     }
+    
+    #endregion
+    public enum Axis
+    {
+        X,
+        Y,
+        Z
+    }
+    public Axis RotationAxis;
+    public float BladeSpeed;
+    public bool InverseRotation;
+    private Vector3 Rotation;
+    private float RotateDegres;
+
+    //private void Start()
+    //{
+    //    Rotation = transform.localEulerAngles;
+    //}
+
+    //private void Update()
+    //{
+    //    if(InverseRotation)
+    //    {
+    //        RotateDegres -= BladeSpeed * Time.deltaTime;
+    //    }
+    //    else
+    //    {
+    //        RotateDegres += BladeSpeed * Time.deltaTime;
+    //    }
+    //    RotateDegres = RotateDegres % 360;
+    //    switch(RotationAxis)
+    //    {
+    //        case Axis.Y:
+    //            transform.localRotation = Quaternion.Euler(Rotation.x, RotateDegres, Rotation.z);
+    //            break;
+    //        case Axis.Z:
+    //            transform.localRotation = Quaternion.Euler(Rotation.x, Rotation.y, RotateDegres);
+    //            break;
+    //        default:
+    //            transform.localRotation = Quaternion.Euler(RotateDegres, Rotation.y, Rotation.z);
+    //            break;
+    //    }
+    //}
 }
