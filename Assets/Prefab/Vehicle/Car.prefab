@@ -1025,7 +1025,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 4402919970293059975}
-  - component: {fileID: 4171710491209829508}
   - component: {fileID: 5903381807986062006}
   - component: {fileID: 602818951265302535}
   - component: {fileID: 6299899720356869043}
@@ -1056,61 +1055,6 @@ Transform:
   - {fileID: 633318065265999937}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &4171710491209829508
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3053828846332036720}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c64396e91fe2b5a40836da9f0c31bf79, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Meta.Meta_CarSystem
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  HasDriver: 0
-  Seat:
-    AllSeats: []
-    DriverSeats: []
-    PassengerSeats: []
-  Move: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Brake: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  SignalLeft: {fileID: -299363374578332828, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  SignalRight: {fileID: -6222468828162654017, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  MotorTorque: 1500
-  BrakeTorque: 3000
-  MaxSteerAngle: 45
-  steerInput: 0
-  motorInput: 0
-  isBraking: 0
-  baseCenterOfMass: {x: 0, y: -0.3, z: 0}
-  comLoweringFactor: 0.2
-  maxSpeedForCoM: 100
-  rb: {fileID: 5903381807986062006}
-  Body:
-    Parts: []
-  Wheel:
-    AllWheels: []
-    FrontWheels: []
-    RearWheels: []
-    AllCollider: []
-    FrontCollider: []
-    RearCollider: []
-    WheelSuspensionDistance: 0.2
-    WheelMass: 30
-  Light:
-    AllLights: []
-    BrakeLights: []
-    HeadLights: []
-    TurnLeftSignal: []
-    TurnRightSignal: []
-    ReverseLight: []
-  Exhaust:
-    AllExhausts: []
-    SmokeEffect: {fileID: 6954634280127262853, guid: e1f1f4dc4004b8a48b3b85c26e457aea, type: 3}
 --- !u!54 &5903381807986062006
 Rigidbody:
   m_ObjectHideFlags: 0

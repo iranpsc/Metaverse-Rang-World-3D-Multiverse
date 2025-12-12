@@ -1,25 +1,44 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using static Meta.Vehicle.Meta_VehiclePart;
 
 namespace Meta.Vehicle
 {
-    [AddComponentMenu("Meta/Meta_VehicleExhaust")]
-    [HelpURL("https://google.com")]
+    [AddComponentMenu("Meta/Vehicle Exhaust")]
+    [HelpURL("https://github.com/DreamFaver")]
     [Serializable]
-
     public class Meta_VehicleExhaust
     {
-        public List<Transform> AllExhausts;
+        public List<Transform> AllExhausts = new List<Transform>();
         public GameObject SmokeEffect;
-        public virtual void GetExhausts(Transform[] _Part)
+        public Transform MainRotor;
+        public Transform TailRotor;
+        public virtual void GetExhaustsAndPropellers(Transform[] _Parts)
         {
-            foreach (Transform _Exhaust in _Part)
+
+            AllExhausts.Clear();
+            MainRotor = null;
+            TailRotor = null;
+
+            foreach (Transform _Part in _Parts)
             {
-                string _name = _Exhaust.name.ToLower();
-                if ((_name.Contains("exhaust") || _name.Contains("thruster")) && _Exhaust.childCount == 0 && _Exhaust.GetComponent<MeshRenderer>())
+                string _Name = _Part.name.ToLower();
+
+                if (!IsVisualOrAttachmentPart(_Part)) continue;
+
+                if (_Name.Contains("exhaust") || _Name.Contains("thruster"))
                 {
-                    AllExhausts.Add(_Exhaust);
+                    AllExhausts.Add(_Part);
+                    continue;
+                }
+
+                if (_Name.Contains("rotor") || _Name.Contains("propeller"))
+                {
+                    if (_Name.Contains("main") && MainRotor ==  null)
+                        MainRotor = _Part;
+                    else if (_Name.Contains("tail") && TailRotor == null)
+                        TailRotor = _Part;
                 }
             }
         }
@@ -29,6 +48,7 @@ namespace Meta.Vehicle
             foreach(Transform _Exhaust in AllExhausts)
             {
                 GameObject Particle = UnityEngine.Object.Instantiate(SmokeEffect, _Exhaust);
+                // Particle.transform.SetParent(_Exhaust); // already done by Instantiate(..., _Exhaust)
             }
         }
     }

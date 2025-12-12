@@ -15,8 +15,6 @@ GameObject:
   - component: {fileID: 1400785321477418086}
   - component: {fileID: 4816061638689902507}
   - component: {fileID: 2212844204571155647}
-  - component: {fileID: 481602507431275396}
-  - component: {fileID: 8662583613686992251}
   m_Layer: 8
   m_Name: Pedal_Boat
   m_TagString: Untagged
@@ -208,50 +206,6 @@ MonoBehaviour:
   rotationSensitivity: 0.01
   positionPrecision: 0.01
   scalePrecision: 0.01
---- !u!114 &481602507431275396
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 374802562699625050}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 33c1a4dbe6a52aa458f52b28044180ca, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Boat_Controller
-  HasDriver: 0
-  hidePlayerOnEnter: 1
-  Move: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Brake: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  maxForwardSpeed: 5
-  maxBackwardSpeed: 2
-  acceleration: 3
-  turnSpeed: 30
-  rb: {fileID: 1400785321477418086}
-  pedal: {fileID: 5435590660499562634}
-  propeller: {fileID: 176909335044664847}
-  steeringWheel: {fileID: 4705795788224190753}
-  pedalRotationSpeed: 360
-  propellerRotationSpeed: 1000
-  maxSteeringWheelAngle: 22
-  onLand: 0
---- !u!114 &8662583613686992251
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 374802562699625050}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 729b44bf1a610f5449769f0f9eae7a55, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Buoyancy
-  waterLevel: 0
-  buoyancyForce: 50
-  dampingFactor: 0.7
-  offsetY: 0.1
 --- !u!1 &395303810756533194
 GameObject:
   m_ObjectHideFlags: 0

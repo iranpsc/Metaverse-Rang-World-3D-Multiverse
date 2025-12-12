@@ -1,39 +1,66 @@
+﻿using Mirror;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using static Meta.Vehicle.Meta_VehiclePart;
 
 namespace Meta
 {
-    [AddComponentMenu("Meta/Meta_VehicleWheel")]
-    [HelpURL("https://google.com")]
+    [AddComponentMenu("Meta/Vehicle Wheel")]
+    [HelpURL("https://github.com/DreamFaver")]
     [Serializable]
-
     public class Meta_VehicleWheel
     {
-        public List<Transform> AllWheels;
-        public List<Transform> FrontWheels;
-        public List<Transform> RearWheels;
+        public List<Transform> AllWheels = new List<Transform>();
+        public List<Transform> FrontWheels = new List<Transform>();
+        public List<Transform> RearWheels = new List<Transform>();
 
-        public List<WheelCollider> AllCollider;
-        public List<WheelCollider> FrontCollider;
-        public List<WheelCollider> RearCollider;
+        public List<WheelCollider> AllCollider = new List<WheelCollider>();
+        public List<WheelCollider> FrontCollider = new List<WheelCollider>();
+        public List<WheelCollider> RearCollider = new List<WheelCollider>();
+
+        public Transform SteeringWheel;
+        public Transform Handlebar;
 
         public float WheelSuspensionDistance = 0.2f;
         public float WheelMass = 30f;
 
-        public virtual void GetWheels(Transform[] _Part)
+        public virtual void GetWheelsAndSteering(Transform[] _Parts)
         {
-            foreach (Transform _Wheels in _Part)
+            AllWheels.Clear();
+            FrontWheels.Clear();
+            RearWheels.Clear();
+            SteeringWheel = null;
+            Handlebar = null;
+
+            foreach (Transform _Part in _Parts)
             {
-                string _name = _Wheels.name.ToLower();
-                if (!_name.Contains("wheel") || _Wheels.childCount > 0 /*|| !_Wheels.GetComponent<MeshRenderer>()*/) continue;
+                string _Name = _Part.name.ToLower();
 
-                AllWheels.Add(_Wheels);
+                if (_Name.Contains("wheel") || _Name.Contains("tire"))
+                {
+                    if (!IsVisualOrAttachmentPart(_Part)) continue;
 
-                if (_name.Contains("front"))
-                    FrontWheels.Add(_Wheels);
-                if (_name.Contains("rear"))
-                    RearWheels.Add(_Wheels);
+                    AllWheels.Add(_Part);
+                    if (_Name.Contains("front"))
+                        FrontWheels.Add(_Part);
+                    if (_Name.Contains("rear"))
+                        RearWheels.Add(_Part);
+                    continue;
+                }
+
+                if (_Name.Contains("steering") && SteeringWheel == null)
+                {
+                    if (IsVisualOrAttachmentPart(_Part))
+                        SteeringWheel = _Part;
+                    continue;
+                }
+
+                if ((_Name.Contains("handlebar") || _Name.Contains("rudder")) && Handlebar == null)
+                {
+                    if (IsVisualOrAttachmentPart(_Part))
+                        Handlebar = _Part;
+                }
             }
         }
         public virtual void SetWheels()
@@ -65,7 +92,7 @@ namespace Meta
                 JointSpring _Spring = new JointSpring
                 {
                     spring = 15000f,
-                    damper = 2500f,
+                    damper = 5000, // 5000 or 2500 عدد بالاتر یعنی کمک فنر سفت تر
                     targetPosition = 0.5f
                 };
 

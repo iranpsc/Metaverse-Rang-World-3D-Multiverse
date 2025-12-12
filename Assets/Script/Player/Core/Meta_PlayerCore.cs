@@ -191,6 +191,7 @@ namespace Meta.Player.Core
         #endregion
         void Update()
         {
+            if (!isOwned) return;
             if (!PlayerController.enabled) return;
 
             float _DeltaTime = Time.deltaTime;
@@ -303,6 +304,7 @@ namespace Meta.Player.Core
 
         public virtual void ApplyMove(float _DeltaTime)
         {
+            if (!isOwned) return;
             PlayerData.Direction = new Vector3(PlayerData.Horizontal, 0f, PlayerData.Vertical);
             PlayerData.Direction = Vector3.ClampMagnitude(PlayerData.Direction, 1f);
             PlayerData.Direction = transform.TransformDirection(PlayerData.Direction);

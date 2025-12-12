@@ -726,7 +726,6 @@ GameObject:
   - component: {fileID: 6221118359724179267}
   - component: {fileID: 1026641369388057921}
   - component: {fileID: 8531844275018438557}
-  - component: {fileID: 8016407744697377402}
   - component: {fileID: 3661743842748438823}
   m_Layer: 8
   m_Name: Motorcycle_Sport
@@ -897,61 +896,6 @@ MonoBehaviour:
   rotationSensitivity: 0.01
   positionPrecision: 0.01
   scalePrecision: 0.01
---- !u!114 &8016407744697377402
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4100976909279371400}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c64396e91fe2b5a40836da9f0c31bf79, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Meta.Meta_CarSystem
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  HasDriver: 0
-  Seat:
-    AllSeats: []
-    DriverSeats: []
-    PassengerSeats: []
-  Move: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Brake: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  SignalLeft: {fileID: -299363374578332828, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  SignalRight: {fileID: -6222468828162654017, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  MotorTorque: 1500
-  BrakeTorque: 3000
-  MaxSteerAngle: 60
-  steerInput: 0
-  motorInput: 0
-  isBraking: 0
-  baseCenterOfMass: {x: 0, y: -0.3, z: 0}
-  comLoweringFactor: 0.2
-  maxSpeedForCoM: 100
-  rb: {fileID: 6221118359724179267}
-  Body:
-    Parts: []
-  Wheel:
-    AllWheels: []
-    FrontWheels: []
-    RearWheels: []
-    AllCollider: []
-    FrontCollider: []
-    RearCollider: []
-    WheelSuspensionDistance: 0.2
-    WheelMass: 30
-  Light:
-    AllLights: []
-    BrakeLights: []
-    HeadLights: []
-    TurnLeftSignal: []
-    TurnRightSignal: []
-    ReverseLight: []
-  Exhaust:
-    AllExhausts: []
-    SmokeEffect: {fileID: 6954634280127262853, guid: e1f1f4dc4004b8a48b3b85c26e457aea, type: 3}
 --- !u!64 &3661743842748438823
 MeshCollider:
   m_ObjectHideFlags: 0

@@ -1,0 +1,206 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1001 &169895850515264199
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 602818951265302535, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: sceneId
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 602818951265302535, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: _assetId
+      value: 2976604671
+      objectReference: {fileID: 0}
+    - target: {fileID: 854572404477410729, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: 'm_Materials.Array.data[3]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 59d0586bb0d8fe14e8915c1357d3ae89, type: 2}
+    - target: {fileID: 2255384261049096190, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: 'm_Materials.Array.data[3]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 59d0586bb0d8fe14e8915c1357d3ae89, type: 2}
+    - target: {fileID: 2482751630298505878, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: 'm_Materials.Array.data[2]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 59d0586bb0d8fe14e8915c1357d3ae89, type: 2}
+    - target: {fileID: 3053828846332036720, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_Name
+      value: Car Variant
+      objectReference: {fileID: 0}
+    - target: {fileID: 4189433289129035316, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: 'm_Materials.Array.data[5]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 59d0586bb0d8fe14e8915c1357d3ae89, type: 2}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -4.31
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4402919970293059975, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4429675274069215821, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: 'm_Materials.Array.data[2]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 59d0586bb0d8fe14e8915c1357d3ae89, type: 2}
+    - target: {fileID: 8049616047732045555, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: 'm_Materials.Array.data[12]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 59d0586bb0d8fe14e8915c1357d3ae89, type: 2}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 3053828846332036720, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1765741443710932539}
+    - targetCorrespondingSourceObject: {fileID: 3053828846332036720, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 3127545222528886845}
+  m_SourcePrefab: {fileID: 100100000, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+--- !u!1 &2898900098671981751 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 3053828846332036720, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+  m_PrefabInstance: {fileID: 169895850515264199}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &1765741443710932539
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2898900098671981751}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c64396e91fe2b5a40836da9f0c31bf79, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Vehicle.Meta_CarSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  DriverNetId: 0
+  SeatPosition:
+    AllSeats: []
+    DriverSeats: []
+    PassengerSeats: []
+  Wheel:
+    AllWheels: []
+    FrontWheels: []
+    RearWheels: []
+    AllCollider: []
+    FrontCollider: []
+    RearCollider: []
+    SteeringWheel: {fileID: 0}
+    Handlebar: {fileID: 0}
+    WheelSuspensionDistance: 0.2
+    WheelMass: 30
+  Light:
+    AllLights: []
+    BrakeLights: []
+    HeadLights: []
+    TurnLeftSignal: []
+    TurnRightSignal: []
+    ReverseLight: []
+    EmissiveIntensity: 5
+  Exhaust:
+    AllExhausts: []
+    SmokeEffect: {fileID: 6954634280127262853, guid: e1f1f4dc4004b8a48b3b85c26e457aea, type: 3}
+    MainRotor: {fileID: 0}
+    TailRotor: {fileID: 0}
+  Move: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  Brake: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  SignalLeft: {fileID: -299363374578332828, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  SignalRight: {fileID: -6222468828162654017, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  HeadLightToggle: {fileID: 1622185770717151323, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  MotorTorque: 1500
+  BrakeTorque: 3000
+  MaxSteerAngle: 45
+  baseCenterOfMass: {x: 0, y: -0.3, z: 0}
+  comLoweringFactor: 0.2
+  maxSpeedForCoM: 100
+  rb: {fileID: 0}
+  steerInput: 0
+  motorInput: 0
+  isBraking: 0
+--- !u!114 &3127545222528886845
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2898900098671981751}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdeaf6b433172fe4293ef757053166ec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Vehicle.Meta_VehicleConfigurator
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  _Body:
+    AllParts: []
+  _Seat:
+    AllSeats: []
+    DriverSeats: []
+    PassengerSeats: []
+  _Wheel:
+    AllWheels: []
+    FrontWheels: []
+    RearWheels: []
+    AllCollider: []
+    FrontCollider: []
+    RearCollider: []
+    SteeringWheel: {fileID: 0}
+    Handlebar: {fileID: 0}
+    WheelSuspensionDistance: 0.2
+    WheelMass: 30
+  _Light:
+    AllLights: []
+    BrakeLights: []
+    HeadLights: []
+    TurnLeftSignal: []
+    TurnRightSignal: []
+    ReverseLight: []
+    EmissiveIntensity: 5
+  _Exhaust:
+    AllExhausts: []
+    SmokeEffect: {fileID: 0}
+    MainRotor: {fileID: 0}
+    TailRotor: {fileID: 0}

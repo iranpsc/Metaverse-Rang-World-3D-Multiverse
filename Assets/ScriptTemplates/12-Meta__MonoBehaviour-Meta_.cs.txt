@@ -3,7 +3,7 @@ using UnityEngine;
 namespace Meta
 {
     [AddComponentMenu("Meta/#SCRIPTNAME#")]
-    [HelpURL("https://google.com")]
+    [HelpURL("https://github.com/DreamFaver")]
     public class #SCRIPTNAME# : MonoBehaviour
     {
 

@@ -47,7 +47,6 @@ GameObject:
   - component: {fileID: 7069939056815193163}
   - component: {fileID: 8844946556589377965}
   - component: {fileID: 5982855611534860853}
-  - component: {fileID: 7873814857082575489}
   m_Layer: 0
   m_Name: JetPack
   m_TagString: Untagged
@@ -207,34 +206,6 @@ MonoBehaviour:
   rotationSensitivity: 0.01
   positionPrecision: 0.01
   scalePrecision: 0.01
---- !u!114 &7873814857082575489
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3879819736551973848}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7e122952c81eda146a98d3fb2367a534, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Jetpack_Controller
-  Move: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Up: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  left: {fileID: -3744878626965789627, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  right: {fileID: -3367577465470513452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Down: {fileID: 3389766867616379561, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  moveForce: 15
-  ascendForce: 10
-  descendForce: 5
-  gravityForce: 2
-  rotateSpeed: 60
-  thrusters:
-  - {fileID: 8939442055572342679}
-  - {fileID: 8719542566273587978}
-  playerCamera: {fileID: 0}
-  HasDriver: 0
-  hidePlayerOnEnter: 1
 --- !u!1 &4870211118162749147
 GameObject:
   m_ObjectHideFlags: 0

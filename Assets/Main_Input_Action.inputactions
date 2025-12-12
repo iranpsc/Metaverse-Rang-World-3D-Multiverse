@@ -4651,6 +4651,15 @@
                     "initialStateCheck": false
                 },
                 {
+                    "name": "Destroy",
+                    "type": "Button",
+                    "id": "6d46c8c0-defc-43fc-bee5-d71655c0eed9",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
                     "name": "Nitro",
                     "type": "Button",
                     "id": "818c5ee5-48a1-4ad2-aa1f-6bc5170f6648",
@@ -4699,6 +4708,15 @@
                     "name": "Right Signal",
                     "type": "Button",
                     "id": "5a015407-4070-4cd8-a30c-bbf810391a6b",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "Head Light",
+                    "type": "Button",
+                    "id": "24e20f75-910b-43e6-9a91-14ebb5d302bd",
                     "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
@@ -4767,6 +4785,17 @@
                     "processors": "",
                     "groups": "Gamepad",
                     "action": "Interact",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "153fecd7-b274-4dcd-834c-072d994e1d1d",
+                    "path": "<Keyboard>/delete",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "Destroy",
                     "isComposite": false,
                     "isPartOfComposite": false
                 },
@@ -4965,6 +4994,39 @@
                     "processors": "",
                     "groups": "XR",
                     "action": "Right Signal",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "2e1f158c-e16c-4e50-98c0-25f56741e41e",
+                    "path": "<Keyboard>/l",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "Head Light",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "e0c7315f-07a7-4dcb-ba09-abebb172c63a",
+                    "path": "<Gamepad>/buttonEast",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Gamepad",
+                    "action": "Head Light",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "a0e382ab-15f3-42dd-801c-16b350ef6b6a",
+                    "path": "<XRController>/secondaryButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "XR",
+                    "action": "Head Light",
                     "isComposite": false,
                     "isPartOfComposite": false
                 },

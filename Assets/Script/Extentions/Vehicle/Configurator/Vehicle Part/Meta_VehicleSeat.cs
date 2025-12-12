@@ -1,43 +1,53 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using static Meta.Vehicle.Meta_VehiclePart;
 
 namespace Meta.Vehicle
 {
-    [AddComponentMenu("Meta/Meta_VehicleSeat")]
+    [AddComponentMenu("Meta/Vehicle Seat")]
     [HelpURL("https://google.com")]
     [Serializable]
     public class Meta_VehicleSeat
     {
-        public List<VehicleSeat> AllSeats;
-        public List<VehicleSeat> DriverSeats;
-        public List<VehicleSeat> PassengerSeats;
+        public List<VehicleSeat> AllSeats = new List<VehicleSeat>();
+        public List<VehicleSeat> DriverSeats = new List<VehicleSeat>();
+        public List<VehicleSeat> PassengerSeats = new List<VehicleSeat>();
         
         [Serializable]
         public class VehicleSeat
         {
-            public Transform Seat;
-            public bool Occupied;
-            public VehicleSeat(Transform _Seat, bool _Occupied)
+            public Transform SeatTransform;
+            public bool IsDriverSeat;
+            public VehicleSeat(Transform _Seat, bool _IsDriver)
             {
-                Seat = _Seat;
-                Occupied = _Occupied;
+                SeatTransform = _Seat;
+                IsDriverSeat = _IsDriver;
             }
         }
-        public virtual void GetSeats(Transform[] _Part)
+        public virtual void GetSeats(Transform[] _Parts)
         {
-            foreach (Transform _Seats in _Part)
+            AllSeats.Clear();
+            DriverSeats.Clear();
+            PassengerSeats.Clear();
+
+            foreach (Transform _Part in _Parts)
             {
-                string _name = _Seats.name.ToLower();
-                if (!_name.Contains("seat") || _Seats.childCount > 0 /*|| !_Seats.GetComponent<MeshRenderer>()*/) continue;
+                string _Name = _Part.name.ToLower();
 
-                AllSeats.Add(new VehicleSeat(_Seats, false));
+                if (!_Name.Contains("seat")) continue;
 
-                if (_name.Contains("driver"))
-                    DriverSeats.Add(new VehicleSeat(_Seats, false));
+                if (!IsVisualOrAttachmentPart(_Part)) continue;
 
-                if (_name.Contains("passenger"))
-                    PassengerSeats.Add(new VehicleSeat(_Seats, false));
+                bool _IsDriver = _Name.Contains("driver");
+                VehicleSeat _NewSeat = new VehicleSeat(_Part, _IsDriver);
+
+                AllSeats.Add(_NewSeat);
+
+                if (_IsDriver)
+                    DriverSeats.Add(_NewSeat);
+                else
+                    PassengerSeats.Add(_NewSeat);
             }
         }
     }

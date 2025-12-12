@@ -1446,7 +1446,6 @@ GameObject:
   - component: {fileID: 8278777979710236138}
   - component: {fileID: 3894910498000666239}
   - component: {fileID: 7707506598962295787}
-  - component: {fileID: 4464264915160262542}
   m_Layer: 8
   m_Name: Helecopter
   m_TagString: Untagged
@@ -1572,42 +1571,6 @@ MonoBehaviour:
   rotationSensitivity: 0.01
   positionPrecision: 0.01
   scalePrecision: 0.01
---- !u!114 &4464264915160262542
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7151739788916111669}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4eb31f9ad05d1e240b07fa0385e2905d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Helicopter_Controller
-  Move: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Up: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  Down: {fileID: 3389766867616379561, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  mainRotor: {fileID: 4471024973464133234}
-  tailRotor: {fileID: 5315582980651030073}
-  centerOfMass: {fileID: 466936668985332181}
-  maxEnginePower: 1000
-  liftForce: 8
-  yawPower: 100
-  moveForce: 10
-  tiltAngle: 15
-  tiltSpeed: 2
-  engineAcceleration: 2
-  engineDeacceleration: 1
-  rotorSpinSpeed: 1000
-  maxAltitude: 100
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 64
-  HasDriver: 0
-  hidePlayerOnEnter: 1
-  RotationAxis: 0
-  BladeSpeed: 0
-  InverseRotation: 0
 --- !u!1 &7225767581929268945
 GameObject:
   m_ObjectHideFlags: 0

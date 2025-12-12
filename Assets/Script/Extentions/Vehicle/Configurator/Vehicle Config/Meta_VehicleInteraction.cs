@@ -2,24 +2,39 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using static Meta.Vehicle.Meta_VehicleSeat;
-using static Mirror.NetworkRuntimeProfiler;
+
 namespace Meta.Vehicle
 {
+    [AddComponentMenu("Meta/Vehicle Interaction")]
+    [HelpURL("https://google.com")]
     public class Meta_VehicleInteraction : NetworkBehaviour
     {
+        [Header("Interaction Setting")]
         public InputActionReference Interact;
         public float RayDistance = 4f;
         public LayerMask VehicleLayer;
         public Vector3 SeatOffset; // optional
-        public float ExitDistance = 0.5f;
+        public float ExitDistance = 1.5f;
+
         [Header("Player Refs")]
         public MonoBehaviour PlayerMove;   // assign in inspector
-        public Collider PlayerCollider;    // assign in inspector
-        public CharacterController Controller;
+        public Collider PlayerCollider;    // assign in inspector
+        public CharacterController Controller;
         public Transform PlayerModel;      // assign the visual/player root
-        private Camera _cam;
-        private VehicleSeat _CurrentSeat;
+
+        // ==========================================================
+        // متغیرهای شبکه ای (SyncVars)
+        // ==========================================================
+        [SyncVar] public uint _SyncedVehicleNetId = 0;
+        [SyncVar] public int _SyncedSeatIndex = -1;
+
+        // ==========================================================
+        // مراجع محلی (Local References)
+        // ==========================================================
+        private Camera _cam;
+        private int _CurrentSeatIndex = -1;
         private Meta_VehicleBase _CurrentVehicle;
+
         private void OnEnable()
         {
             Interact.action.performed += OnInteract;
@@ -32,114 +47,199 @@ namespace Meta.Vehicle
         }
         private void Start()
         {
+            // Initializes the camera reference
             _cam = Camera.main;
         }
+
+        // ==========================================================
+        // متد اصلی تعامل (فقط روی کلاینت محلی)
+        // ==========================================================
+
         private void OnInteract(InputAction.CallbackContext ctx)
         {
+            if (!isLocalPlayer) return;
 
-            // If player is already in a vehicle → exit
-            if (_CurrentSeat != null && _CurrentVehicle != null)
+            // 1. **EXCELSIOR**: Check if player is IN a vehicle
+            if (_SyncedVehicleNetId != 0)
             {
-                CmdExitVehicle();
+                // Request to EXIT the vehicle
+
+                if (_CurrentVehicle == null && NetworkClient.spawned.TryGetValue(_SyncedVehicleNetId, out NetworkIdentity vehicleNetId))
+                {
+                    _CurrentVehicle = vehicleNetId.GetComponent<Meta_VehicleBase>();
+                }
+
+                if (_CurrentVehicle != null)
+                {
+                    Debug.Log("Exit Request Sent to Server.");
+                    // --- 🛑 UNCOMMENTED: CALL COMMAND ---
+                    CmdExitVehicle();
+                }
+                else
+                {
+                    // Emergency reset
+                    _SyncedVehicleNetId = 0;
+                    _SyncedSeatIndex = -1;
+                }
+            }
+            else // 2. **NO VEHICLE**: Try to enter
+            {
+                // Raycast logic is correct: shoots from camera center
+                if (_cam == null || !Physics.Raycast(_cam.transform.position, _cam.transform.forward, out RaycastHit _Hit, RayDistance, VehicleLayer))
+                    return;
+
+                Meta_VehicleBase _Vehicle = _Hit.collider.GetComponentInParent<Meta_VehicleBase>();
+                if (_Vehicle == null) return;
+
+                // Find a free seat (requires logic in Meta_VehicleBase)
+                (int _SeatIndex, Transform _SeatTransform) _FreeSeat = _Vehicle.GetFreeSeat();
+
+                if (_FreeSeat._SeatTransform != null)
+                {
+                    Debug.Log($"Enter Request Sent to Server. Seat Index: {_FreeSeat._SeatIndex}");
+                    // --- 🛑 UNCOMMENTED: CALL COMMAND ---
+                    CmdEnterVehicle(_Vehicle.netIdentity, _FreeSeat._SeatIndex, netIdentity.netId);
+                }
+            }
+        }
+
+        // ==========================================================
+        // Commands (Client -> Server)
+        // ==========================================================
+
+        [Command(requiresAuthority = false)]
+        private void CmdEnterVehicle(NetworkIdentity _VehicleNetId, int _SeatIndex, uint _OccupiedNetId)
+        {
+            Meta_VehicleBase _Vehicle = _VehicleNetId.GetComponent<Meta_VehicleBase>();
+            if (_Vehicle == null || _Vehicle.IsSeatOccupied(_OccupiedNetId)) return;
+
+            // 1. Authority transfer logic
+            bool isDriverSeat = _Vehicle.Seat.AllSeats[_SeatIndex].IsDriverSeat;
+            if (isDriverSeat)
+            {
+                if (_Vehicle.netIdentity.connectionToClient != connectionToClient)
+                {
+                    _Vehicle.netIdentity.RemoveClientAuthority();
+                    _Vehicle.netIdentity.AssignClientAuthority(connectionToClient);
+                }
+            }
+
+            // 2. Set seat state on server
+            _Vehicle.MarkSeatOccupied(_SeatIndex, _OccupiedNetId);
+
+            // 3. Set SyncVars on the player (Server -> All Clients)
+            _SyncedSeatIndex = _SeatIndex;
+            _SyncedVehicleNetId = _VehicleNetId.netId;
+
+            // 4. Call TargetRpc for local client actions (Disabling control, parenting)
+            TargetEnterVehicle(connectionToClient, _VehicleNetId, _SeatIndex);
+        }
+
+
+        [Command(requiresAuthority = false)]
+        private void CmdExitVehicle()
+        {
+            // 1. Server-side reference retrieval
+            if (_CurrentVehicle == null && _SyncedVehicleNetId != 0)
+            {
+                if (NetworkServer.spawned.TryGetValue(_SyncedVehicleNetId, out NetworkIdentity vehicleNetId))
+                {
+                    _CurrentVehicle = vehicleNetId.GetComponent<Meta_VehicleBase>();
+                }
+            }
+
+            if (_CurrentVehicle == null)
+            {
+                _SyncedVehicleNetId = 0;
+                _SyncedSeatIndex = -1;
                 return;
             }
-            // Raycast for vehicle
-            Ray ray = _cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-            if (Physics.Raycast(ray, out RaycastHit hit, RayDistance, VehicleLayer))
+
+            // 2. Find and free the occupied seat
+            (int _SeatIndex, SeatState _SeatData) _SeatInfo = _CurrentVehicle.GetSeatByNetId(netIdentity.netId);
+
+            if (_SeatInfo._SeatIndex == -1)
             {
-                var vehicle = hit.collider.GetComponentInParent<Meta_VehicleBase>();
-                if (!vehicle) return;
-                VehicleSeat seat = vehicle.GetFreeSeat();
-                if (seat.Seat == null)
+                Debug.LogWarning($"Player {netId} tried to exit, but was not found. Forcing client exit.");
+                if (_CurrentVehicle.netIdentity.isOwned && _CurrentVehicle.netIdentity.connectionToClient == connectionToClient)
                 {
-                    Debug.Log("No free seat.");
-                    return;
+                    _CurrentVehicle.netIdentity.RemoveClientAuthority();
                 }
-                CmdEnterVehicle(vehicle, seat);
             }
+            else
+            {
+                _CurrentVehicle.MarkSeatFree(_SeatInfo._SeatIndex);
+
+                // 3. Remove Authority if driver
+                if (_SeatInfo._SeatData.IsDriver)
+                {
+                    _CurrentVehicle.netIdentity.RemoveClientAuthority();
+                }
+            }
+
+            // 4. Reset SyncVars (Server -> All Clients)
+            _SyncedSeatIndex = -1;
+            _SyncedVehicleNetId = 0;
+
+            // 5. TargetRpc for local client actions (Enabling control, unparenting)
+            TargetExitVehicle(connectionToClient, _CurrentVehicle.netIdentity);
+
+            // 6. Reset server local references
+            _CurrentSeatIndex = -1;
+            _CurrentVehicle = null;
         }
-        
-        private void CmdEnterVehicle(Meta_VehicleBase vehicle, VehicleSeat seat)
+
+        // ==========================================================
+        // TargetRpcs (Server -> Client)
+        // ==========================================================
+
+        [TargetRpc]
+        private void TargetEnterVehicle(NetworkConnection _Target, NetworkIdentity _VehicleNetId, int _SeatIndex)
         {
-            // The logic to mark the seat and set HasDriver must happen on the Server
-            vehicle.MarkSeatOccupied(seat.Seat);
-            if (!vehicle.HasDriver)
-                vehicle.HasDriver = true;
+            Meta_VehicleBase _Vehicle = _VehicleNetId.GetComponent<Meta_VehicleBase>();
+            if (_Vehicle == null) return;
 
-            // Assign authority of the vehicle to the client who is entering
-            vehicle.netIdentity.AssignClientAuthority(connectionToClient); // ADD THIS
+            // Local actions (Parenting, Disabling Control)
+            Transform _SeatTransform = _Vehicle.Seat.AllSeats[_SeatIndex].SeatTransform;
 
-            // Call an Rpc to execute the client-side changes on the player who entered
-            TargetEnterVehicle(connectionToClient, vehicle.netIdentity, seat.Seat);
-        }
+            _CurrentSeatIndex = _SeatIndex;
+            _CurrentVehicle = _Vehicle;
 
-        // --- TargetEnterVehicle (Executed on the specific Client that entered) ---
-        
-        private void TargetEnterVehicle(NetworkConnection target, NetworkIdentity vehicleNetId, Transform seatTransform)
-        {
-            // Re-find the seat object on this client using the passed Transform
-            Meta_VehicleBase vehicle = vehicleNetId.GetComponent<Meta_VehicleBase>();
-            VehicleSeat seat = vehicle.Seat.AllSeats.Find(s => s.Seat == seatTransform);
+            // Parent directly to the seat transform
+            PlayerModel.SetParent(_SeatTransform);
+            PlayerModel.localPosition = SeatOffset;
+            PlayerModel.localRotation = Quaternion.identity;
 
-            if (seat == null) return;
-
-            // Disable player movement + collider
             PlayerMove.enabled = false;
             PlayerCollider.enabled = false;
             Controller.enabled = false;
-
-            // Move player to seat
-            PlayerModel.position = seat.Seat.position + SeatOffset;
-            PlayerModel.rotation = seat.Seat.rotation;
-            PlayerModel.SetParent(seat.Seat);
-
-            // Save current references (Local-only)
-            _CurrentSeat = seat;
-            _CurrentVehicle = vehicle;
-            Debug.Log("Player entered vehicle at seat: " + seat.Seat.name);
         }
 
-        // --- CmdExitVehicle (Needs to be a [Command] executed on the Server) ---
-        
-        private void CmdExitVehicle()
+        [TargetRpc]
+        private void TargetExitVehicle(NetworkConnection _Target, NetworkIdentity _VehicleNetId)
         {
-            if (_CurrentSeat == null || _CurrentVehicle == null) return;
+            Meta_VehicleBase _Vehicle = _VehicleNetId.GetComponent<Meta_VehicleBase>();
+            if (_Vehicle == null) return;
 
-            // The logic to free the seat and reset HasDriver must happen on the Server
-            _CurrentVehicle.MarkSeatFree(_CurrentSeat.Seat);
-            if (_CurrentVehicle.HasDriver)
-                _CurrentVehicle.HasDriver = false;
+            // Local actions (Unparenting, Enabling Control)
 
-            _CurrentVehicle.netIdentity.RemoveClientAuthority(); // ADD THIS
+            // 1. Determine exit position
+            Vector3 _ExitOffset = _Vehicle.transform.right * ExitDistance;
 
-            // Call an Rpc to execute the client-side changes on the player who exited
-            TargetExitVehicle(connectionToClient, _CurrentVehicle.netIdentity);
-        }
+            // 🛑 FIX: Added Vector3.up (world up) to the exit position for vertical offset.
+            Vector3 _ExitPosition = _Vehicle.transform.position + _ExitOffset + Vector3.up;
 
-        // --- TargetExitVehicle (Executed on the specific Client that exited) ---
-        
-        private void TargetExitVehicle(NetworkConnection target, NetworkIdentity vehicleNetId)
-        {
-            Meta_VehicleBase vehicle = vehicleNetId.GetComponent<Meta_VehicleBase>();
-            if (vehicle == null) return;
-
-            // Determine exit position (calculate locally)
-            Vector3 exitOffset = new Vector3(1f, 0.1f, 0f);
-            Vector3 exitPosition = vehicle.transform.TransformPoint(exitOffset * ExitDistance);
-
-            // Unparent player
+            // 2. Unparent from the vehicle
             PlayerModel.SetParent(null);
-            // Move player to safe position
-            PlayerModel.position = exitPosition;
+            PlayerModel.position = _ExitPosition;
 
-            // Re-enable movement
-            PlayerMove.enabled = true;
-            PlayerCollider.enabled = true;
+            // 3. Enable local movement/physics
             Controller.enabled = true;
+            PlayerCollider.enabled = true;
+            PlayerMove.enabled = true;
 
-            Debug.Log("Player exited vehicle.");
-            // Reset references (Local-only)
-            _CurrentSeat = null;
+            // 4. Reset local references
+            _CurrentSeatIndex = -1;
             _CurrentVehicle = null;
         }
     }
