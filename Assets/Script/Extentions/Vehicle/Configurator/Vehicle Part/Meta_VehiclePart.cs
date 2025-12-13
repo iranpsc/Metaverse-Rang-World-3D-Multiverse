@@ -25,7 +25,7 @@ namespace Meta.Vehicle
             if (_Part.GetComponent<MeshRenderer>() != null)
                 return true;
 
-            if (_Name.Contains("exhaust") || _Name.Contains("thruster") || _Name.Contains("rotor") || _Name.Contains("propeller") || _Name.Contains("handlebar") || _Name.Contains("rudder"))
+            if (_Name.Contains("exhaust") || _Name.Contains("thruster") || _Name.Contains("rotor") || _Name.Contains("propeller") || _Name.Contains("handlebar") || _Name.Contains("rudder") || _Name.Contains("seatmap"))
             {
                 return true;
             }

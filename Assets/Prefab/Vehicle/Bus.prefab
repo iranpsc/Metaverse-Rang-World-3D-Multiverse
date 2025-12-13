@@ -110,15 +110,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -3910990755373119420, guid: d4a052f5ba9f7ff4cbb9c472cc24838e, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -13.28
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -3910990755373119420, guid: d4a052f5ba9f7ff4cbb9c472cc24838e, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.00000023841858
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -3910990755373119420, guid: d4a052f5ba9f7ff4cbb9c472cc24838e, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.05
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -3910990755373119420, guid: d4a052f5ba9f7ff4cbb9c472cc24838e, type: 3}
       propertyPath: m_LocalRotation.w
@@ -488,7 +488,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Mirror::Mirror.NetworkIdentity
   sceneId: 0
-  _assetId: 1460893037
+  _assetId: 1633769443
   serverOnly: 0
   visibility: 0
   hasSpawned: 0

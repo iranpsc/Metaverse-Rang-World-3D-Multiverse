@@ -6,6 +6,54 @@ using UnityEngine.InputSystem;
 
 namespace Meta
 {
+    [Serializable]
+    public struct RuntimeData
+    {
+        [ReadOnly, SerializeField] float _MotorInput;
+        [ReadOnly, SerializeField] float _SteerInput;
+        [ReadOnly, SerializeField] Vector3 _CenterOfMass;
+        [ReadOnly, SerializeField] bool _IsBraking;
+        [ReadOnly, SerializeField] bool _IsReversing;
+        [ReadOnly, SerializeField] bool _IsBrakingLightOn;
+        [ReadOnly, SerializeField] float _SignalTimer;
+
+        public float MotorInput
+        {
+            get => _MotorInput;
+            internal set => _MotorInput = value;
+        }
+        public float SteerInput
+        {
+            get => _SteerInput;
+            internal set => _SteerInput = value;
+        }
+        public Vector3 CenterOfMass
+        {
+            get => _CenterOfMass;
+            internal set => _CenterOfMass = value;
+        }
+        public bool IsBraking
+        {
+            get => _IsBraking;
+            internal set => _IsBraking = value;
+        }
+        public bool IsReversing
+        {
+            get => _IsReversing;
+            internal set => _IsReversing = value;
+        }
+        public bool IsBrakingLightOn
+        {
+            get => _IsBrakingLightOn;
+            internal set => _IsBrakingLightOn = value;
+        }
+        public float SignalTimer
+        {
+            get => _SignalTimer;
+            internal set => _SignalTimer = value;
+        }
+
+    }
     [AddComponentMenu("Meta/Vehicle System")]
     [DisallowMultipleComponent]
     [HelpURL("https://github.com/DreamFaver")]
@@ -37,54 +85,7 @@ namespace Meta
         float CoMLoweringFactor = 0.2f;
         float MaxSpeedForCoM = 100f;
 
-        [Serializable]
-        public struct RuntimeData
-        {
-            [ReadOnly, SerializeField] float _MotorInput;
-            [ReadOnly, SerializeField] float _SteerInput;
-            [ReadOnly, SerializeField] Vector3 _CenterOfMass;
-            [ReadOnly, SerializeField] bool _IsBraking;
-            [ReadOnly, SerializeField] bool _IsReversing;
-            [ReadOnly, SerializeField] bool _IsBrakingLightOn;
-            [ReadOnly, SerializeField] float _SignalTimer;
 
-            public float MotorInput
-            {
-                get => _MotorInput;
-                internal set => _MotorInput = value;
-            }
-            public float SteerInput
-            {
-                get => _SteerInput;
-                internal set => _SteerInput = value;
-            }
-            public Vector3 CenterOfMass
-            {
-                get => _CenterOfMass;
-                internal set => _CenterOfMass = value;
-            }
-            public bool IsBraking
-            {
-                get => _IsBraking;
-                internal set => _IsBraking = value;
-            }
-            public bool IsReversing
-            {
-                get => _IsReversing;
-                internal set => _IsReversing = value;
-            }
-            public bool IsBrakingLightOn
-            {
-                get => _IsBrakingLightOn;
-                internal set => _IsBrakingLightOn = value;
-            }
-            public float SignalTimer
-            {
-                get => _SignalTimer;
-                internal set => _SignalTimer = value;
-            }
-
-        }
         public RuntimeData runtimeData;
 
         #region Network Setup
@@ -97,7 +98,7 @@ namespace Meta
         }
         protected virtual void Reset()
         {
-            GetComponent<Rigidbody>().isKinematic = true;
+            Rb.isKinematic = true;
             //this.enabled = false;
         }
         public override void OnStartAuthority()

@@ -9,7 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1769749192752946987}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: JoyStick
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -44,10 +44,13 @@ GameObject:
   - component: {fileID: 420963819696892891}
   - component: {fileID: 3143045006695493399}
   - component: {fileID: 8472948483398186344}
+  - component: {fileID: 7237603606086788371}
   - component: {fileID: 7069939056815193163}
   - component: {fileID: 8844946556589377965}
   - component: {fileID: 5982855611534860853}
-  m_Layer: 0
+  - component: {fileID: 3232959931377555168}
+  - component: {fileID: 6330323481952141183}
+  m_Layer: 8
   m_Name: JetPack
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -62,7 +65,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3879819736551973848}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -128,6 +131,28 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!64 &7237603606086788371
+MeshCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3879819736551973848}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 5
+  m_Convex: 1
+  m_CookingOptions: 30
+  m_Mesh: {fileID: -1068700126848321606, guid: e8bb070add7ce524bba055482f421f1d, type: 3}
 --- !u!54 &7069939056815193163
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -136,7 +161,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3879819736551973848}
   serializedVersion: 5
-  m_Mass: 1
+  m_Mass: 1500
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -206,6 +231,116 @@ MonoBehaviour:
   rotationSensitivity: 0.01
   positionPrecision: 0.01
   scalePrecision: 0.01
+--- !u!114 &3232959931377555168
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3879819736551973848}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdeaf6b433172fe4293ef757053166ec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Vehicle.Meta_VehicleConfigurator
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  _Body:
+    AllParts: []
+  _Seat:
+    AllSeats: []
+    DriverSeats: []
+    PassengerSeats: []
+  _Wheel:
+    AllWheels: []
+    FrontWheels: []
+    RearWheels: []
+    AllCollider: []
+    FrontCollider: []
+    RearCollider: []
+    SteeringWheel: {fileID: 0}
+    Handlebar: {fileID: 0}
+    WheelSuspensionDistance: 0.2
+    WheelMass: 30
+  _Light:
+    AllLights: []
+    BrakeLights: []
+    HeadLights: []
+    TurnLeftSignal: []
+    TurnRightSignal: []
+    ReverseLight: []
+    EmissiveIntensity: 5
+  _Exhaust:
+    AllExhausts: []
+    SmokeEffect: {fileID: 0}
+    MainRotor: {fileID: 0}
+    TailRotor: {fileID: 0}
+--- !u!114 &6330323481952141183
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3879819736551973848}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 36ac1cd344aa06941a891a46559bd5c9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Meta_JetpackSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  DriverNetId: 0
+  Seat:
+    AllSeats: []
+    DriverSeats: []
+    PassengerSeats: []
+  Wheel:
+    AllWheels: []
+    FrontWheels: []
+    RearWheels: []
+    AllCollider: []
+    FrontCollider: []
+    RearCollider: []
+    SteeringWheel: {fileID: 0}
+    Handlebar: {fileID: 0}
+    WheelSuspensionDistance: 0.2
+    WheelMass: 30
+  Light:
+    AllLights: []
+    BrakeLights: []
+    HeadLights: []
+    TurnLeftSignal: []
+    TurnRightSignal: []
+    ReverseLight: []
+    EmissiveIntensity: 5
+  Exhaust:
+    AllExhausts: []
+    SmokeEffect: {fileID: 6954634280127262853, guid: e1f1f4dc4004b8a48b3b85c26e457aea, type: 3}
+    MainRotor: {fileID: 0}
+    TailRotor: {fileID: 0}
+  Rb: {fileID: 7069939056815193163}
+  playerCamera: {fileID: 0}
+  keys:
+    Move: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    Up: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    Down: {fileID: 3389766867616379561, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    YawAxis: {fileID: 6760607525988030868, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  runtimeData:
+    MoveInput: {x: 0, y: 0}
+    YawInput: 0
+    IsAscending: 0
+    IsDescending: 0
+    IsThrusting: 0
+  moveForce: 15
+  ascendForce: 15
+  descendForce: 10
+  gravityForce: 3
+  rotateSpeed: 180
+  cameraFollowSpeed: 50
+  CameraDeadZoneAngle: 10
+  ThrustParticlePrefab: {fileID: 6954634280127262853, guid: e1f1f4dc4004b8a48b3b85c26e457aea, type: 3}
 --- !u!1 &4870211118162749147
 GameObject:
   m_ObjectHideFlags: 0
@@ -217,7 +352,7 @@ GameObject:
   - component: {fileID: 8263374058065519372}
   - component: {fileID: 6658027745077498291}
   - component: {fileID: 7394396678500823306}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Joystick_Left
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -304,7 +439,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 4962658183631345793}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Thrusters
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -339,7 +474,7 @@ GameObject:
   - component: {fileID: 75464501568051564}
   - component: {fileID: 9165685061452410320}
   - component: {fileID: 3189085655158505586}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Joystick_Right
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -428,7 +563,7 @@ GameObject:
   - component: {fileID: 8719542566273587978}
   - component: {fileID: 4348370403864273032}
   - component: {fileID: 1395086189340981976}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Thruster_Right
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -517,7 +652,7 @@ GameObject:
   - component: {fileID: 8939442055572342679}
   - component: {fileID: 5691840900849904523}
   - component: {fileID: 7928438740071090522}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Thruster_Left
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -604,8 +739,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 4653069370804673083}
-  m_Layer: 0
-  m_Name: Driver_Seat
+  m_Layer: 8
+  m_Name: Driver_Seatmap
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

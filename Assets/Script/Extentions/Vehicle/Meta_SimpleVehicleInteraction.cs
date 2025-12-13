@@ -1,6 +1,7 @@
 ﻿using Meta.Vehicle;
 using Mirror;
 using Mirror.Examples.Benchmark;
+using Unity.Cinemachine;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -25,6 +26,7 @@ namespace Meta
         public CharacterController Controller;
         public Transform PlayerModel;      // assign the visual/player root
         public Camera PlayerCamera;
+        public CinemachinePanTilt CameraRot;
 
         // ==========================================================
         // متغیرهای شبکه ای (SyncVars)
@@ -149,6 +151,7 @@ namespace Meta
                 {
                     Debug.Log("Exit Request Sent to Server.");
                     // --- 🛑 UNCOMMENTED: CALL COMMAND ---
+                    CameraRot.ReferenceFrame = CinemachinePanTilt.ReferenceFrames.World;
                     CmdExitVehicle();
                 }
                 else
@@ -169,10 +172,13 @@ namespace Meta
                 _CurrentVehicle = _Vehicle.GetComponent<Meta_VehicleBase>();
                 // Find a free seat (requires logic in Meta_VehicleBase)
                 (int _SeatIndex, Transform _SeatTransform) _FreeSeat = _Vehicle.GetFreeSeat();
-                targetObjectName = _FreeSeat._SeatTransform.name;
+
                 if (_FreeSeat._SeatTransform != null)
                 {
+                    targetObjectName = _FreeSeat._SeatTransform.name;
+
                     Debug.Log($"Enter Request Sent to Server. Seat Index: {_FreeSeat._SeatIndex}");
+                    CameraRot.ReferenceFrame = CinemachinePanTilt.ReferenceFrames.ParentObject;
                     // --- 🛑 UNCOMMENTED: CALL COMMAND ---
                     _Vehicle.ValidateSeat();
                     CmdEnterVehicle(_Vehicle.netIdentity, _FreeSeat._SeatIndex, netIdentity.netId);

@@ -867,7 +867,7 @@ GameObject:
   - component: {fileID: 553787645085030116}
   - component: {fileID: 3496872071166719352}
   m_Layer: 8
-  m_Name: Driver_Seat_02
+  m_Name: Passenger_Seat_00
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1446,6 +1446,8 @@ GameObject:
   - component: {fileID: 8278777979710236138}
   - component: {fileID: 3894910498000666239}
   - component: {fileID: 7707506598962295787}
+  - component: {fileID: 6378208201107208707}
+  - component: {fileID: 7763416790094100986}
   m_Layer: 8
   m_Name: Helecopter
   m_TagString: Untagged
@@ -1513,7 +1515,7 @@ Rigidbody:
   m_ExcludeLayers:
     serializedVersion: 2
     m_Bits: 0
-  m_ImplicitCom: 1
+  m_ImplicitCom: 0
   m_ImplicitTensor: 1
   m_UseGravity: 1
   m_IsKinematic: 0
@@ -1571,6 +1573,118 @@ MonoBehaviour:
   rotationSensitivity: 0.01
   positionPrecision: 0.01
   scalePrecision: 0.01
+--- !u!114 &6378208201107208707
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7151739788916111669}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdeaf6b433172fe4293ef757053166ec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Vehicle.Meta_VehicleConfigurator
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  _Body:
+    AllParts: []
+  _Seat:
+    AllSeats: []
+    DriverSeats: []
+    PassengerSeats: []
+  _Wheel:
+    AllWheels: []
+    FrontWheels: []
+    RearWheels: []
+    AllCollider: []
+    FrontCollider: []
+    RearCollider: []
+    SteeringWheel: {fileID: 0}
+    Handlebar: {fileID: 0}
+    WheelSuspensionDistance: 0.2
+    WheelMass: 30
+  _Light:
+    AllLights: []
+    BrakeLights: []
+    HeadLights: []
+    TurnLeftSignal: []
+    TurnRightSignal: []
+    ReverseLight: []
+    EmissiveIntensity: 5
+  _Exhaust:
+    AllExhausts: []
+    SmokeEffect: {fileID: 0}
+    MainRotor: {fileID: 0}
+    TailRotor: {fileID: 0}
+--- !u!114 &7763416790094100986
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7151739788916111669}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f11937bc518211d4589f64916f30afcb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Meta_HelicopterSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  DriverNetId: 0
+  Seat:
+    AllSeats: []
+    DriverSeats: []
+    PassengerSeats: []
+  Wheel:
+    AllWheels: []
+    FrontWheels: []
+    RearWheels: []
+    AllCollider: []
+    FrontCollider: []
+    RearCollider: []
+    SteeringWheel: {fileID: 0}
+    Handlebar: {fileID: 0}
+    WheelSuspensionDistance: 0.2
+    WheelMass: 30
+  Light:
+    AllLights: []
+    BrakeLights: []
+    HeadLights: []
+    TurnLeftSignal: []
+    TurnRightSignal: []
+    ReverseLight: []
+    EmissiveIntensity: 5
+  Exhaust:
+    AllExhausts: []
+    SmokeEffect: {fileID: 0}
+    MainRotor: {fileID: 0}
+    TailRotor: {fileID: 0}
+  Rb: {fileID: 8278777979710236138}
+  flightKeys:
+    Collective: {fileID: 5506356349553896381, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    Cyclic: {fileID: 7011802740830980649, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    Rudder: {fileID: 6760607525988030868, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    HeadLightToggle: {fileID: 1622185770717151323, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  GravityForce: 0
+  MinimumLiftFactor: 0.5
+  MaxCollectiveForce: 10
+  EnginePower: 100
+  PitchRollTorque: 2
+  YawTorque: 2
+  StabilizationFactor: 2
+  SpinUpRate: 5000
+  MaxRotorVisualRPM: 5000
+  runtimeData:
+    CollectiveInput: 0
+    CyclicInput: {x: 0, y: 0}
+    RudderInput: 0
+    MainRotorSpeed: 0
+    VerticalSpeed: 0
+    IsInFlight: 0
+    EngineOn: 0
 --- !u!1 &7225767581929268945
 GameObject:
   m_ObjectHideFlags: 0

@@ -4730,6 +4730,15 @@
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": true
+                },
+                {
+                    "name": "Rudder",
+                    "type": "Value",
+                    "id": "2392deb4-fa0a-417b-9272-b3fbca11b967",
+                    "expectedControlType": "Axis",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": true
                 }
             ],
             "bindings": [
@@ -5161,6 +5170,39 @@
                     "action": "Move",
                     "isComposite": false,
                     "isPartOfComposite": false
+                },
+                {
+                    "name": "1D Axis",
+                    "id": "caf95ce5-8d66-4275-bf7c-e3eb1204eb50",
+                    "path": "1DAxis",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Rudder",
+                    "isComposite": true,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "negative",
+                    "id": "1ea46495-cbe6-439e-bdb1-a1b5209772d4",
+                    "path": "<Keyboard>/q",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Rudder",
+                    "isComposite": false,
+                    "isPartOfComposite": true
+                },
+                {
+                    "name": "positive",
+                    "id": "22442a5c-1b53-477e-8fc9-dff00af5b113",
+                    "path": "<Keyboard>/e",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Rudder",
+                    "isComposite": false,
+                    "isPartOfComposite": true
                 }
             ]
         },
@@ -5271,7 +5313,7 @@
                 {
                     "name": "negative",
                     "id": "2a4da8e5-4626-4c30-89a2-485cfbea0aaa",
-                    "path": "<Keyboard>/numpad4",
+                    "path": "<Keyboard>/numpad1",
                     "interactions": "",
                     "processors": "",
                     "groups": "",
@@ -5282,7 +5324,7 @@
                 {
                     "name": "positive",
                     "id": "5f04beca-a093-4c83-ad5d-ac242cababb1",
-                    "path": "<Keyboard>/numpad6",
+                    "path": "<Keyboard>/numpad7",
                     "interactions": "",
                     "processors": "",
                     "groups": "",

@@ -16,7 +16,6 @@ namespace Meta.Vehicle
         public Transform TailRotor;
         public virtual void GetExhaustsAndPropellers(Transform[] _Parts)
         {
-
             AllExhausts.Clear();
             MainRotor = null;
             TailRotor = null;
@@ -35,9 +34,9 @@ namespace Meta.Vehicle
 
                 if (_Name.Contains("rotor") || _Name.Contains("propeller"))
                 {
-                    if (_Name.Contains("main") && MainRotor ==  null)
+                    if (_Name.Contains("front") && MainRotor ==  null)
                         MainRotor = _Part;
-                    else if (_Name.Contains("tail") && TailRotor == null)
+                    else if (_Name.Contains("rear") && TailRotor == null)
                         TailRotor = _Part;
                 }
             }

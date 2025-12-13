@@ -5362,6 +5362,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 8063361437837337642}
+  - component: {fileID: 6623159232668139332}
   m_Layer: 0
   m_Name: Spawn
   m_TagString: Untagged
@@ -5385,6 +5386,36 @@ Transform:
   - {fileID: 8980172817883877807}
   m_Father: {fileID: 4207643317038658834}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6623159232668139332
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2125366032349237251}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 364c8039d2116424ca258395d958bc32, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.Meta_VehicleSpawnController
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  SpawnPoint: {fileID: 1576254008602164703}
+  PreviewAnchor: {fileID: 8980172817883877807}
+  keys:
+    RotateAxis: {fileID: -4579797066522168891, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    DistanceAxis: {fileID: -6361517045638229086, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    Confirm: {fileID: 3894121881379334169, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    Cancel: {fileID: 597421348880513429, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  PreviewRotateSpeed: 120
+  PreviewDistanceSpeed: 5
+  MinSpawnDistance: 1
+  MaxSpawnDistance: 15
+  SpawnCheckRadius: 1.5
+  CollisionLayers:
+    serializedVersion: 2
+    m_Bits: 1
 --- !u!1 &2158490523756162387
 GameObject:
   m_ObjectHideFlags: 0
@@ -5425,6 +5456,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 8980172817883877807}
+  - component: {fileID: 6757336321560923643}
   m_Layer: 0
   m_Name: Preview
   m_TagString: Untagged
@@ -5444,9 +5476,22 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 1576254008602164703}
   m_Father: {fileID: 8063361437837337642}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6757336321560923643
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2176951214270284675}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7fda72b73ef4ae8429566779142c1315, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Meta.GlobalAlignmentController
 --- !u!1 &2204813620771429910
 GameObject:
   m_ObjectHideFlags: 0
@@ -11856,6 +11901,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 5226912704703154868}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &4438064288058362317
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1576254008602164703}
+  m_Layer: 0
+  m_Name: SpawnPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1576254008602164703
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4438064288058362317}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8980172817883877807}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &4528461456626571964
 GameObject:
   m_ObjectHideFlags: 0
@@ -14790,17 +14866,18 @@ MonoBehaviour:
   syncInterval: 0
   Interact: {fileID: 4462449745125738975, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   DestroyVehicle: {fileID: -2870675638912064860, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  RayDistance: 2
+  RayDistance: 3
   VehicleLayer:
     serializedVersion: 2
     m_Bits: 256
   SeatOffset: {x: 0, y: -0.9, z: -0.1}
-  ExitDistance: 3
+  ExitDistance: 4
   PlayerMove: {fileID: 2220560926058094786}
   PlayerCollider: {fileID: 161697182502540772}
   Controller: {fileID: 2551772813433681465}
   PlayerModel: {fileID: 1812075125773417835}
   PlayerCamera: {fileID: 7640047298126306908}
+  CameraRot: {fileID: 4146444449585203954}
   _SyncedVehicleNetId: 0
   _SyncedSeatIndex: -1
   targetObjectName: 
