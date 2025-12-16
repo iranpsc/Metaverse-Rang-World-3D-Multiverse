@@ -589,7 +589,6 @@ GameObject:
   - component: {fileID: 833724166}
   - component: {fileID: 833724165}
   - component: {fileID: 833724164}
-  - component: {fileID: 833724170}
   m_Layer: 0
   m_Name: '[Mirror] Network Manager'
   m_TagString: Untagged
@@ -710,8 +709,12 @@ MonoBehaviour:
   autoCreatePlayer: 1
   playerSpawnMethod: 1
   spawnPrefabs:
-  - {fileID: 3888161585449881471, guid: 8513d476d77ff044d8152a40830dba49, type: 3}
-  - {fileID: 3233249436331013177, guid: 738cb44073acef0488df6db84b5c962d, type: 3}
+  - {fileID: 770219137593874474, guid: d9b859d5b4119c04c96fc703eed51a27, type: 3}
+  - {fileID: 7228441347252537548, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+  - {fileID: 7151739788916111669, guid: 7bd99cc85300e8f46a09efb194027d15, type: 3}
+  - {fileID: 3879819736551973848, guid: b55e13f2ec0a16c49b2a5c8a8ede7fd8, type: 3}
+  - {fileID: 5772957351144640659, guid: 6c264005b5ea31a4697439367f7c75cb, type: 3}
+  - {fileID: 1286582439580828887, guid: 6b9909658950ce64d90fdaf138cc248f, type: 3}
   exceptionsDisconnect: 1
   snapshotSettings:
     bufferTimeMultiplier: 2
@@ -746,20 +749,6 @@ Transform:
   - {fileID: 1695123984}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &833724170
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 833724163}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8f60becab051427fbdd3c8ac9ab4712b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Mirror.Components::Mirror.DistanceInterestManagement
-  visRange: 500
-  rebuildInterval: 0.5
 --- !u!1 &1195061328
 GameObject:
   m_ObjectHideFlags: 0

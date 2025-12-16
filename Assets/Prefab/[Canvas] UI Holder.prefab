@@ -6881,7 +6881,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uFEED\uFEB3\uFBFF\uFEE0\uFEEA \uFEE7\uFED8\uFEE0\uFBFF\uFEEA"
+  m_text: "\uFEEB\uFEE0\uFB91\uFEEE\uFB58\uFE98\uFEAE"
   m_isRightToLeft: 1
   m_fontAsset: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
   m_sharedMaterial: {fileID: -1086375310735475615, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
@@ -6954,7 +6954,7 @@ MonoBehaviour:
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
   farsi: 1
-  originalText: "\u0648\u0633\u06CC\u0644\u0647 \u0646\u0642\u0644\u06CC\u0647"
+  originalText: "\u0647\u0644\u06A9\u0648\u067E\u062A\u0631"
   fixTags: 1
   forceFix: 0
 --- !u!1 &1273260729653878627
@@ -7138,7 +7138,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1084904781961013379
 RectTransform:
   m_ObjectHideFlags: 0
@@ -17488,9 +17488,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uFEB3\uFE8E\uFEA7\uFE98\uFEE4\uFE8E\uFEE5 \uFBFE\uFB8F \uFEA9\uFEED \uFEB7\uFEE4\uFE8E\uFEAD\uFEE9
-    \u06F4 \uFEB3\uFE8E\uFEA7\uFE98\uFEE4\uFE8E\uFEE5 \uFBFE\uFB8F \uFEA9\uFEED 
-    \uFEB3\uFE8E\uFEA7\uFE98\uFEE4\uFE8E \uFEB3\uFEEA \uFEEB\uFED4\uFE96 \uFEB7\uFEB6"
+  m_text: "\uFE8D\uFE97\uFEEE\uFE91\uFEEE\uFEB1"
   m_isRightToLeft: 1
   m_fontAsset: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
   m_sharedMaterial: {fileID: -1086375310735475615, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
@@ -17563,10 +17561,7 @@ MonoBehaviour:
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
   farsi: 1
-  originalText: "\u0633\u0627\u062E\u062A\u0645\u0627\u0646 \u06CC\u06A9 \u062F\u0648
-    \u0634\u0645\u0627\u0631\u0647 4 \u0633\u0627\u062E\u062A\u0645\u0627\u0646 \u06CC\u06A9
-    \u062F\u0648  \u0633\u0627\u062E\u062A\u0645\u0627 \u0633\u0647 \u0647\u0641\u062A
-    \u0634\u0634"
+  originalText: "\u0627\u062A\u0648\u0628\u0648\u0633"
   fixTags: 1
   forceFix: 0
 --- !u!1 &3197377122375659254
@@ -21777,9 +21772,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uFEB3\uFE8E\uFEA7\uFE98\uFEE4\uFE8E\uFEE5 \uFBFE\uFB8F \uFEA9\uFEED \uFEB7\uFEE4\uFE8E\uFEAD\uFEE9
-    \u06F4 \uFEB3\uFE8E\uFEA7\uFE98\uFEE4\uFE8E\uFEE5 \uFBFE\uFB8F \uFEA9\uFEED 
-    \uFEB3\uFE8E\uFEA7\uFE98\uFEE4\uFE8E \uFEB3\uFEEA \uFEEB\uFED4\uFE96 \uFEB7\uFEB6"
+  m_text: "\uFEE3\uFE8E\uFEB7\uFBFF\uFEE6"
   m_isRightToLeft: 1
   m_fontAsset: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
   m_sharedMaterial: {fileID: -1086375310735475615, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
@@ -21852,10 +21845,7 @@ MonoBehaviour:
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
   farsi: 1
-  originalText: "\u0633\u0627\u062E\u062A\u0645\u0627\u0646 \u06CC\u06A9 \u062F\u0648
-    \u0634\u0645\u0627\u0631\u0647 4 \u0633\u0627\u062E\u062A\u0645\u0627\u0646 \u06CC\u06A9
-    \u062F\u0648  \u0633\u0627\u062E\u062A\u0645\u0627 \u0633\u0647 \u0647\u0641\u062A
-    \u0634\u0634"
+  originalText: "\u0645\u0627\u0634\u06CC\u0646"
   fixTags: 1
   forceFix: 0
 --- !u!1 &3837751702593537545
@@ -25246,7 +25236,7 @@ RectTransform:
   m_AnchorMin: {x: 1, y: 0}
   m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 467.92, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 1, y: 0.5}
 --- !u!222 &4226276363537439536
 CanvasRenderer:
@@ -26986,7 +26976,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uFEED\uFEB3\uFBFF\uFEE0\uFEEA \uFEE7\uFED8\uFEE0\uFBFF\uFEEA"
+  m_text: "\uFED7\uFE8E\uFBFE\uFED6"
   m_isRightToLeft: 1
   m_fontAsset: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
   m_sharedMaterial: {fileID: -1086375310735475615, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
@@ -27059,7 +27049,7 @@ MonoBehaviour:
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
   farsi: 1
-  originalText: "\u0648\u0633\u06CC\u0644\u0647 \u0646\u0642\u0644\u06CC\u0647"
+  originalText: "\u0642\u0627\u06CC\u0642"
   fixTags: 1
   forceFix: 0
 --- !u!1 &5139715499025415343
@@ -27215,6 +27205,7 @@ GameObject:
   - component: {fileID: 3807579841480027594}
   - component: {fileID: 8093111002428022768}
   - component: {fileID: 6210617288426653749}
+  - component: {fileID: 4421411341234993803}
   m_Layer: 6
   m_Name: '[Button] Sit'
   m_TagString: Untagged
@@ -27325,6 +27316,19 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &4421411341234993803
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5153185311862183631}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d54531977ecb194c95e2d3aa7a5d72a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.InputSystem::UnityEngine.InputSystem.OnScreen.OnScreenButton
+  m_ControlPath: <Keyboard>/f
 --- !u!1 &5162302683473190042
 GameObject:
   m_ObjectHideFlags: 0
@@ -31574,7 +31578,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1aa08ab6e0800fa44ae55d278d1423e3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.ScrollRect
-  m_Content: {fileID: 0}
+  m_Content: {fileID: 914713303802348488}
   m_Horizontal: 0
   m_Vertical: 1
   m_MovementType: 1
@@ -34743,7 +34747,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uFEED\uFEB3\uFBFF\uFEE0\uFEEA \uFEE7\uFED8\uFEE0\uFBFF\uFEEA"
+  m_text: "\uFE9F\uFE96 \uFB58\uFB8F"
   m_isRightToLeft: 1
   m_fontAsset: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
   m_sharedMaterial: {fileID: -1086375310735475615, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
@@ -34816,7 +34820,7 @@ MonoBehaviour:
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
   farsi: 1
-  originalText: "\u0648\u0633\u06CC\u0644\u0647 \u0646\u0642\u0644\u06CC\u0647"
+  originalText: "\u062C\u062A \u067E\u06A9"
   fixTags: 1
   forceFix: 0
 --- !u!1 &6735143946064910737
@@ -42395,7 +42399,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\uFEED\uFEB3\uFBFF\uFEE0\uFEEA \uFEE7\uFED8\uFEE0\uFBFF\uFEEA"
+  m_text: "\uFEE3\uFEEE\uFE97\uFEEE\uFEAD"
   m_isRightToLeft: 1
   m_fontAsset: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
   m_sharedMaterial: {fileID: -1086375310735475615, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
@@ -42468,7 +42472,7 @@ MonoBehaviour:
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
   farsi: 1
-  originalText: "\u0648\u0633\u06CC\u0644\u0647 \u0646\u0642\u0644\u06CC\u0647"
+  originalText: "\u0645\u0648\u062A\u0648\u0631"
   fixTags: 1
   forceFix: 0
 --- !u!1 &8011692601902706108
@@ -43081,7 +43085,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: -30}
+  m_AnchoredPosition: {x: 0, y: 0.0000019073486}
   m_SizeDelta: {x: -60, y: 59.01}
   m_Pivot: {x: 0.5, y: 1}
 --- !u!222 &5769078448064417690
