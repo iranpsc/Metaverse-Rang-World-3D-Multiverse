@@ -2,31 +2,32 @@
 using UnityEngine;
 using UnityEngine.Audio;
 
-namespace Meta
+namespace Meta.Commands
 {
-    [CreateAssetMenu(fileName = "Toggle Mute", menuName = "Meta/Console/Toggle Game Mute")]
-    public class MuteCommand : ConsoleCommand
+    public class MuteCommand : BaseCommand
     {
-        [SerializeField] private AudioMixer targetMixer = null;
+        [SerializeField] private AudioMixer targetMixer = Resources.Load<AudioMixer>("MainMixer");
 
-        // This MUST match the exposed parameter name in your Audio Mixer exactly.
         [SerializeField] private string MasterVolumeParameter = "MasterVolume";
 
         private bool isMuted = false;
         private float lastVolume = 0f;
         private const float MuteVolume = -80f;
 
-        public override string Execute(string[] _Args)
+        public override string Name => "mute";
+
+        public override string Help => "Toggle Mute The Game Audio";
+
+        public override string Execute(CommandContext _Context)
         {
             if (targetMixer == null)
             {
                 return "<color=#FF0000>Error:</color> Audio Mixer reference is missing on the MuteCommand asset.";
             }
 
-            // --- Argument check to force state ---
-            if (_Args.Length > 0)
+            if (_Context.Args.Length > 0)
             {
-                string arg = _Args[0].ToLowerInvariant();
+                string arg = _Context.Args[0].ToLowerInvariant();
                 if (arg == "on" || arg == "true")
                 {
                     isMuted = false; // Intend to mute (set opposite for toggle below)

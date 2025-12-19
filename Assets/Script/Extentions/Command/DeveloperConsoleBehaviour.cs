@@ -1,3 +1,4 @@
+using Mirror;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -7,7 +8,7 @@ namespace Meta
 {
     [AddComponentMenu("Meta/DeveloperConsoleBehaviour")]
     [HelpURL("https://github.com/DreamFaver")]
-    public class DeveloperConsoleBehaviour : MonoBehaviour
+    public class DeveloperConsoleBehaviour : NetworkBehaviour
     {
         [SerializeField] private string Prefix = string.Empty;
         [SerializeField] private ConsoleCommand[] Commands = new ConsoleCommand[0];
@@ -42,10 +43,10 @@ namespace Meta
             instance = this;
             DontDestroyOnLoad(gameObject);
         }
-
+        
         public void Toggle(InputAction.CallbackContext _Ctx)
         {
-            if (!_Ctx.action.triggered) return;
+            if (!isLocalPlayer || !_Ctx.action.triggered) return;
 
             if (ConsolePanel.activeSelf)
             {
@@ -59,11 +60,28 @@ namespace Meta
         }
         public void ExecuteCommand(string _InputValue)
         {
-            string _Output = DeveloperConsole.ExecuteCommand(_InputValue);
+            if (string.IsNullOrEmpty(_InputValue)) return;
 
-            if (!string.IsNullOrEmpty(_Output))
+            CmdProccessCommandOnServer(_InputValue);
+
+            InputField.text = string.Empty;
+            InputField.ActivateInputField();
+        }
+
+        [Command]
+        private void CmdProccessCommandOnServer(string _InputValue)
+        {
+            string _Output = DeveloperConsole.ExecuteCommand(_InputValue);
+            
+            TargetReceiveLog(connectionToClient, _Output);
+        }
+
+        [TargetRpc]
+        private void TargetReceiveLog(NetworkConnection _Target, string _Message)
+        {
+            if (!string.IsNullOrEmpty(_Message))
             {
-                string _LogEntry = $"{_Output}\n";
+                string _LogEntry = $"{_Message}\n";
                 LogPanel.text += _LogEntry;
 
                 if (LogScrollRect != null)
@@ -71,8 +89,6 @@ namespace Meta
                     LogScrollRect.value = -.5f;
                 }
             }
-            InputField.text = string.Empty;
-            InputField.ActivateInputField();
         }
     }
 }

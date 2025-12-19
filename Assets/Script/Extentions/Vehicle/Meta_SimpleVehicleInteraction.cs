@@ -1,6 +1,7 @@
 ﻿using Meta.Vehicle;
 using Mirror;
 using Mirror.Examples.Benchmark;
+using Mirror.Examples.Common;
 using Unity.Cinemachine;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -50,6 +51,8 @@ namespace Meta
 
         public override void OnStartLocalPlayer()  
         {
+            if (PlayerCamera == null) PlayerCamera = Camera.main;
+
             Interact.action.performed += OnInteract;
             DestroyVehicle.action.performed += OnDestroyVehicle;
             Interact.action.Enable();
@@ -69,6 +72,10 @@ namespace Meta
             }
         }
         private void OnDestroyVehicle(InputAction.CallbackContext ctx)
+        {
+            RequestDestroyVehicle();
+        }
+        public void RequestDestroyVehicle()
         {
             if (!isLocalPlayer) return;
 
@@ -90,7 +97,6 @@ namespace Meta
                 CmdDestroyVehicle(_Vehicle.netIdentity);
             }
         }
-
 
         // 🛑 New Server-Side Command (This runs the check and destruction)
         [Command(requiresAuthority = false)]

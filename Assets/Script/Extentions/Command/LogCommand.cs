@@ -1,15 +1,18 @@
 using UnityEngine;
 
-namespace Meta
+namespace Meta.Commands
 {
-    [CreateAssetMenu(fileName = "Log Message", menuName = "Meta/Console/Log Message")]
-    public class LogCommand : ConsoleCommand
+    public class LogCommand : BaseCommand
     {
-        public override string Execute(string[] _Args)
-        {
-            string _LogText = string.Join(" ", _Args);
+        public override string Name => "log";
 
-            return $"[log] {_LogText}"; // unknow must change to user name
+        public override string Help => "log a message localy";
+
+        public override string Execute(CommandContext _Context)
+        {
+            string _LogText = string.Join(" ", _Context.Args);
+
+            return $"[log] {_LogText}";
         }
     }
 }

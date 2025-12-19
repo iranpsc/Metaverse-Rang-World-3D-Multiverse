@@ -1,32 +1,18 @@
-// UnstuckCommand.cs (FIXED)
 using UnityEngine;
 using Mirror;
 using System.Linq;
 using System.Collections.Generic;
 
-namespace Meta
+namespace Meta.Commands
 {
-    [CreateAssetMenu(fileName = "Unstuck Player", menuName = "Meta/Console/Unstuck Player")]
-    public class UnstuckCommand : ConsoleCommand
+    public class UnstuckCommand : BaseCommand
     {
-        public override string Execute(string[] _Args)
+        public override string Name => "unstuck";
+
+        public override string Help => "If You Stuck Use This Command";
+
+        public override string Execute(CommandContext _Context)
         {
-            if (!NetworkServer.active)
-            {
-                return "<color=#FF0000>Error:</color> Unstuck command must be executed on the server. Please ensure you are connected as Host or Client.";
-            }
-
-            // FIX 1: Accesses the required static helper method from ConsoleClientBridge
-            NetworkIdentity senderIdentity = ConsoleClientBridge.GetCurrentCommandSenderIdentity();
-            string _IdentityName = senderIdentity != null ? senderIdentity.gameObject.name : "NULL";
-            Debug.Log($"[COMMAND DEBUG] Read senderIdentity from static context: {_IdentityName}");
-
-            if (senderIdentity == null)
-            {
-                return "<color=#FF0000>Error:</color> Could not identify the player who issued the command on the server. Network identity missing.";
-            }
-
-            // FIX 2: Access startPositions statically from the NetworkManager class
             List<Transform> spawnPoints = NetworkManager.startPositions;
 
             if (spawnPoints == null || spawnPoints.Count == 0)
@@ -34,7 +20,6 @@ namespace Meta
                 return "<color=#FF0000>Error:</color> No Network Start Positions found in the scene to teleport to.";
             }
 
-            // Choose the first spawn point
             Transform spawnPoint = spawnPoints.FirstOrDefault();
 
             if (spawnPoint == null)
@@ -42,13 +27,11 @@ namespace Meta
                 return "<color=#FF0000>Error:</color> Could not find a valid spawn point transform.";
             }
 
-            // Teleport the player object
-            GameObject playerObject = senderIdentity.gameObject;
-            Vector3 targetPosition = spawnPoint.position + new Vector3(0, 1f, 0);
-            playerObject.transform.position = targetPosition;
+            Vector3 targetPosition = spawnPoint.position + new Vector3(0f, 0f, 0f);
+            _Context.SenderObject.transform.position = targetPosition;
 
             // Optional: Reset player physics
-            Rigidbody rb = playerObject.GetComponent<Rigidbody>();
+            Rigidbody rb = _Context.SenderObject.GetComponent<Rigidbody>();
             if (rb != null)
             {
                 rb.linearVelocity = Vector3.zero;

@@ -1964,7 +1964,7 @@ MeshRenderer:
   m_Materials:
   - {fileID: 7879783375299196747, guid: e35e5ab5f072a8641955927c8b3e6880, type: 3}
   - {fileID: -389402008792246631, guid: e35e5ab5f072a8641955927c8b3e6880, type: 3}
-  - {fileID: -7255647052170860681, guid: e35e5ab5f072a8641955927c8b3e6880, type: 3}
+  - {fileID: -5910522632708050558, guid: e35e5ab5f072a8641955927c8b3e6880, type: 3}
   - {fileID: -896346071383750651, guid: e35e5ab5f072a8641955927c8b3e6880, type: 3}
   - {fileID: 6688127345893676205, guid: e35e5ab5f072a8641955927c8b3e6880, type: 3}
   - {fileID: -6385249766067767514, guid: e35e5ab5f072a8641955927c8b3e6880, type: 3}
@@ -2629,7 +2629,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7228441347252537548}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -4.72, y: 0, z: 0.06}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
