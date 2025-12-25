@@ -8,7 +8,7 @@ namespace Meta.Commands
     {
         public override string Name => "clear";
         public override string Help => "Clear Text Box";
-
+        public override bool RequiresAuthority => false;
         public override string Execute(CommandContext _Context)
         {
             ConsoleUI.Instance.ClearOutput();

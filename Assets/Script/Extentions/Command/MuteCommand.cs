@@ -17,6 +17,7 @@ namespace Meta.Commands
         public override string Name => "mute";
 
         public override string Help => "Toggle Mute The Game Audio";
+        public override bool RequiresAuthority => false;
 
         public override string Execute(CommandContext _Context)
         {

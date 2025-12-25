@@ -77,7 +77,7 @@ namespace Meta.Vehicle
         }
         protected virtual void Reset()
         {
-            Rb.isKinematic = true;
+            Rb.isKinematic = false;
             //this.enabled = false;
         }
         public override void OnStartAuthority()
@@ -100,7 +100,7 @@ namespace Meta.Vehicle
         {
             base.OnStopAuthority();
 
-            Rb.isKinematic = true;
+            Rb.isKinematic = false;
             this.enabled = false;
 
             if (keys.MoveAndSteer != null) keys.MoveAndSteer.action.Disable();

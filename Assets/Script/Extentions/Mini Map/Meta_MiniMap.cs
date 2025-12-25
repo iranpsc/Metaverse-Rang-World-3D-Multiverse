@@ -1,19 +1,18 @@
-using Mirror;
+﻿using Mirror;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace Meta
 {
     [AddComponentMenu("Meta/Mini Map")]
-    [HelpURL("https://google.com")]
     public class Meta_MiniMap : NetworkBehaviour
     {
         [Header("References")]
         public Transform Target;
         public GameObject MiniMap;
+        public Camera MiniMapCamera; // رفرنس مستقیم به دوربین مینی‌مپ
 
         [Header("Player Direction UI")]
-        [Tooltip("The UI Image (arrow or triangle) that shows player direction.")]
         public Image PlayerDirectionImage;
 
         [Header("Settings")]
@@ -24,16 +23,28 @@ namespace Meta
 
         [Header("Zoom Settings")]
         public float ZoomSpeed = 50f;
-        public float MinZoom = 20f;
-        public float MaxZoom = 200f;
-        private float TargetZoomY;
+        public float MinZoom = 5f;   // برای Ortho معمولاً اعداد کوچکترند
+        public float MaxZoom = 100f;
+        private float TargetZoomValue; // مقدار هدف (یا Y یا Size)
 
-        // Internal
         private Transform CameraTransform;
 
         private void Start()
         {
-            TargetZoomY = Offset.y;
+            if (MiniMapCamera == null) MiniMapCamera = GetComponentInChildren<Camera>();
+
+            // مقدار اولیه بر اساس نوع دوربین
+            if (MiniMapCamera != null && MiniMapCamera.orthographic)
+            { 
+                TargetZoomValue = MiniMapCamera.orthographicSize;
+                MinZoom = MinZoom / 4;
+                MaxZoom = MaxZoom / 2;
+            }
+            else
+            {
+                TargetZoomValue = Offset.y;
+            }
+
             TryAssignTarget();
             if (Target != null)
                 transform.SetParent(Target.transform);
@@ -46,19 +57,8 @@ namespace Meta
             if (NetworkClient.localPlayer != null)
             {
                 Target = NetworkClient.localPlayer.transform;
-
-                // Find the active camera inside the player's hierarchy
                 Camera _PlayerCamera = Target.GetComponentInChildren<Camera>(true);
-                if (_PlayerCamera != null)
-                {
-                    CameraTransform = _PlayerCamera.transform;
-                    Debug.Log("[Meta] MiniMap using player camera: " + CameraTransform.name);
-                }
-                else
-                {
-                    Debug.LogWarning("[Meta] No camera found under player! MiniMap will use player root instead.");
-                    CameraTransform = Target;
-                }
+                CameraTransform = (_PlayerCamera != null) ? _PlayerCamera.transform : Target;
             }
             else
             {
@@ -66,73 +66,75 @@ namespace Meta
             }
         }
 
-        public void ToggleMiniMap(bool _Enable)
-        {
-            if (Target == null)
-                TryAssignTarget();
-
-            IsEnabled = _Enable;
-            MiniMap.SetActive(IsEnabled);
-        }
-
         private void ApplyToggle()
         {
-            if (Target == null) return;
+            if (Target == null || MiniMapCamera == null) return;
 
-            // Smooth follow
-            Vector3 _TargetPos = Target.position + Offset;
+            // 1. Follow Position
+            Vector3 _TargetPos = Target.position + new Vector3(Offset.x, MiniMapCamera.orthographic ? Offset.y : Offset.y, Offset.z);
             transform.position = Vector3.Lerp(transform.position, _TargetPos, Time.deltaTime * FollowSpeed);
 
-            // Smooth zoom transition
-            Offset.y = Mathf.Lerp(Offset.y, TargetZoomY, Time.deltaTime * 5f);
+            // 2. Dual-Mode Zoom Transition
+            if (MiniMapCamera.orthographic)
+            {
+                // زوم برای دوربین ارتودوگرافیک
+                MiniMapCamera.orthographicSize = Mathf.Lerp(MiniMapCamera.orthographicSize, TargetZoomValue, Time.deltaTime * 5f);
+            }
+            else
+            {
+                // زوم برای دوربین پرسپکتیو (تغییر ارتفاع)
+                Offset.y = Mathf.Lerp(Offset.y, TargetZoomValue, Time.deltaTime * 5f);
+            }
 
-            // Rotation handling
+            // 3. Rotation
             if (RotateWithPlayer && CameraTransform != null)
                 transform.rotation = Quaternion.Euler(0f, CameraTransform.eulerAngles.y, 0f);
             else
                 transform.rotation = Quaternion.Euler(0f, 0f, 0f);
 
-            // Update UI indicator
             UpdateDirectionImage();
         }
 
         private void LateUpdate()
         {
-            if (IsEnabled)
-                ApplyToggle();
+            if (IsEnabled) ApplyToggle();
         }
 
-        // ======== ZOOM CONTROL ========
+        // ======== ZOOM CONTROLS (Updated) ========
         public void ZoomIn()
         {
-            TargetZoomY = Mathf.Max(MinZoom, TargetZoomY - ZoomSpeed * Time.deltaTime);
+            TargetZoomValue = Mathf.Max(MinZoom, TargetZoomValue - ZoomSpeed * Time.deltaTime);
         }
 
         public void ZoomOut()
         {
-            TargetZoomY = Mathf.Min(MaxZoom, TargetZoomY + ZoomSpeed * Time.deltaTime);
+            TargetZoomValue = Mathf.Min(MaxZoom, TargetZoomValue + ZoomSpeed * Time.deltaTime);
         }
 
         public void ZoomInButton()
         {
-            TargetZoomY = Mathf.Max(MinZoom, TargetZoomY - 10f);
+            float step = MiniMapCamera.orthographic ? 2f : 10f;
+            TargetZoomValue = Mathf.Max(MinZoom, TargetZoomValue - step);
         }
 
         public void ZoomOutButton()
         {
-            TargetZoomY = Mathf.Min(MaxZoom, TargetZoomY + 10f);
+            float step = MiniMapCamera.orthographic ? 2f : 10f;
+            TargetZoomValue = Mathf.Min(MaxZoom, TargetZoomValue + step);
         }
 
-        // ======== PLAYER DIRECTION INDICATOR ========
         private void UpdateDirectionImage()
         {
-            if (PlayerDirectionImage == null || CameraTransform == null) return;
-            if (RotateWithPlayer) return;
-            // Use camera Y rotation to match where the player is looking
+            if (PlayerDirectionImage == null || CameraTransform == null || RotateWithPlayer) return;
             float _YRotation = CameraTransform.eulerAngles.y;
-
-            // Invert Z rotation so arrow points correctly on minimap
             PlayerDirectionImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -_YRotation);
+        }
+
+        public void ToggleMiniMap(bool _Enable)
+        {
+            if (Target == null) TryAssignTarget();
+            IsEnabled = _Enable;
+            MiniMap.SetActive(IsEnabled);
         }
     }
 }

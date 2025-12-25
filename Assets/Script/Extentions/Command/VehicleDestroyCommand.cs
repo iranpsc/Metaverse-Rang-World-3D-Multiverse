@@ -8,7 +8,7 @@ namespace Meta.Commands
     {
         public override string Name => "destroy";
         public override string Help => "Destroy Vehicle Player Looking At";
-
+        public override bool RequiresAuthority => false;
         public override string Execute(CommandContext _Context)
         {
             if (_Context.SenderIdentity == null) return "No Permission.";

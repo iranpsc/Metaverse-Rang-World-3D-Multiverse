@@ -648,55 +648,6 @@ Transform:
   - {fileID: 1051117649}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1530227026
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1530227027}
-  - component: {fileID: 1530227028}
-  m_Layer: 0
-  m_Name: Global Volume
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1530227027
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1530227026}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 2137573655}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1530227028
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1530227026}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
-  m_IsGlobal: 1
-  priority: 0
-  blendDistance: 0
-  weight: 1
-  sharedProfile: {fileID: 11400000, guid: 619e9523426918d429d75ac3ca82788f, type: 2}
 --- !u!1 &1720816443
 GameObject:
   m_ObjectHideFlags: 0
@@ -896,7 +847,8 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_text: "\uFE8D\uFE97\uFEBC\uFE8E\uFEDD \uFEB7\uFEE4\uFE8E \uFE91\uFEEA \uFEB3\uFEAE\uFEED\uFEAD
-    \uFEE3\uFE98\uFE8E\uFEED\uFEAD\uFEB1 <color=red>\uFED7\uFEC4\uFECA</color> \uFEB7\uFEAA!"
+    \uFEE3\uFE98\uFE8E\uFEED\uFEAD\uFEB1 <color=#939393>\uFED7\uFEC4\uFECA</color>
+    \uFEB7\uFEAA!"
   m_isRightToLeft: 1
   m_fontAsset: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
   m_sharedMaterial: {fileID: -1086375310735475615, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
@@ -970,7 +922,8 @@ MonoBehaviour:
   preserveNumbers: 0
   farsi: 1
   originalText: "\u0627\u062A\u0635\u0627\u0644 \u0634\u0645\u0627 \u0628\u0647 \u0633\u0631\u0648\u0631
-    \u0645\u062A\u0627\u0648\u0631\u0633 <color=red>\u0642\u0637\u0639</color> \u0634\u062F!"
+    \u0645\u062A\u0627\u0648\u0631\u0633 <color=#939393>\u0642\u0637\u0639</color>
+    \u0634\u062F!"
   fixTags: 1
   forceFix: 0
 --- !u!222 &1857101746
@@ -1089,7 +1042,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 0.3830188, b: 0.3830188, a: 1}
+  m_Color: {r: 0.5754717, g: 0.5754717, b: 0.5754717, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1204,8 +1157,7 @@ Transform:
   m_LocalPosition: {x: 0, y: 1, z: -10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 1530227027}
+  m_Children: []
   m_Father: {fileID: 485880256}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &2137573656

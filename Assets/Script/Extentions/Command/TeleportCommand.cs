@@ -1,3 +1,4 @@
+﻿using Mirror;
 using UnityEngine;
 
 namespace Meta.Commands
@@ -8,21 +9,53 @@ namespace Meta.Commands
     {
         public override string Name => "tp";
         public override string Help => "tp x y z";
+        public override bool RequiresAuthority => false;
 
         public override string Execute(CommandContext _Context)
         {
-            if (_Context.Args.Length < 3) return "Usage: tp x y z";
+            if (!NetworkServer.active)
+                return "Teleport must be executed on server.";
 
-            Vector3 Pos = new Vector3(float.Parse(_Context.Args[0]), float.Parse(_Context.Args[1]), float.Parse(_Context.Args[2]));
+            if (_Context.Args.Length < 3)
+                return "Usage: tp x y z";
 
-            _Context.SenderObject.transform.position = Pos;
-
-            Rigidbody rb = _Context.SenderObject.GetComponent<Rigidbody>();
-            if (rb != null)
+            if (!float.TryParse(_Context.Args[0], out float _X) ||
+                !float.TryParse(_Context.Args[1], out float _Y) ||
+                !float.TryParse(_Context.Args[2], out float _Z))
             {
-                rb.linearVelocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
+                return "Invalid coordinates.";
             }
+
+            GameObject _Player = _Context.SenderObject;
+            if (_Player == null)
+                return "Player object not found.";
+
+            Vector3 _TargetPos = new Vector3(_X, _Y, _Z);
+
+            // 🔒 TELEPORT SAFELY (SERVER AUTHORITATIVE)
+            Rigidbody _Rb = _Player.GetComponent<Rigidbody>();
+            if (_Rb != null)
+            {
+                _Rb.isKinematic = true;
+                _Rb.position = _TargetPos;
+                _Rb.linearVelocity = Vector3.zero;
+                _Rb.angularVelocity = Vector3.zero;
+                _Rb.isKinematic = false;
+            }
+            else
+            {
+                _Player.transform.position = _TargetPos;
+            }
+
+            // 🔁 Force NetworkTransform sync
+            NetworkTransformReliable _NetTransform = _Player.GetComponent<NetworkTransformReliable>();
+            if (_NetTransform != null)
+            {
+                _NetTransform.enabled = false;
+                _NetTransform.enabled = true;
+            }
+            Debug.Log($"[TP] Server teleporting {_Context.SenderConnection.connectionId}");
+
             return "<color=#00FF00>Teleported.</color>";
         }
     }

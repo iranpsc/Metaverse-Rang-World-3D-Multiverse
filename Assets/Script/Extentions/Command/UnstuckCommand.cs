@@ -8,9 +8,8 @@ namespace Meta.Commands
     public class UnstuckCommand : BaseCommand
     {
         public override string Name => "unstuck";
-
         public override string Help => "If You Stuck Use This Command";
-
+        public override bool RequiresAuthority => false;
         public override string Execute(CommandContext _Context)
         {
             List<Transform> spawnPoints = NetworkManager.startPositions;

@@ -1,8 +1,8 @@
-using UnityEngine;
 using Mirror;
 using System;
+using UnityEngine;
 using UnityEngine.InputSystem;
-using Unity.Cinemachine;
+using UnityEngine.XR.Interaction.Toolkit.Locomotion;
 
 /// TODO => add ledge assist
 
@@ -92,9 +92,9 @@ namespace Meta.Player.Core
         [Header("References")]
         public CharacterController PlayerController;
         public Transform Player;
-        public CinemachinePanTilt Camera;
-        public GameObject PlayerCamera;
+        public Transform PlayerCamera;
         public GameObject Machine;
+        public XRBodyYawRotation transformation { get; set; } = new XRBodyYawRotation();
 
         public Animator PlayerAnimation;
 
@@ -130,7 +130,6 @@ namespace Meta.Player.Core
             if (Application.isPlaying) return;
 
             Machine?.SetActive(false);
-            PlayerCamera?.SetActive(false);
             base.OnValidate();
             Reset();
         }
@@ -165,7 +164,8 @@ namespace Meta.Player.Core
         {
             PlayerController.enabled = true;
             Machine?.SetActive(true);
-            PlayerCamera?.SetActive(true);
+            if (PlayerCamera == null) PlayerCamera = Camera.main.transform;
+            PlayerCamera?.gameObject.SetActive(true);
             this.enabled = true;
         }
         public override void OnStopAuthority()
@@ -176,7 +176,6 @@ namespace Meta.Player.Core
 
             PlayerController.enabled = false;
             Machine?.SetActive(false);
-            PlayerCamera?.SetActive(false);
             this.enabled = false;
         }
 
@@ -185,7 +184,7 @@ namespace Meta.Player.Core
             if (!isLocalPlayer)
             {
                 Machine?.SetActive(false);
-                PlayerCamera?.SetActive(false);
+                PlayerCamera?.gameObject.SetActive(false);
             }
         }
         #endregion
@@ -282,7 +281,11 @@ namespace Meta.Player.Core
         }
         public virtual void RotateHandler()
         {
-            Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0); 
+            float _Yaw = PlayerCamera.transform.eulerAngles.y;
+            Player.rotation = Quaternion.Euler(0, _Yaw, 0);
+
+            transformation.angleDelta = _Yaw;
+            //Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0); 
         }
         public virtual void AnimationHandler(float _DeltaTime)
         {

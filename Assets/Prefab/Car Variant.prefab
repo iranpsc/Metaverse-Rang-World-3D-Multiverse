@@ -84,6 +84,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: Car Variant
       objectReference: {fileID: 0}
+    - target: {fileID: 7657055901540343602, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
+      propertyPath: _assetId
+      value: 2976604671
+      objectReference: {fileID: 0}
     - target: {fileID: 8049616047732045555, guid: 28cefcccd3954d74b9df0b65bf7a6956, type: 3}
       propertyPath: 'm_Materials.Array.data[12]'
       value: 

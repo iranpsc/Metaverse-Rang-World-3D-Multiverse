@@ -27,6 +27,7 @@ namespace Meta
                 {
                     if (_obj != null)
                         _obj.SetActive(false);
+                    Debug.Log("[Platform] Detected.");
                 }
             }
 
@@ -37,6 +38,7 @@ namespace Meta
                 {
                     if (_obj != null)
                         _obj.SetActive(false);
+                    Debug.Log("[Platform] VR Detected.");
                 }
             }
 

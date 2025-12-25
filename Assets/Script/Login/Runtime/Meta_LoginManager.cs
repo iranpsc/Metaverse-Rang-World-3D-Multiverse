@@ -1,7 +1,6 @@
-﻿using System.Collections;
-using TMPro;
+﻿using TMPro;
 using UnityEngine;
-using UnityEngine.Networking;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -69,10 +68,10 @@ namespace Meta
             bool _hasPassword = !string.IsNullOrEmpty(_password);
 
             // Enable if username exists
-            LoginButton.interactable = _hasUsername && !IsProcessing;
+            //LoginButton.interactable = _hasUsername && !IsProcessing;
 
             // Change button text
-            if (_hasUsername && !_hasPassword)
+            if (!_hasUsername && !_hasPassword)
                 _loginButtonText.text = "مهمان";
             else if (_hasUsername && _hasPassword)
                 _loginButtonText.text = "ورود";
@@ -118,7 +117,7 @@ namespace Meta
             if (string.IsNullOrEmpty(_username))
             {
                 ErrorText.text = "Please enter a username.";
-                return;
+                //return;
             }
 
             // Guest login (username only)
@@ -162,6 +161,13 @@ namespace Meta
         private void OnSupportPressed()
         {
             Application.OpenURL("https://accounts.irpsc.com/password/contactus.html");
+        }
+
+        public void OpenKeyboard(TMP_InputField _Input)
+        {
+            EventSystem.current.SetSelectedGameObject(_Input.gameObject);
+            _Input.Select();
+            _Input.ActivateInputField();
         }
     }
 }

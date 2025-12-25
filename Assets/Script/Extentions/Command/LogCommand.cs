@@ -5,8 +5,8 @@ namespace Meta.Commands
     public class LogCommand : BaseCommand
     {
         public override string Name => "log";
-
         public override string Help => "log a message localy";
+        public override bool RequiresAuthority => false;
 
         public override string Execute(CommandContext _Context)
         {

@@ -1,0 +1,12 @@
+TODO:
+
+1 -photo camera (zoom, effect preview, image resize) *** Done ***
+2 -player movement sound (walk, run, jump) *** Done ***
+3 -player spawn randomly in the area with no obstacles *** Done ***
+4 -command line need permission
+5 -input field for webgl in android need force keyboard popup *** Done ***
+6 -mini map camera need to be 2D + zoom in and zoom out must use orthograph size + lower resolution *** Done ***
+7 -remove duplicated day & night cycle *** Done ***
+8 -VR movement test
+9 -Android movement test
+10 -remove lens flare *** Done ***

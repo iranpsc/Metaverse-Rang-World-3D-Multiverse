@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -21,11 +20,10 @@ namespace Meta.Commands
 
             string[] _Split = _Raw.Split(' ');
             string _CmdName = _Split[0].ToLower();
-            _Context.Args = _Split.Skip(1).ToArray();
 
             if (!Commands.TryGetValue(_CmdName, out ICommand _Command)) { return $"Unknown Command: {_CmdName}"; }
 
-            if (_Command.RequiresAuthority && !_Context.SenderIdentity.isOwned) { return "No Permission"; }
+            //if (_Command.RequiresAuthority && _Context.SenderConnection.connectionId != 0) { return "No Permission"; }
 
             return _Command.Execute(_Context);
         }

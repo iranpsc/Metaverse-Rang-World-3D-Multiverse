@@ -2,6 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Mirror;
+using Meta;
 
 /*
 	Documentation: https://mirror-networking.gitbook.io/docs/components/network-manager
@@ -151,8 +152,17 @@ public class Meta_NetworkManager : NetworkManager
     {
         //base.OnServerAddPlayer(conn);
         // ========================== //
+        Transform startPos = null;
 
-        Transform startPos = GetStartPosition();
+        if (playerSpawnMethod == PlayerSpawnMethod.MetaSpawner)
+        {
+            startPos = Meta_SpawnManager.Instance.GetValidSpawnTransform();
+        }
+        else
+        {
+            startPos = GetStartPosition();
+        }
+
         GameObject player = startPos != null
             ? Instantiate(playerPrefab, startPos.position, startPos.rotation)
             : Instantiate(playerPrefab);

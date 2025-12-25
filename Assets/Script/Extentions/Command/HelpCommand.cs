@@ -1,5 +1,4 @@
 using System.Text;
-using UnityEditor.Hardware;
 using UnityEngine;
 
 namespace Meta.Commands
@@ -10,7 +9,7 @@ namespace Meta.Commands
     {
         public override string Name => "help";
         public override string Help => "List Of All Commands";
-
+        public override bool RequiresAuthority => false;
         public override string Execute(CommandContext _Context)
         {
             StringBuilder _Sb = new StringBuilder();

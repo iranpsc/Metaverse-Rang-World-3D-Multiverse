@@ -1,36 +1,47 @@
+using Meta.Commands;
 using Mirror;
-using UnityEngine;
 
-namespace Meta.Commands
+public class ServerCommandManager : NetworkBehaviour
 {
-    [AddComponentMenu("Meta/ServerCommandManager")]
-    [HelpURL("https://github.com/DreamFaver")]
-    public class ServerCommandManager : NetworkBehaviour
+    public static ServerCommandManager Instance;
+
+    private CommandProcessor Processor;
+
+    private void Awake()
     {
-        public static ServerCommandManager Instance;
-        private CommandProcessor Processor;
-
-        public override void OnStartServer()
+        if (Instance != null)
         {
-            Instance = this;
+            Destroy(gameObject);
+            return;
+        }
 
-            Processor = new CommandProcessor(new ICommand[]
-            {
-                new HelpCommand(),
-                new UnstuckCommand(),
-                new TeleportCommand(),
-                new ClearCommand(),
-                new MuteCommand(),
-                new FpsCommand(),
-                new LogCommand(),
-                new VehicleDestroyCommand(),
-            });
-        }
-        [Server]
-        public string Execute(string _Raw, NetworkConnectionToClient _Sender)
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+    }
+
+    public override void OnStartServer()
+    {
+        Processor = new CommandProcessor(new ICommand[]
         {
-            var _Ctx = new CommandContext(_Sender, null);
-            return Processor.Proccess(_Raw, _Ctx);
-        }
+            new HelpCommand(),
+            new UnstuckCommand(),
+            new TeleportCommand(),
+            new ClearCommand(),
+            new MuteCommand(),
+            new FpsCommand(),
+            new LogCommand(),
+            new VehicleDestroyCommand(),
+        });
+    }
+
+    [Server]
+    public string Execute(string _Raw, NetworkConnectionToClient _Sender)
+    {
+        var _Split = _Raw.Split(' ');
+        var _Args = _Split.Length > 1 ? _Split[1..] : System.Array.Empty<string>();
+
+        var _Ctx = new CommandContext(_Sender, _Args);
+
+        return Processor.Proccess(_Raw, _Ctx);
     }
 }

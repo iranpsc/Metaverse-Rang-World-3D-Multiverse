@@ -7,7 +7,7 @@ using UnityEngine.Serialization;
 
 namespace Mirror
 {
-    public enum PlayerSpawnMethod { Random, RoundRobin }
+    public enum PlayerSpawnMethod { Random, RoundRobin, MetaSpawner }
     public enum NetworkManagerMode { Offline, ServerOnly, ClientOnly, Host }
     public enum HeadlessStartOptions { DoNothing, AutoStartServer, AutoStartClient }
 

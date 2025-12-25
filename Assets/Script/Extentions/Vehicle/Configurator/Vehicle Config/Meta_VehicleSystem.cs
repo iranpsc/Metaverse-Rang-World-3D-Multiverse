@@ -98,7 +98,7 @@ namespace Meta
         }
         protected virtual void Reset()
         {
-            Rb.isKinematic = true;
+            Rb.isKinematic = false;
             //this.enabled = false;
         }
         public override void OnStartAuthority()
@@ -119,7 +119,7 @@ namespace Meta
         }
         public override void OnStopAuthority()
         {
-            GetComponent<Rigidbody>().isKinematic = true;
+            Rb.isKinematic = false;
             this.enabled = false;
 
             if (moveKeys.HeadLightToggle != null) moveKeys.HeadLightToggle.action.performed -= OnHeadLightToggle;

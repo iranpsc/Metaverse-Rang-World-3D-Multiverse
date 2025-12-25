@@ -1,4 +1,3 @@
-using Meta.Player.Core;
 using Mirror;
 using UnityEngine;
 
@@ -8,14 +7,19 @@ namespace Meta.Commands
     [HelpURL("https://github.com/DreamFaver")]
     public class PlayerCommandSender : NetworkBehaviour
     {
-        
         public override void OnStartLocalPlayer()
         {
             ConsoleUI.Instance.BindPlayer(this);
         }
-        [Command]
+        [Command(requiresAuthority = false)]
         public void CmdSendCommand(string _Raw)
         {
+            if (ServerCommandManager.Instance == null)
+            {
+                Debug.LogError("ServerCommandManager.Instance is NULL on server");
+                return;
+            }
+
             string _Result = ServerCommandManager.Instance.Execute(_Raw, connectionToClient);
             TargetReceive(connectionToClient, _Result);
         }
