@@ -1,7 +1,5 @@
 ﻿using Meta.Vehicle;
 using Mirror;
-using Mirror.Examples.Benchmark;
-using Mirror.Examples.Common;
 using Unity.Cinemachine;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -77,67 +75,42 @@ namespace Meta
         }
         public void RequestDestroyVehicle()
         {
-            if (!isLocalPlayer) return;
+            if (!isLocalPlayer || PlayerCamera == null) return;
 
-            // Raycast to find the vehicle, using the exact logic you requested.
-            if (PlayerCamera == null ||
-                !Physics.Raycast(PlayerCamera.transform.position, PlayerCamera.transform.forward,
-                                 out RaycastHit _Hit, RayDistance, VehicleLayer))
+            if (Physics.Raycast(PlayerCamera.transform.position, PlayerCamera.transform.forward, out RaycastHit hit, RayDistance, VehicleLayer))
             {
-                // No vehicle found in range
-                return;
-            }
+                Meta_VehicleBase vehicle = hit.collider.GetComponentInParent<Meta_VehicleBase>();
+                if (vehicle == null) return;
 
-            // Get the Vehicle Base component from the hit object's parent
-            Meta_VehicleBase _Vehicle = _Hit.collider.GetComponentInParent<Meta_VehicleBase>();
-
-            if (_Vehicle != null)
-            {
-                // Send command to the server to check and destroy
-                CmdDestroyVehicle(_Vehicle.netIdentity);
-            }
-        }
-
-        // 🛑 New Server-Side Command (This runs the check and destruction)
-        [Command(requiresAuthority = false)]
-        private void CmdDestroyVehicle(NetworkIdentity _VehicleNetId)
-        {
-            // 1. Ensure this runs only on the server
-            if (!NetworkServer.active) return;
-
-            Meta_VehicleBase _Vehicle = _VehicleNetId.GetComponent<Meta_VehicleBase>();
-            if (_Vehicle == null)
-            {
-                Debug.LogWarning("CmdDestroyVehicle: Vehicle object not found on server.");
-                return;
-            }
-
-            // 2. Check if the vehicle is empty by iterating over its SyncList of seat states
-            bool isEmpty = true;
-
-            // We assume the _SeatState SyncList is available on the Meta_VehicleBase
-            foreach (var seatState in _Vehicle._SeatState)
-            {
-                // If the occupant's NetId is not 0, the seat is occupied
-                if (seatState.OccupantNetId != 0)
-                {
-                    isEmpty = false;
-                    break;
-                }
-            }
-
-            if (isEmpty)
-            {
-                Debug.Log($"Server is destroying empty vehicle: {_Vehicle.name}");
-                // 3. Destroy the networked object for ALL clients
-                NetworkServer.UnSpawn(_Vehicle.gameObject);
+                // فقط NetIdentity به سرور بفرست
+                CmdDestroyVehicle(vehicle.netIdentity);
             }
             else
             {
-                // Optional: Send a TargetRpc back to the client to notify them the vehicle is occupied
-                Debug.Log($"Vehicle {_Vehicle.name} is occupied and cannot be destroyed.");
+                Debug.Log("No vehicle in sight to destroy");
             }
         }
+
+
+
+        // 🛑 New Server-Side Command (This runs the check and destruction)
+        [Command(requiresAuthority = false)]
+        private void CmdDestroyVehicle(NetworkIdentity vehicleIdentity)
+        {
+            if (vehicleIdentity == null) return;
+
+            Meta_VehicleBase vehicle = vehicleIdentity.GetComponent<Meta_VehicleBase>();
+            if (vehicle == null) return;
+
+            // بررسی خالی بودن وسیله
+            foreach (var seat in vehicle._SeatState)
+            {
+                if (seat.OccupantNetId != 0) return;
+            }
+
+            NetworkServer.Destroy(vehicle.gameObject);
+        }
+
 
         private void OnInteract(InputAction.CallbackContext ctx)
         {
@@ -333,7 +306,7 @@ namespace Meta
             _CurrentVehicle = _Vehicle;//*
 
             // Parent directly to the seat transform
-            PlayerModel.SetParent(_SeatTransform);//
+            //PlayerModel.SetParent(_SeatTransform);//
             PlayerModel.localPosition = SeatOffset;//
             PlayerModel.localRotation = Quaternion.identity;//
 
@@ -356,7 +329,7 @@ namespace Meta
             Vector3 _ExitPosition = _Vehicle.transform.position + _ExitOffset + Vector3.up;//
 
             // 2. Unparent from the vehicle
-            PlayerModel.SetParent(null);//
+            //PlayerModel.SetParent(null);//
             PlayerModel.position = _ExitPosition;//
 
             // 3. Enable local movement/physics
@@ -379,6 +352,7 @@ namespace Meta
 
         }
         // File: Meta_SimpleVehicleInteraction.cs (Updated OnParentChange)
+
 
         private void OnParentChange(NetworkIdentity oldRoot, NetworkIdentity newRoot)
         {
@@ -430,9 +404,19 @@ namespace Meta
                 transform.SetParent(null);
 
                 // Unparenting/Exit logic remains the same (using transform to move the whole player)
-                Vector3 _ExitOffset = PlayerModel.transform.right * ExitDistance;
-                Vector3 _ExitPosition = PlayerModel.transform.position + _ExitOffset + Vector3.up;
-                PlayerModel.position = _ExitPosition; // You might want to move the entire player root here: transform.position = _ExitPosition;
+
+                //Vector3 _ExitOffset = PlayerModel.transform.right * ExitDistance;
+                //Vector3 _ExitPosition = PlayerModel.transform.position + _ExitOffset + Vector3.up;
+                //PlayerModel.position = _ExitPosition; // You might want to move the entire player root here: transform.position = _ExitPosition;
+                if (_CurrentVehicle != null)
+                {
+                    Vector3 exitDir = _CurrentVehicle.transform.right; // یا forward
+                    Vector3 exitPos = _CurrentVehicle.transform.position
+                                      + exitDir.normalized * ExitDistance
+                                      + Vector3.up;
+
+                    transform.position = exitPos; // ⬅ کل Player، نه فقط Model
+                }
 
                 if (PlayerMove != null) PlayerMove.enabled = true;
                 if (Controller != null) Controller.enabled = true;

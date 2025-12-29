@@ -1,4 +1,4 @@
-using Mirror;
+﻿using Mirror;
 using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -231,6 +231,8 @@ namespace Meta.Player.Core
             PlayerData.Horizontal = PlayerData.MoveInput.x;
             PlayerData.Vertical = PlayerData.MoveInput.y;
         }
+
+
         public virtual void JumpHandler(float _DeltaTime)
         {
             bool _JumpPressed = PlayerInputAction.JumpAction.action.IsPressed();
@@ -293,7 +295,7 @@ namespace Meta.Player.Core
             bool IsJumping = PlayerInputAction.JumpAction.action.IsPressed();
 
             Vector2 _AnimInput = PlayerData.MoveInput * (IsRunning ? RunSpeed : MoveSpeed);
-            _AnimInput *= AnimationMultiplier; // boost to match blend tree 0�4 range
+            _AnimInput *= AnimationMultiplier; // boost to match blend tree 0–4 range
 
             bool _WalkJump = !PlayerData.IsGrounded && IsJumping && !IsRunning;
             bool _RunJump = !PlayerData.IsGrounded && IsJumping && IsRunning;
@@ -318,5 +320,6 @@ namespace Meta.Player.Core
 
             PlayerController.Move(PlayerData.Direction * _DeltaTime);
         }
+
     }
 }

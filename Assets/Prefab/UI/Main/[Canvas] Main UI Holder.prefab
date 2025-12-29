@@ -3384,8 +3384,8 @@ GameObject:
   - component: {fileID: 9191657872636356056}
   - component: {fileID: 5914182633009780176}
   - component: {fileID: 5584806682797291968}
-  - component: {fileID: 3112257373208794263}
   - component: {fileID: 2686356445635777967}
+  - component: {fileID: 3852702214673313487}
   m_Layer: 6
   m_Name: '[Canvas] Main UI Holder'
   m_TagString: Untagged
@@ -3499,22 +3499,6 @@ CanvasGroup:
   m_Interactable: 1
   m_BlocksRaycasts: 1
   m_IgnoreParentGroups: 0
---- !u!114 &3112257373208794263
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 626620129539455488}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 81b1b19bc961dad45b269a8edf2af70b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Meta.Commands.ConsoleUI
-  Input: {fileID: 4936911746808072827}
-  Output: {fileID: 6573650944891743448}
-  Scroll: {fileID: 302779549917793812}
-  ConsolePanel: {fileID: 4431061418807483085}
 --- !u!114 &2686356445635777967
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4086,7 +4070,7 @@ MonoBehaviour:
     m_ActionName: 'Spawn/SpawnCancel[/Keyboard/escape]'
   - m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 3112257373208794263}
+      - m_Target: {fileID: 0}
         m_TargetAssemblyTypeName: Meta.Commands.ConsoleUI, Assembly-CSharp
         m_MethodName: Toggle
         m_Mode: 0
@@ -4105,6 +4089,26 @@ MonoBehaviour:
   m_DefaultActionMap: Console
   m_SplitScreenIndex: -1
   m_Camera: {fileID: 0}
+--- !u!114 &3852702214673313487
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 626620129539455488}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8b130ea365db772449fc95ebf156221a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ConsoleManager
+  Panel: {fileID: 4431061418807483085}
+  InputField: {fileID: 4936911746808072827}
+  PreviewText: {fileID: 6573650944891743448}
+  ScrollRect: {fileID: 302779549917793812}
+  Commands:
+  - {fileID: 11400000, guid: 0b963568b50347e41836f77eaacf966f, type: 2}
+  - {fileID: 11400000, guid: 3c0b9e938b5373c4c88c80e8ed2aa786, type: 2}
+  ToggleInput: {fileID: 4119661827818021300, guid: 052faaac586de48259a63d0c4782560b, type: 3}
 --- !u!1 &633252597331019942
 GameObject:
   m_ObjectHideFlags: 0
@@ -39048,9 +39052,9 @@ MonoBehaviour:
   m_OnEndEdit:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 3112257373208794263}
-        m_TargetAssemblyTypeName: Meta.Commands.ConsoleUI, Assembly-CSharp
-        m_MethodName: Submit
+      - m_Target: {fileID: 3852702214673313487}
+        m_TargetAssemblyTypeName: ConsoleManager, Assembly-CSharp
+        m_MethodName: OnSubmit
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}

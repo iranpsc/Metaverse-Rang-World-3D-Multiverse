@@ -1,25 +1,24 @@
 using Mirror;
 using UnityEngine;
 
-namespace Meta.Commands
+public enum CommandResultType
 {
-    [AddComponentMenu("Meta/CommandContext")]
-    [HelpURL("https://github.com/DreamFaver")]
-    public class CommandContext
-    {
-        public NetworkConnectionToClient SenderConnection;
-        public NetworkIdentity SenderIdentity;
-        public GameObject SenderObject;
-        public bool IsServer;
-        public string[] Args;
+    Info,
+    Success,
+    Error
+}
+public class CommandContext
+{
+    public NetworkIdentity Sender;
+    public string[] Args;
 
-        public CommandContext(NetworkConnectionToClient _Conn, string[] _Args)
-        {
-            SenderConnection = _Conn;
-            SenderIdentity = _Conn.identity;
-            SenderObject = _Conn.identity.gameObject;
-            Args = _Args;
-            IsServer = true;
-        }
+    public string ResultMessage;
+    public CommandResultType ResultType;
+    public ConsoleManager Console;
+
+    public void SetResult(string _Msg, CommandResultType _Type)
+    {
+        ResultMessage = _Msg;
+        ResultType = _Type;
     }
 }

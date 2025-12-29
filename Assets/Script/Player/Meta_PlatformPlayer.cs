@@ -1,65 +1,80 @@
+using System.Collections;
 using UnityEngine;
-#if UNITY_XR_MANAGEMENT
 using UnityEngine.XR.Management;
-#endif
 
 namespace Meta
 {
     [AddComponentMenu("Meta/Meta PlatformPlayer")]
-    [HelpURL("https://google.com")]
     public class Meta_PlatformPlayer : MonoBehaviour
     {
         [Header("References")]
         public GameObject[] VRComponent;
         public GameObject[] PC_AndroidComponent;
 
-        private void Start()
+        private void Awake()
         {
-            bool _isXR = IsXRActive();
-            bool _isDesktop = Application.platform == RuntimePlatform.WindowsPlayer || Application.platform == RuntimePlatform.WindowsEditor;
-            bool _isAndroid = Application.platform == RuntimePlatform.Android;
-            bool _isWebGL = Application.platform == RuntimePlatform.WebGLPlayer;
+#if UNITY_WEBGL
+            DisableVR();
+            Debug.Log("[Platform] WebGL detected (XR disabled)");
+            return;
+#endif
 
-            // If running non-VR version (PC/Android/WebGL)
-            if (!_isXR && (_isDesktop || _isAndroid || _isWebGL))
+            if (ShouldUseXR())
             {
-                foreach (GameObject _obj in VRComponent)
-                {
-                    if (_obj != null)
-                        _obj.SetActive(false);
-                    Debug.Log("[Platform] Detected.");
-                }
+                DisablePC();
+                StartCoroutine(StartXR());
+            }
+            else
+            {
+                DisableVR();
             }
 
-            // If running in VR mode
-            if (_isXR)
-            {
-                foreach (GameObject _obj in PC_AndroidComponent)
-                {
-                    if (_obj != null)
-                        _obj.SetActive(false);
-                    Debug.Log("[Platform] VR Detected.");
-                }
-            }
-
-            Debug.Log($"[Meta_PlatformPlayer] Platform: {Application.platform}, XR Active: {_isXR}");
+            Debug.Log($"[Platform] {Application.platform}, XR Requested: {ShouldUseXR()}");
         }
 
-        private bool IsXRActive()
+        private bool ShouldUseXR()
         {
-#if UNITY_XR_MANAGEMENT
-            var _xrSettings = XRGeneralSettings.Instance;
-            if (_xrSettings != null && _xrSettings.Manager != null)
-            {
-                var _loader = _xrSettings.Manager.activeLoader;
-                return _loader != null;
-            }
-            return false;
-#elif ENABLE_VR
+#if UNITY_ANDROID
+            // Quest / XR-only Android devices
             return UnityEngine.XR.XRSettings.isDeviceActive;
+#elif UNITY_STANDALONE_WIN
+            // Allow VR on Windows (user may have headset)
+            return true;
 #else
             return false;
 #endif
+        }
+
+        private IEnumerator StartXR()
+        {
+            var _manager = XRGeneralSettings.Instance.Manager;
+
+            if (_manager.isInitializationComplete)
+                yield break;
+
+            yield return _manager.InitializeLoader();
+
+            if (_manager.activeLoader == null)
+            {
+                Debug.LogWarning("[XR] No runtime found, running non-VR");
+                DisableVR();
+                yield break;
+            }
+
+            _manager.StartSubsystems();
+            Debug.Log("[XR] XR started successfully");
+        }
+
+        private void DisableVR()
+        {
+            foreach (var _obj in VRComponent)
+                if (_obj) _obj.SetActive(false);
+        }
+
+        private void DisablePC()
+        {
+            foreach (var _obj in PC_AndroidComponent)
+                if (_obj) _obj.SetActive(false);
         }
     }
 }
