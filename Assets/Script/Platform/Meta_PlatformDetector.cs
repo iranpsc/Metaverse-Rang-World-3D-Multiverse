@@ -1,23 +1,23 @@
 using UnityEngine;
 using UnityEngine.XR;
 
+public enum PlatformType
+{
+    Windows,
+    Android,
+    IOS,
+    WebGL_Windows,
+    WebGL_Android,
+    VR,
+    Unknow
+}
+
 namespace Meta
 {
     [AddComponentMenu("Meta/Platform Detector")]
     [HelpURL("https://google.com")]
     public class Meta_PlatformDetector
     {
-        public enum PlatformType
-        {
-            Windows,
-            Android,
-            IOS,
-            WebGL_Windows,
-            WebGL_Android,
-            VR,
-            Unknow
-        }
-
         public static PlatformType GetPlatformType()
         {
             if (XRSettings.isDeviceActive) return PlatformType.VR;

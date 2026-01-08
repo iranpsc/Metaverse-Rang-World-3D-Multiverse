@@ -2,7 +2,17 @@ fileFormatVersion: 2
 guid: b98b59cc4fdeda64fb092f88a6c82e78
 ScriptedImporter:
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: CorrugatedSteel008A_2K_Color
+    second: {fileID: 2800000, guid: c297375feaf4107488b9825a02e50fb4, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: CorrugatedSteel008A_2K_Roughness
+    second: {fileID: 2800000, guid: cc3c874c9195e404baedd50b297d3044, type: 3}
   serializedVersion: 2
   userData: 
   assetBundleName: 
@@ -42,17 +52,17 @@ ScriptedImporter:
 '
   optimizeGameObjects: 0
   materials:
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
-  - {instanceID: 0}
+  - {fileID: -7964107986667598607, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: -3866847751855027541, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: 8017954320907059462, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: -5396234901987582864, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: 6993430650792907508, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: 4747196833660800999, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: 7555212452235271434, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: -1332324875808695782, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: 3876542345217667742, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: 7549148373029935524, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
+  - {fileID: -1255982633427224767, guid: b98b59cc4fdeda64fb092f88a6c82e78, type: 3}
   textures:
   - {fileID: 2800000, guid: 2dd4d99ff271dfa4c99d7da03cbb6439, type: 3}
   - {fileID: 2800000, guid: 63ab263e38d36fb438e51a291a983c35, type: 3}

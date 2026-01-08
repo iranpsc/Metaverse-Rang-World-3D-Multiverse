@@ -15,6 +15,9 @@ namespace Meta
     [HelpURL("https://google.com")]
     public class Meta_PhotoCamera : MonoBehaviour
     {
+        [Header("Platform")]
+        public PlatformType Platform;
+
         [Header("References")]
         private Texture2D ScreenCapture;
         [SerializeField] private Image PhotoDisplayArea;
@@ -22,10 +25,12 @@ namespace Meta
         [SerializeField] private Animator FadeAnimation;
         [SerializeField] private GameObject MainUI;
         [SerializeField] private CinemachineCamera VirtualCamera;
+        [SerializeField] private Camera PlayerCamera;
         [SerializeField] private Slider ZoomSlider;
         [SerializeField] private Volume CameraVolume;
 
         [Header("UI")]
+        [SerializeField] private RenderTexture VRCameraRT;
         [SerializeField] private TMP_Text PhotoPathText;
 
         [Header("Settings")]
@@ -88,11 +93,22 @@ namespace Meta
 
         private void InitializeCamera(NetworkIdentity localPlayer)
         {
-            VirtualCamera = localPlayer.GetComponentInChildren<CinemachineCamera>();
-            if (VirtualCamera == null)
-                Debug.LogError("No Virtual Camera found in Local Player!");
-            else
-                DefaultFOV = VirtualCamera.Lens.FieldOfView;
+            if (Platform != PlatformType.VR)
+            {
+                VirtualCamera = localPlayer.GetComponentInChildren<CinemachineCamera>();
+                if (VirtualCamera == null)
+                    Debug.LogError("No Virtual Camera found in Local Player!");
+                else
+                    DefaultFOV = VirtualCamera.Lens.FieldOfView;
+            }
+            if (Platform == PlatformType.VR && PlayerCamera == null)
+            {
+                PlayerCamera = localPlayer.GetComponentInChildren<Camera>();
+                if (PlayerCamera == null)
+                    Debug.LogError("No Virtual Camera found in Local Player!");
+                else
+                    DefaultFOV = PlayerCamera.fieldOfView;
+            }
 
             if (ZoomSlider != null)
             {
@@ -124,9 +140,18 @@ namespace Meta
 
         public void SetZoomFromSlider(float _Value)
         {
-            if (VirtualCamera != null)
-                VirtualCamera.Lens.FieldOfView =
-                    Mathf.Lerp(MaxZoom, MinZoom, _Value);
+            if (Platform != PlatformType.VR)
+            {
+                if (VirtualCamera != null)
+                    VirtualCamera.Lens.FieldOfView =
+                        Mathf.Lerp(MaxZoom, MinZoom, _Value);
+            }
+            if (Platform == PlatformType.VR)
+            {
+                if (PlayerCamera != null)
+                    PlayerCamera.fieldOfView =
+                        Mathf.Lerp(MaxZoom, MinZoom, _Value);
+            }
         }
 
         public void ActivatePhotoMod()
@@ -149,8 +174,16 @@ namespace Meta
             if (ZoomSlider != null)
                 ZoomSlider.gameObject.SetActive(false);
 
-            if (VirtualCamera != null)
-                VirtualCamera.Lens.FieldOfView = DefaultFOV;
+            if (Platform != PlatformType.VR)
+            {
+                if (VirtualCamera != null)
+                    VirtualCamera.Lens.FieldOfView = DefaultFOV;
+            }
+            if (Platform == PlatformType.VR)
+            {
+                if (PlayerCamera != null)
+                    PlayerCamera.fieldOfView = DefaultFOV;
+            }
 
             ResetCameraEffects();
         }
@@ -163,21 +196,60 @@ namespace Meta
 
             yield return new WaitForEndOfFrame();
 
-            int _ScreenWidth = Screen.width;
-            int _ScreenHeight = Screen.height;
-            int _SquarSize = Mathf.Min(_ScreenWidth, _ScreenHeight) - (CapturePadding * 2);
+            if (Platform == PlatformType.VR)
+            {
+                // --- منطق مخصوص VR (استفاده از RenderTexture) ---
+                if (VRCameraRT == null)
+                {
+                    Debug.LogError("VR RenderTexture is not assigned!");
+                    ViewingPhoto = false;
+                    MainUI.SetActive(true);
+                    yield break;
+                }
 
-            if (_SquarSize <= 0) yield break;
+                int _Width = VRCameraRT.width;
+                int _Height = VRCameraRT.height;
+                int _SquareSize = Mathf.Min(_Width, _Height) - (CapturePadding * 2);
 
-            int _StartX = (_ScreenWidth - _SquarSize) / 2;
-            int _StartY = (_ScreenHeight - _SquarSize) / 2;
+                if (_SquareSize <= 0) yield break;
 
-            Rect _RegionToRead = new Rect(_StartX, _StartY, _SquarSize, _SquarSize);
+                int _StartX = (_Width - _SquareSize) / 2;
+                int _StartY = (_Height - _SquareSize) / 2;
 
-            ScreenCapture = new Texture2D(_SquarSize, _SquarSize, TextureFormat.RGB24, false);
-            ScreenCapture.ReadPixels(_RegionToRead, 0, 0, false);
-            ScreenCapture.Apply();
+                // ایجاد بافت جدید برای ذخیره بخش برش خورده
+                ScreenCapture = new Texture2D(_SquareSize, _SquareSize, TextureFormat.RGB24, false);
 
+                // ذخیره RenderTexture فعلی و تنظیم RT دوربین به عنوان فعال
+                RenderTexture _CurrentRT = RenderTexture.active;
+                RenderTexture.active = VRCameraRT;
+
+                // خواندن پیکسل‌ها از محدوده مشخص شده در RenderTexture
+                ScreenCapture.ReadPixels(new Rect(_StartX, _StartY, _SquareSize, _SquareSize), 0, 0);
+                ScreenCapture.Apply();
+
+                // بازگرداندن وضعیت قبلی RT
+                RenderTexture.active = _CurrentRT;
+            }
+            else
+            {
+                // --- منطق قبلی برای PC/Screen ---
+                int _ScreenWidth = Screen.width;
+                int _ScreenHeight = Screen.height;
+                int _SquareSize = Mathf.Min(_ScreenWidth, _ScreenHeight) - (CapturePadding * 2);
+
+                if (_SquareSize <= 0) yield break;
+
+                int _StartX = (_ScreenWidth - _SquareSize) / 2;
+                int _StartY = (_ScreenHeight - _SquareSize) / 2;
+
+                Rect _RegionToRead = new Rect(_StartX, _StartY, _SquareSize, _SquareSize);
+
+                ScreenCapture = new Texture2D(_SquareSize, _SquareSize, TextureFormat.RGB24, false);
+                ScreenCapture.ReadPixels(_RegionToRead, 0, 0, false);
+                ScreenCapture.Apply();
+            }
+
+            // بقیه مراحل ذخیره‌سازی و نمایش (بدون تغییر)
             ApplyEffect(CurrentEffect);
             string _SavedPath = SavePhoto();
             ShowPhoto(_SavedPath);

@@ -7,13 +7,18 @@ namespace Meta
     [AddComponentMenu("Meta/Mini Map")]
     public class Meta_MiniMap : NetworkBehaviour
     {
+        [Header("Platform")]
+        public PlatformType Platform;
+
         [Header("References")]
         public Transform Target;
         public GameObject MiniMap;
+        public GameObject VRMiniMap;
         public Camera MiniMapCamera; // رفرنس مستقیم به دوربین مینی‌مپ
 
         [Header("Player Direction UI")]
         public Image PlayerDirectionImage;
+        public Image VRPlayerDirectionImage;
 
         [Header("Settings")]
         public Vector3 Offset = new Vector3(0, 100, 0);
@@ -127,14 +132,17 @@ namespace Meta
         {
             if (PlayerDirectionImage == null || CameraTransform == null || RotateWithPlayer) return;
             float _YRotation = CameraTransform.eulerAngles.y;
-            PlayerDirectionImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -_YRotation);
+            if(Platform == PlatformType.Windows) PlayerDirectionImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -_YRotation);
+            if (VRPlayerDirectionImage == null) return;
+            if (Platform == PlatformType.VR) VRPlayerDirectionImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -_YRotation);
         }
 
         public void ToggleMiniMap(bool _Enable)
         {
             if (Target == null) TryAssignTarget();
             IsEnabled = _Enable;
-            MiniMap.SetActive(IsEnabled);
+            if (Platform == PlatformType.Windows) MiniMap?.SetActive(IsEnabled);
+            if (Platform == PlatformType.VR) VRMiniMap?.SetActive(IsEnabled);
         }
     }
 }

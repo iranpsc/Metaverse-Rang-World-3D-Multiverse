@@ -5,8 +5,6 @@ using UnityEngine.InputSystem;
 using UnityEngine.XR.Interaction.Toolkit.Locomotion;
 
 /// TODO => add ledge assist
-
-
 namespace Meta.Player.Core
 {
     [AddComponentMenu("Meta/Meta PlayerCore")]
@@ -14,6 +12,7 @@ namespace Meta.Player.Core
     [DisallowMultipleComponent]
     public class Meta_PlayerCore : NetworkBehaviour
     {
+        
         public enum GroundState : byte { Grounded, Jumping, Falling }
 
         [Serializable]
@@ -88,6 +87,8 @@ namespace Meta.Player.Core
             }
             #endregion
         }
+        [Header("Platform Type")]
+        public PlatformType Platform;
 
         [Header("References")]
         public CharacterController PlayerController;
@@ -163,9 +164,17 @@ namespace Meta.Player.Core
         public override void OnStartAuthority()
         {
             PlayerController.enabled = true;
-            Machine?.SetActive(true);
+
             if (PlayerCamera == null) PlayerCamera = Camera.main.transform;
-            PlayerCamera?.gameObject.SetActive(true);
+            if (Platform != PlatformType.VR)
+            {
+                Machine?.SetActive(true);
+                PlayerCamera?.gameObject.SetActive(true);
+            }
+            if (Platform == PlatformType.VR)
+            {
+                Player = PlayerAnimation.transform;
+            }
             this.enabled = true;
         }
         public override void OnStopAuthority()
@@ -231,8 +240,6 @@ namespace Meta.Player.Core
             PlayerData.Horizontal = PlayerData.MoveInput.x;
             PlayerData.Vertical = PlayerData.MoveInput.y;
         }
-
-
         public virtual void JumpHandler(float _DeltaTime)
         {
             bool _JumpPressed = PlayerInputAction.JumpAction.action.IsPressed();
@@ -285,9 +292,9 @@ namespace Meta.Player.Core
         {
             float _Yaw = PlayerCamera.transform.eulerAngles.y;
             Player.rotation = Quaternion.Euler(0, _Yaw, 0);
-
-            transformation.angleDelta = _Yaw;
-            //Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0); 
+            
+            //transformation.angleDelta = _Yaw;
+            //Player.rotation = Quaternion.Euler(0, Camera.PanAxis.Value, 0);
         }
         public virtual void AnimationHandler(float _DeltaTime)
         {
@@ -310,13 +317,39 @@ namespace Meta.Player.Core
         public virtual void ApplyMove(float _DeltaTime)
         {
             if (!isOwned) return;
+
             PlayerData.Direction = new Vector3(PlayerData.Horizontal, 0f, PlayerData.Vertical);
             PlayerData.Direction = Vector3.ClampMagnitude(PlayerData.Direction, 1f);
-            PlayerData.Direction = transform.TransformDirection(PlayerData.Direction);
-            PlayerData.Direction *= PlayerInputAction.RunAction.action.IsPressed() ? RunSpeed : MoveSpeed;
+            //PlayerData.Direction = transform.TransformDirection(PlayerData.Direction);
+            //PlayerData.Direction *= PlayerInputAction.RunAction.action.IsPressed() ? RunSpeed : MoveSpeed;
 
-            PlayerData.Direction = new Vector3(PlayerData.Direction.x, PlayerData.JumpForce, PlayerData.Direction.z);
+            //PlayerData.Direction = new Vector3(PlayerData.Direction.x, PlayerData.JumpForce, PlayerData.Direction.z);
 
+            //PlayerController.Move(PlayerData.Direction * _DeltaTime);
+
+            Vector3 _FinalMoveDirection;
+
+            if (Platform == PlatformType.VR && PlayerCamera != null)
+            {
+                Vector3 _CamForward = PlayerCamera.transform.forward;
+                _CamForward.y = 0;
+                _CamForward.Normalize();
+
+                Vector3 _CamRight = PlayerCamera.transform.right;
+                _CamRight.y = 0;
+                _CamRight.Normalize();
+
+                _FinalMoveDirection = (_CamForward * PlayerData.Direction.z) + (_CamRight * PlayerData.Direction.x);
+            }
+            else
+            {
+                _FinalMoveDirection = transform.TransformDirection(PlayerData.Direction);
+            }
+
+            float _CurrentSpeed = PlayerInputAction.RunAction.action.IsPressed() ? RunSpeed : MoveSpeed;
+            _FinalMoveDirection *= _CurrentSpeed;
+
+            PlayerData.Direction = new Vector3(_FinalMoveDirection.x, PlayerData.JumpForce, _FinalMoveDirection.z);
 
             PlayerController.Move(PlayerData.Direction * _DeltaTime);
         }

@@ -64,7 +64,7 @@
                     "name": "Eye Gaze Is Tracked",
                     "type": "Button",
                     "id": "13ed167f-e321-4b06-8ee1-f496c0749de5",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": true
@@ -86,7 +86,7 @@
                     "path": "<XRHMD>/centerEyePosition",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Position",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -97,7 +97,7 @@
                     "path": "<HandheldARInputDevice>/devicePosition",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Position",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -108,7 +108,7 @@
                     "path": "<XRHMD>/centerEyeRotation",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Rotation",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -119,7 +119,7 @@
                     "path": "<HandheldARInputDevice>/deviceRotation",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Rotation",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -141,7 +141,7 @@
                     "path": "<EyeGaze>/pose/rotation",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Rotation",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -152,7 +152,7 @@
                     "path": "<XRHMD>/centerEyeRotation",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Rotation",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -163,7 +163,7 @@
                     "path": "",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Rotation",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -185,7 +185,7 @@
                     "path": "<EyeGaze>/pose/position",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Position",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -196,7 +196,7 @@
                     "path": "<XRHMD>/centerEyePosition",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Position",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -207,7 +207,7 @@
                     "path": "",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Position",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -229,7 +229,7 @@
                     "path": "<EyeGaze>/pose/trackingState",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Tracking State",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -240,7 +240,7 @@
                     "path": "<XRHMD>/trackingState",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Tracking State",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -251,7 +251,7 @@
                     "path": "",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Tracking State",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -262,7 +262,7 @@
                     "path": "<XRHMD>/trackingState",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Tracking State",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -273,7 +273,7 @@
                     "path": "<XRHMD>/isTracked",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Is Tracked",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -295,7 +295,7 @@
                     "path": "<EyeGaze>/pose/isTracked",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Is Tracked",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -306,7 +306,7 @@
                     "path": "<XRHMD>/isTracked",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Is Tracked",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -317,7 +317,7 @@
                     "path": "",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";XR",
                     "action": "Eye Gaze Is Tracked",
                     "isComposite": false,
                     "isPartOfComposite": true
@@ -2547,7 +2547,7 @@
                     "name": "Submit",
                     "type": "Button",
                     "id": "d5345cb4-12c6-4a97-81c4-23017b1d6a0f",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -2556,7 +2556,7 @@
                     "name": "Cancel",
                     "type": "Button",
                     "id": "a989107e-41d8-406f-879a-ae7ffd244748",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -3661,11 +3661,11 @@
                 },
                 {
                     "name": "",
-                    "id": "1635d3fe-58b6-4ba9-a4e2-f4b964f6b5c8",
-                    "path": "<XRController>/{Primary2DAxis}",
+                    "id": "d16b1cdf-a9d8-4bc9-9ed6-6f3e619fa541",
+                    "path": "<XRController>{LeftHand}/{Primary2DAxis}",
                     "interactions": "",
-                    "processors": "",
-                    "groups": "XR",
+                    "processors": "StickDeadzone",
+                    "groups": ";XR",
                     "action": "Move",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -3859,11 +3859,11 @@
                 },
                 {
                     "name": "",
-                    "id": "603f3daf-40bd-4854-8724-93e8017f59e3",
-                    "path": "<XRController>/secondaryButton",
+                    "id": "5bc6659e-c5fe-4a70-977a-2550e8ceb454",
+                    "path": "<XRController>{RightHand}/{PrimaryButton}",
                     "interactions": "",
                     "processors": "",
-                    "groups": "XR",
+                    "groups": ";XR",
                     "action": "Jump",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -4202,6 +4202,15 @@
                     "type": "PassThrough",
                     "id": "9caa3d8a-6b2f-4e8e-8bad-6ede561bd9be",
                     "expectedControlType": "Quaternion",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "ToggleMenu",
+                    "type": "Button",
+                    "id": "1635e454-a579-40ab-a1d0-c2842363ea14",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -4623,6 +4632,17 @@
                     "processors": "",
                     "groups": "XR",
                     "action": "TrackedDeviceOrientation",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "02a04fae-d591-4e30-b0b1-3ab4310ba519",
+                    "path": "<XRController>{LeftHand}/{SecondaryButton}",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "ToggleMenu",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }
@@ -5301,6 +5321,39 @@
                 },
                 {
                     "name": "1D Axis",
+                    "id": "29101332-a842-45f5-a85d-43d098a7f484",
+                    "path": "1DAxis",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SpawnMove",
+                    "isComposite": true,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "Positive",
+                    "id": "7e0e0a5d-b3b8-440c-a083-4d83d5e24b73",
+                    "path": "<XRController>{RightHand}/{TriggerButton}",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": ";XR",
+                    "action": "SpawnMove",
+                    "isComposite": false,
+                    "isPartOfComposite": true
+                },
+                {
+                    "name": "Negative",
+                    "id": "67181ab2-8a01-43d4-8c1b-2c577f0a5ebe",
+                    "path": "<XRController>{RightHand}/{GripButton}",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": ";XR",
+                    "action": "SpawnMove",
+                    "isComposite": false,
+                    "isPartOfComposite": true
+                },
+                {
+                    "name": "1D Axis",
                     "id": "b6e47252-235d-47ab-aefc-6ef6ab8bfa0e",
                     "path": "1DAxis",
                     "interactions": "",
@@ -5402,9 +5455,20 @@
                     "name": "",
                     "id": "08eb14bf-381f-402d-b605-f94445b1c8a9",
                     "path": "<Keyboard>/f",
-                    "interactions": "",
+                    "interactions": "Press",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";Keyboard&Mouse",
+                    "action": "SpawnSubmit",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "6d853a36-1a36-4e7d-b00c-c731d6870edf",
+                    "path": "<XRController>{RightHand}/{SecondaryButton}",
+                    "interactions": "Press",
+                    "processors": "",
+                    "groups": ";XR",
                     "action": "SpawnSubmit",
                     "isComposite": false,
                     "isPartOfComposite": false
@@ -5415,7 +5479,18 @@
                     "path": "<Keyboard>/{Cancel}",
                     "interactions": "",
                     "processors": "",
-                    "groups": "",
+                    "groups": ";Keyboard&Mouse",
+                    "action": "SpawnCancel",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "aaaa20c5-ba8d-43c3-9785-619697f510af",
+                    "path": "<XRController>{LeftHand}/{PrimaryButton}",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": ";XR",
                     "action": "SpawnCancel",
                     "isComposite": false,
                     "isPartOfComposite": false
