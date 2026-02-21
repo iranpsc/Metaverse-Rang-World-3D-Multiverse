@@ -124,9 +124,7 @@ public class EnvironmentConfig : MonoBehaviour
         return currentEnvironment == EnvironmentType.Localhost;
     }
 
-    //* خذف الش تکراری از قسمت دوم آدرس که ار توابع دیگر دریافت می شود
-    //* string baseUrl = "https://api.example.com/";
-    //* string endpoint = "/auth/login";
+
     public string GetFullUrl(string endpoint)
     {
         // حذف اسلش اضافه در ابتدا

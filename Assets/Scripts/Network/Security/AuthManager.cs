@@ -54,11 +54,7 @@ namespace Assets.Scripts.Network.Security
 
             refreshTokenHandler = new RefreshTokenHandler(tokenStorage, httpClient.Logger);
 
-            // Create HTTPClient
 
-
-            //  Debug.Log("[AuthManager] Initialized with HTTPClient");
-            //  Debug.Log($"[AuthManager] Initialized for platform: {Application.platform}");
         }
 
         /// <summary>
@@ -337,7 +333,7 @@ namespace Assets.Scripts.Network.Security
         private const string KEY_TOKEN = "METAVERSE_AUTH_TOKEN";
         private const string KEY_REFRESH = "METAVERSE_AUTH_REFRESH";
         private const string KEY_EXPIRY = "METAVERSE_AUTH_EXPIRY";
-        private const string KEY_USERID = "METAVERSE_AUTH_USERID";
+        //  private const string KEY_USERID = "METAVERSE_AUTH_USERID";
 
         public EditorTokenStorage()
         {
@@ -417,7 +413,7 @@ namespace Assets.Scripts.Network.Security
 #if UNITY_EDITOR
             string diskToken = EditorPrefs.GetString(KEY_TOKEN, "");
             string diskRefresh = EditorPrefs.GetString(KEY_REFRESH, "");
-            string diskUserId = EditorPrefs.GetString(KEY_USERID, "");
+           // string diskUserId = EditorPrefs.GetString(KEY_USERID, "");
             string expiryStr = EditorPrefs.GetString(KEY_EXPIRY, "0");
 
             long diskExpiry = 0;
@@ -439,7 +435,7 @@ namespace Assets.Scripts.Network.Security
 #else
             token = null;
             refreshToken = null;
-            userId = null;
+            //  userId = null;
             expiryTimestamp = 0;
 
             if (withLog)
@@ -472,7 +468,7 @@ namespace Assets.Scripts.Network.Security
 #if UNITY_EDITOR
             EditorPrefs.DeleteKey(KEY_TOKEN);
             EditorPrefs.DeleteKey(KEY_REFRESH);
-            EditorPrefs.DeleteKey(KEY_USERID);
+         //   EditorPrefs.DeleteKey(KEY_USERID);
             EditorPrefs.DeleteKey(KEY_EXPIRY);
 
             if (withLog)

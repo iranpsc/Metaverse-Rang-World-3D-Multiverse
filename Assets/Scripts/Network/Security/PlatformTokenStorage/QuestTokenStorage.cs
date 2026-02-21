@@ -17,7 +17,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
         private const string TOKEN_KEY = "metaverse_auth_token_quest";
         private const string REFRESH_TOKEN_KEY = "metaverse_refresh_token_quest";
         private const string EXPIRY_KEY = "metaverse_token_expiry_quest";
-        private const string USER_ID_KEY = "metaverse_user_id_quest";
+     //   private const string USER_ID_KEY = "metaverse_user_id_quest";
 
         private const string INSTALL_SECRET_KEY = "metaverse_install_secret_q";
 
@@ -30,7 +30,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
             encryptionKey = GenerateEncryptionKey(deviceFingerprint);
         }
 
-        public void SaveTokens(string token, string refreshToken, int expiresIn, string userId)
+        public void SaveTokens(string token, string refreshToken, int expiresIn)
         {
             try
             {
@@ -42,7 +42,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
                 PlayerPrefs.SetString(TOKEN_KEY, encryptedToken);
                 PlayerPrefs.SetString(REFRESH_TOKEN_KEY, encryptedRefreshToken);
                 PlayerPrefs.SetString(EXPIRY_KEY, expiry.ToString());
-                PlayerPrefs.SetString(USER_ID_KEY, userId ?? string.Empty);
+              //  PlayerPrefs.SetString(USER_ID_KEY, userId ?? string.Empty);
                 PlayerPrefs.Save();
             }
             catch (Exception ex)
@@ -84,12 +84,9 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
             PlayerPrefs.DeleteKey(TOKEN_KEY);
             PlayerPrefs.DeleteKey(REFRESH_TOKEN_KEY);
             PlayerPrefs.DeleteKey(EXPIRY_KEY);
-            PlayerPrefs.DeleteKey(USER_ID_KEY);
+          //  PlayerPrefs.DeleteKey(USER_ID_KEY);
             PlayerPrefs.Save();
-
-            // install secret را پاک نمی‌کنیم مگر اینکه reset کامل بخواهی
-            // PlayerPrefs.DeleteKey(INSTALL_SECRET_KEY);
-            // PlayerPrefs.Save();
+ 
         }
 
         public string GetUserId()

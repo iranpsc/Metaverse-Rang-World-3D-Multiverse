@@ -14,7 +14,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
         private const string TOKEN_KEY = "metaverse_auth_token_win";
         private const string REFRESH_TOKEN_KEY = "metaverse_refresh_token_win";
         private const string EXPIRY_KEY = "metaverse_token_expiry_win";
-        private const string USER_ID_KEY = "metaverse_user_id_win";
+     //   private const string USER_ID_KEY = "metaverse_user_id_win";
         private const string LEGACY_REG_PATH = "SOFTWARE\\MetaverseIran\\Auth";
 
         // new dpapi file
@@ -174,7 +174,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
                 string encToken = key.GetValue(TOKEN_KEY) as string;
                 string encRefresh = key.GetValue(REFRESH_TOKEN_KEY) as string;
                 string expStr = key.GetValue(EXPIRY_KEY) as string;
-                string uid = key.GetValue(USER_ID_KEY) as string;
+               // string uid = key.GetValue(USER_ID_KEY) as string;
 
                 key.Close();
 
@@ -188,7 +188,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
                 if (!long.TryParse(expStr, out expiry))
                     return false;
 
-                userId = uid;
+              //  userId = uid;
                 return !string.IsNullOrEmpty(token);
             }
             catch (Exception ex)
@@ -204,14 +204,14 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
         }
 
         // payload format: token|refresh|expiry|userId  (escaped)
-        private static string Serialize(string token, string refresh, long expiry, string userId)
+        private static string Serialize(string token, string refresh, long expiry )
         {
-            return $"{Esc(token)}|{Esc(refresh)}|{expiry}|{Esc(userId)}";
+            return $"{Esc(token)}|{Esc(refresh)}|{expiry}}";
         }
 
-        private static bool TryDeserialize(string s, out string token, out string refresh, out long expiry, out string userId)
+        private static bool TryDeserialize(string s, out string token, out string refresh, out long expiry )
         {
-            token = null; refresh = null; expiry = 0; userId = null;
+            token = null; refresh = null; expiry = 0;  
             if (string.IsNullOrEmpty(s)) return false;
 
             var parts = Split4(s);
@@ -220,7 +220,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
             token = UnEsc(parts[0]);
             refresh = UnEsc(parts[1]);
             if (!long.TryParse(parts[2], out expiry)) return false;
-            userId = UnEsc(parts[3]);
+         
 
             return true;
         }
@@ -242,7 +242,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
 
         private static string[] Split4(string s)
         {
-            string[] parts = new string[4];
+            string[] parts = new string[3];
             var sb = new StringBuilder();
             int idx = 0;
             bool esc = false;
@@ -252,7 +252,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
                 if (esc) { sb.Append(c); esc = false; continue; }
                 if (c == '\\') { esc = true; continue; }
 
-                if (c == '|' && idx < 3)
+                if (c == '|' && idx < 2)
                 {
                     parts[idx++] = sb.ToString();
                     sb.Clear();
@@ -261,8 +261,8 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
                 sb.Append(c);
             }
 
-            if (idx != 3) return null;
-            parts[3] = sb.ToString();
+            if (idx != 2) return null;
+            parts[2] = sb.ToString();
             return parts;
         }
     }

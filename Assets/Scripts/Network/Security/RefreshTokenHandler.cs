@@ -75,13 +75,11 @@ namespace Assets.Scripts.Network.Security
         /// </summary>
         private async Task<AuthResult> InternalRefreshAsync(CancellationToken cancellationToken, int sequenceId)
         {
-            Debug.Log("[RefreshTokenHandler] InternalRefreshAsync started. (1)");
 
             try
             {
                 string currentRefreshToken = tokenStorage.GetRefreshToken();
 
-                Debug.Log("[RefreshTokenHandler] Read refresh token from storage. (2)");
 
                 if (string.IsNullOrEmpty(currentRefreshToken))//*Go Login
                 {
@@ -109,17 +107,16 @@ namespace Assets.Scripts.Network.Security
                 {
                     var authResponse = JSONSerializer.Deserialize<AuthResponse>(result.RawData);
 
-                    if (authResponse.success && !string.IsNullOrEmpty(authResponse.token?.access_token))
+                    if (authResponse.success && !string.IsNullOrEmpty(authResponse?.access_token))
                     {
-                        Debug.Log($"4 [Save Access Token]  : {authResponse.token.access_token}");
+
                         tokenStorage.SaveTokens(
-                            authResponse.token.access_token,
-                            authResponse.token.refresh_token,
-                            authResponse.token.expires_in
+                            authResponse.access_token,
+                            authResponse.refresh_token,
+                            authResponse.expires_in
                         //authResponse.user?.userId ?? authResponse.user?.userId // kept as-is
                         );
 
-                        Debug.Log("[RefreshTokenHandler] Tokens saved successfully.(5)");
                         return AuthResult.Success(authResponse);
                     }
                     else
@@ -191,7 +188,7 @@ namespace Assets.Scripts.Network.Security
                         (int)webRequest.responseCode
                     );
                 }
-                Debug.Log($"5555555555555[Url]  : {webRequest.downloadHandler.text}");
+
                 return ResponseModel.Success(
                     webRequest.downloadHandler.text,
                     (int)webRequest.responseCode

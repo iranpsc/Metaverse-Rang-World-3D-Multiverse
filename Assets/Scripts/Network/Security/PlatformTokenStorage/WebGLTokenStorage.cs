@@ -19,7 +19,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
         private const string TOKEN_KEY = "metaverse_auth_token";
         private const string REFRESH_TOKEN_KEY = "metaverse_refresh_token";
         private const string EXPIRY_KEY = "metaverse_token_expiry";
-        private const string USER_ID_KEY = "metaverse_user_id";
+      //  private const string USER_ID_KEY = "metaverse_user_id";
         private const string DEVICE_FP_KEY = "metaverse_device_fp";
 
         // Install secret (persisted)
@@ -39,7 +39,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
             encryptionKey = GenerateEncryptionKey(deviceFingerprint);
         }
 
-        public void SaveTokens(string token, string refreshToken, int expiresIn, string userId)
+        public void SaveTokens(string token, string refreshToken, int expiresIn )
         {
             try
             {
@@ -51,7 +51,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
                 SetLocalStorage(TOKEN_KEY, encryptedToken);
                 SetLocalStorage(REFRESH_TOKEN_KEY, encryptedRefreshToken);
                 SetLocalStorage(EXPIRY_KEY, expiry.ToString());
-                SetLocalStorage(USER_ID_KEY, userId ?? string.Empty);
+         //       SetLocalStorage(USER_ID_KEY, userId ?? string.Empty);
             }
             catch (Exception ex)
             {
@@ -95,7 +95,7 @@ namespace Assets.Scripts.Network.Security.PlatformTokenStorage
             RemoveLocalStorage(TOKEN_KEY);
             RemoveLocalStorage(REFRESH_TOKEN_KEY);
             RemoveLocalStorage(EXPIRY_KEY);
-            RemoveLocalStorage(USER_ID_KEY);
+          //  RemoveLocalStorage(USER_ID_KEY);
             RemoveLocalStorage(DEVICE_FP_KEY);
 
             // install secret را پاک نمی‌کنیم مگر اینکه واقعاً بخواهی reset کامل شود
