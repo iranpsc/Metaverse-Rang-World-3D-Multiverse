@@ -19,12 +19,13 @@ namespace Meta
         private bool groundFound = false;
         private Transform _helperTransform;
 
-        void Awake()
+        void Start()
         {
             Instance = this;
             _helperTransform = new GameObject("SpawnHelper").transform;
             _helperTransform.SetParent(this.transform);
             FindGroundBounds();
+            GetValidSpawnTransform();
         }
 
         private void FindGroundBounds()
@@ -46,8 +47,7 @@ namespace Meta
 
         public Transform GetValidSpawnTransform()
         {
-            Vector3 targetPos = Vector3.up * 10f; // موقعیت پیش‌فرض بالا
-
+            Vector3 targetPos = Vector3.up * 2; // موقعیت پیش‌فرض بالا
             if (groundFound)
             {
                 for (int i = 0; i < 30; i++) // تعداد تلاش بیشتر برای زمین‌های دایره‌ای

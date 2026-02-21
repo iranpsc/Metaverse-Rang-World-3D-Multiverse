@@ -131,7 +131,10 @@ namespace Meta
             // Normal login
             if (EnableLog) Debug.Log($"[Meta_LoginManager] Logging in as normal user ({_username})...");
             SaveLogin();
-            SceneManager.LoadScene(Scene);
+
+            // Addresable Change
+            //SceneManager.LoadScene(Scene);
+            Meta_SceneFlowManager.Instance?.LoadScene(Scene);
         }
 
         private void StartGuestLogin(string username)
@@ -145,7 +148,9 @@ namespace Meta
 
             if (EnableLog) Debug.Log($"[Meta_LoginManager] Guest token created: {TemporaryToken}");
 
-            SceneManager.LoadScene(Scene);
+            // Addresable Change
+            //SceneManager.LoadScene(Scene);
+            Meta_SceneFlowManager.Instance?.LoadScene(Scene);
         }
 
         private void OnRegisterPressed()

@@ -81,7 +81,10 @@ namespace Meta
         private void Update()
         {
             if (InputProvider == null || EventSystem.current == null)
+            {
+                Debug.Log("[Input Action] Input provider or Event system is null");
                 return;
+            }
 
             CursorState = MultiTap || IsEnable;
 

@@ -38,6 +38,7 @@ public class Meta_NetworkManager : NetworkManager
     public override void Start()
     {
         base.Start();
+        Meta_SceneFlowManager.Instance.AutoLoadNext("Login");
     }
 
     /// <summary>
@@ -96,7 +97,23 @@ public class Meta_NetworkManager : NetworkManager
     /// <para>This allows server to do work / cleanup / prep before the scene changes.</para>
     /// </summary>
     /// <param name="newSceneName">Name of the scene that's about to be loaded</param>
-    public override void OnServerChangeScene(string newSceneName) { }
+    public override void OnServerChangeScene(string newSceneName)
+    {
+        if (newSceneName != "Lobby")
+            return;
+
+        foreach (NetworkConnectionToClient conn in NetworkServer.connections.Values)
+        {
+            if (conn.identity == null)
+                continue;
+
+            Transform spawn = Meta_SpawnManager.Instance.GetValidSpawnTransform();
+            conn.identity.transform.SetPositionAndRotation(
+                spawn.position,
+                spawn.rotation
+            );
+        }
+    }
 
     /// <summary>
     /// Called on the server when a scene is completed loaded, when the scene load was initiated by the server with ServerChangeScene().
@@ -150,26 +167,31 @@ public class Meta_NetworkManager : NetworkManager
     /// <param name="conn">Connection from client.</param>
     public override void OnServerAddPlayer(NetworkConnectionToClient conn)
     {
+        GameObject player = Instantiate(playerPrefab);
+        player.name = $"{playerPrefab.name} [ID[{conn.connectionId}]]";
+        NetworkServer.AddPlayerForConnection(conn, player);
         //base.OnServerAddPlayer(conn);
         // ========================== //
-        Transform startPos = null;
+        //Transform startPos = null;
 
-        if (playerSpawnMethod == PlayerSpawnMethod.MetaSpawner)
-        {
-            startPos = Meta_SpawnManager.Instance.GetValidSpawnTransform();
-        }
-        else
-        {
-            startPos = GetStartPosition();
-        }
+        //if (playerSpawnMethod == PlayerSpawnMethod.MetaSpawner)
+        //{
+        //    startPos = Meta_SpawnManager.Instance.GetValidSpawnTransform();
+        //    Debug.Log("[Meta Spawner] Player Spawned At: "+ startPos);
+        //}
+        //else
+        //{
+        //    startPos = GetStartPosition();
+        //}
 
-        GameObject player = startPos != null
-            ? Instantiate(playerPrefab, startPos.position, startPos.rotation)
-            : Instantiate(playerPrefab);
+        //GameObject player = startPos != null
+        //    ? Instantiate(playerPrefab, startPos.position, startPos.rotation)
+        //    : Instantiate(playerPrefab);
 
-        player.name = $"{playerPrefab.name} [ID[{conn.connectionId}]";
-        NetworkServer.AddPlayerForConnection(conn, player);
+        //player.name = $"{playerPrefab.name} [ID[{conn.connectionId}]";
+        //NetworkServer.AddPlayerForConnection(conn, player);
     }
+
 
     /// <summary>
     /// Called on the server when a client disconnects.

@@ -7,15 +7,28 @@ using UnityEngine.InputSystem;
 
 namespace Meta
 {
+    /// <summary>
+    /// this script made for android touch input
+    /// shuld be off in other build.
+    /// its Android web only script
+    /// </summary>
     [AddComponentMenu("Meta/Meta_CinemachineInput")]
     [HelpURL("https://google.com")]
     public class Meta_CinemachineInput : MonoBehaviour
     {
         [Tooltip("Reference your Cinemachine Input Axis Controller component here")]
         public CinemachineInputAxisController InputProvider;
-
+        private PlatformType PlatformType;
         private bool _wasOverUI;
 
+        private void Awake()
+        {
+            PlatformType = Meta_PlatformDetector.GetPlatformType();
+            if (PlatformType != PlatformType.Android)
+            {
+                this.enabled = false;
+            }
+        }
         private void Update()
         {
             if (InputProvider == null || EventSystem.current == null)

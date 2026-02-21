@@ -353,6 +353,5 @@ namespace Meta.Player.Core
 
             PlayerController.Move(PlayerData.Direction * _DeltaTime);
         }
-
     }
 }

@@ -31,7 +31,7 @@ MonoBehaviour:
     m_Address: Login
     m_ReadOnly: 0
     m_SerializedLabels:
-    - Bootstrap
+    - Scene
     FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: 28cefcccd3954d74b9df0b65bf7a6956
     m_Address: Car
@@ -43,7 +43,7 @@ MonoBehaviour:
     m_Address: Avatar Selector
     m_ReadOnly: 0
     m_SerializedLabels:
-    - Bootstrap
+    - Scene
     FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: 2ab34027ebc55da4db8e469c1b3fc757
     m_Address: Vehicle
@@ -81,29 +81,17 @@ MonoBehaviour:
     m_SerializedLabels:
     - Vehicle
     FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: 9d59451b264321244a7bb6ea04f10889
-    m_Address: Offline
-    m_ReadOnly: 0
-    m_SerializedLabels:
-    - Bootstrap
-    FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: b55e13f2ec0a16c49b2a5c8a8ede7fd8
     m_Address: JetPack
     m_ReadOnly: 0
     m_SerializedLabels:
     - Vehicle
     FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: b6d077966c07efd48be555f72a5d9d3e
-    m_Address: Network
-    m_ReadOnly: 0
-    m_SerializedLabels:
-    - Bootstrap
-    FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: bb00c6df144615f45a56d79ae8f125ff
     m_Address: Lobby
     m_ReadOnly: 0
     m_SerializedLabels:
-    - Bootstrap
+    - Scene
     FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: d9b859d5b4119c04c96fc703eed51a27
     m_Address: Bus

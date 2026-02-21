@@ -15,9 +15,9 @@ MonoBehaviour:
   m_DefaultGroup: e7ebc1d2777614a468d8bf9b0eb137dc
   m_currentHash:
     serializedVersion: 2
-    Hash: 7808a9a84e4b6dac5c11aa2c277ffe26
+    Hash: db8099cb64b98bccfa3def8556e47a6a
   m_OptimizeCatalogSize: 0
-  m_BuildRemoteCatalog: 1
+  m_BuildRemoteCatalog: 0
   m_BundleLocalCatalog: 0
   m_CatalogRequestsTimeout: 0
   m_DisableCatalogUpdateOnStart: 0
@@ -121,6 +121,7 @@ MonoBehaviour:
     - Vehicle
     - Environment
     - Bootstrap
+    - Scene
   m_SchemaTemplates: []
   m_GroupTemplateObjects:
   - {fileID: 11400000, guid: 926f6e98007ac2f4f8a31432c9e025de, type: 2}
@@ -133,4 +134,4 @@ MonoBehaviour:
   - {fileID: 11400000, guid: ca72e64ca67b48042827f1b6282afbce, type: 2}
   - {fileID: 11400000, guid: e0ad8023e4c7a704e84d07e4ca51c62c, type: 2}
   - {fileID: 11400000, guid: 811f88ffadd78d14e8a332bbac408038, type: 2}
-  m_ActiveProfileId: 4ac9db52abec47b4e916a33f21ac4fc7
+  m_ActiveProfileId: 9496bbc5620736a459756fd35857dad3
