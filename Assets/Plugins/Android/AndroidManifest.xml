@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.metargb.metaverse">
+
+    <!-- اجازه دسترسی به اینترنت (برای ارتباط با سرور) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    
+    <!-- اجازه ضبط صدا (برای سیستم صوتی مکانی) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    
+    <!-- اجازه دسترسی به شبکه (اختیاری اما توصیه می‌شود) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- اجازه لرزش (برای فیدبک لمسی در هنگام اتصال) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/app_icon"
+        android:allowBackup="false"
+        android:theme="@style/UnityThemeSelector">
+        
+        <!-- فعال‌سازی clearText برای اتصال به سرور لوکال در حالت توسعه -->
+        <!-- ⚠️ فقط برای محیط توسعه - در نسخه نهایی حذف شود -->
+        <meta-data
+            android:name="unityplayer.SkipPermissionsDialog"
+            android:value="true" />
+    </application>
+</manifest>
