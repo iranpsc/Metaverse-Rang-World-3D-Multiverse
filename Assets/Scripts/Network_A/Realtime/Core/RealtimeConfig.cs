@@ -33,7 +33,7 @@ namespace Network_A.Realtime.Core
         public void Normalize()
         {
             if (string.IsNullOrWhiteSpace(serverUrl)) serverUrl = "ws://127.0.0.1:8080";
-            if (connectTimeoutMs <= 0) connectTimeoutMs = 10000;
+            if (connectTimeoutMs < 0) connectTimeoutMs = 10000;
             if (sendTimeoutMs <= 0) sendTimeoutMs = 10000;
         }
     }

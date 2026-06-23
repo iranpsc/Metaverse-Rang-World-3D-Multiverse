@@ -52,19 +52,23 @@ namespace Network_A.Realtime.Transport
             if (string.IsNullOrWhiteSpace(url)) return FailConnect("WebSocket url is empty.");
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-            return FailConnect("WebSocketRealtimeTransport needs WebGL adapter in WebGL build.");
+    return FailConnect("WebSocketRealtimeTransport needs WebGL adapter in WebGL build.");
 #else
             try
             {
                 await CleanupSocketAsync("Reconnect cleanup", CancellationToken.None);
                 SetState(RealtimeTransportState.Connecting);
                 isDisconnecting = false;
-                connectionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                connectionCts = new CancellationTokenSource();
 
                 clientWebSocket = new ClientWebSocket();
                 ApplyHeaders(headers);
 
-                await clientWebSocket.ConnectAsync(new Uri(url), connectionCts.Token);
+                using (CancellationTokenSource connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connectionCts.Token))
+                {
+                    await clientWebSocket.ConnectAsync(new Uri(url), connectCts.Token);
+                }
+
                 SetState(RealtimeTransportState.Connected);
                 Connected?.Invoke();
                 _ = ReceiveLoopAsync(connectionCts.Token);

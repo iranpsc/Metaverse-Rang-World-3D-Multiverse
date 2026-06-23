@@ -9,12 +9,15 @@ namespace Network_A.Auth
         public static Endpoint CurrentEndpoint = new Endpoint("localhost", 8443, true);
         public static Endpoint GrpcWebEndpoint = new Endpoint("localhost", 8443, true);
         public static Endpoint GrpcNativeEndpoint = new Endpoint("localhost", 50051, false);
+        public static Endpoint DedicatedGrpcWebEndpoint = new Endpoint("dev-world-3d.metarang.com", 443, true);
+        public static Endpoint DedicatedGrpcNativeEndpoint = new Endpoint("dev-world-3d.metarang.com", 50051, true);
 
         public static string ServiceName = "metaverse.v1.AuthService";
         public static string HealthServiceName = "metaverse.v1.HealthService";
         public static string ClientName = "Unity";
         public static string ClientVersion = "1.0.0";
         public static int TimeoutSeconds = 15;
+        public static string RealtimeWebSocketPath = "/ws";
 
         public static int RefreshRequestTokenFieldNumber = 1;
         public static int AuthReplyRefreshTokenFieldNumber = 4;
@@ -27,6 +30,7 @@ namespace Network_A.Auth
         public static string LogoutUrl { get { return BuildGrpcWebUrl(ServiceName, "Logout"); } }
         public static string HealthUrl { get { return BuildGrpcWebUrl(HealthServiceName, "Check"); } }
         public static string LogoutAllDevicesUrl { get { return BuildGrpcWebUrl(ServiceName, "LogoutAllDevices"); } }
+        public static string RealtimeWebSocketUrl { get { return BuildRealtimeWebSocketUrl(); } }
 
         public static string NativeRegisterMethod { get { return BuildGrpcNativeMethod(ServiceName, "Register"); } }
         public static string NativeLoginMethod { get { return BuildGrpcNativeMethod(ServiceName, "Login"); } }
@@ -50,6 +54,29 @@ namespace Network_A.Auth
             CurrentTransportKind = TransportKind.GrpcNative;
             GrpcNativeEndpoint = new Endpoint("localhost", 50051, false);
             CurrentEndpoint = GrpcNativeEndpoint;
+        }
+
+        //* Sets the VPS gRPC-Web endpoint used by WebGL and HTTPS based builds.
+        public static void UseDedicatedGrpcWeb()
+        {
+            CurrentTransportKind = TransportKind.GrpcWeb;
+            GrpcWebEndpoint = DedicatedGrpcWebEndpoint;
+            CurrentEndpoint = GrpcWebEndpoint;
+        }
+
+        //* Sets the VPS native gRPC endpoint used by native clients when the public gRPC port is available.
+        public static void UseDedicatedGrpcNative()
+        {
+            CurrentTransportKind = TransportKind.GrpcNative;
+            GrpcNativeEndpoint = DedicatedGrpcNativeEndpoint;
+            CurrentEndpoint = GrpcNativeEndpoint;
+        }
+
+        //* Sets a dedicated gRPC-Web endpoint and keeps all dependent URLs centralized.
+        public static void UseDedicatedGrpcWeb(string host, int port, bool useTls)
+        {
+            DedicatedGrpcWebEndpoint = new Endpoint(host, port, useTls);
+            UseDedicatedGrpcWeb();
         }
 
         //* Sets the current transport kind without changing endpoint values.
@@ -84,10 +111,28 @@ namespace Network_A.Auth
             if (CurrentTransportKind == TransportKind.GrpcNative) CurrentEndpoint = endpoint;
         }
 
+        //* Sets the realtime WebSocket path used by WebGL and realtime test controllers.
+        public static void UseRealtimeWebSocketPath(string path)
+        {
+            RealtimeWebSocketPath = NormalizePath(path, "/ws");
+        }
+
         //* Builds a gRPC-Web unary URL for Envoy.
         public static string BuildGrpcWebUrl(string serviceName, string methodName)
         {
             return GrpcWebEndpoint.ToHttpBaseUrl() + "/" + serviceName + "/" + methodName;
+        }
+
+        //* Builds the realtime WebSocket URL from the centralized gRPC-Web endpoint.
+        public static string BuildRealtimeWebSocketUrl()
+        {
+            return BuildRealtimeWebSocketUrl(GrpcWebEndpoint, RealtimeWebSocketPath);
+        }
+
+        //* Builds a realtime WebSocket URL from a given endpoint and path.
+        public static string BuildRealtimeWebSocketUrl(Endpoint endpoint, string path)
+        {
+            return endpoint.ToWsBaseUrl() + NormalizePath(path, "/ws");
         }
 
         //* Builds a native gRPC method path.
@@ -112,6 +157,13 @@ namespace Network_A.Auth
         public static bool IsGrpcNative()
         {
             return CurrentTransportKind == TransportKind.GrpcNative;
+        }
+
+        //* Normalizes URL path text so callers can pass ws or /ws safely.
+        private static string NormalizePath(string path, string fallbackPath)
+        {
+            string result = string.IsNullOrWhiteSpace(path) ? fallbackPath : path.Trim();
+            return result.StartsWith("/") ? result : "/" + result;
         }
     }
 }

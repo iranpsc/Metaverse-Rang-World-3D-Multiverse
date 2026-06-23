@@ -4,6 +4,7 @@ namespace Network_A.Realtime.Protocol
     {
         public const string System = "system";
         public const string Game = "game";
+        public const string Lobby = "lobby";
         public const string Presence = "presence";
         public const string Chat = "chat";
         public const string Voice = "voice";

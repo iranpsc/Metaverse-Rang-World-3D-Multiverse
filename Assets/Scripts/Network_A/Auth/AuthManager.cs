@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
+using RTLTMPro;
 using Network_A.Core;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -57,9 +59,22 @@ namespace Network_A.Auth
         [SerializeField] private Button btn_Log;
         #endregion
 
+        #region <Auth Input Validation>
+        [Header("Auth Input Validation")]
+        [SerializeField] private int minUsernameLength = 7;
+        [SerializeField] private int minPasswordLength = 7;
+        #endregion
+
         #region <Status UI>
         [Header("Status UI")]
         [SerializeField] private TMP_Text txt_Status;
+        #endregion
+        #region <Server Debug UI>
+        [Header("Server Debug UI")]
+        [SerializeField] private GameObject pnl_ServerDebug;
+        [SerializeField] private RTLTextMeshPro txt_ServerDebug;
+        [SerializeField] private Button btn_ServerDebugClose;
+        [SerializeField] private bool showServerDebugPanelOnServerMessage = true;
         #endregion
 
         #region <Login State>
@@ -100,13 +115,17 @@ namespace Network_A.Auth
                 NetworkFileLogger.Warning("AUTH_MANAGER", "Duplicate AuthManager detected. Destroying duplicate component only.");
                 Destroy(this);
             }
+
+
+            Application.runInBackground = true;
+
         }
 
         //* Starts auth startup flow after Awake is fully completed.
         private async void Start()
         {
             isLogin = false;
-
+            SetupServerDebugPanel();
             if (clearTokensOnStart)
             {
                 bool cleared = await ClearTokensOnStartAsync();
@@ -231,7 +250,7 @@ namespace Network_A.Auth
         public async Task Login_Init()
         {
             NetworkFileLogger.Auth("LOGIN_INIT_START", true, "Login_Init started.", string.Empty, HasAccessToken(), HasRefreshToken());
-            ShowInfoMessage("در حال دریافت اطلاعات کاربر...");
+            ShowInfoMessage("در حال دریافت اطلاعات کاربر | Request: GetUserData | Function: Login_Init");
 
             ApiResult<GetUserDataResponseDto> res = await GetUserDataAsync();
 
@@ -274,7 +293,7 @@ namespace Network_A.Auth
 
             if (is_First_Reg) is_First_Reg = false;
 
-            ShowSuccessMessage("اطلاعات کاربر دریافت شد");
+            ShowSuccessMessage("اطلاعات کاربر دریافت شد | User: " + CurrentUser.emailOrUsername + " | Request: GetUserData");
             NetworkFileLogger.Auth("LOGIN_INIT_SUCCESS", true, res.Data.message, CurrentUser.emailOrUsername, HasAccessToken(), HasRefreshToken());
         }
 
@@ -543,6 +562,27 @@ namespace Network_A.Auth
         {
             if (pnl_Login != null) pnl_Login.SetActive(state);
         }
+
+        public void DH_Pnl_ServerDebug(bool state)
+        {
+            if (pnl_ServerDebug != null) pnl_ServerDebug.SetActive(state);
+        }
+
+        private void SetupServerDebugPanel()
+        {
+            if (btn_ServerDebugClose != null)
+            {
+                btn_ServerDebugClose.onClick.RemoveListener(HideServerDebugPanel);
+                btn_ServerDebugClose.onClick.AddListener(HideServerDebugPanel);
+            }
+
+            DH_Pnl_ServerDebug(false);
+        }
+
+        private void HideServerDebugPanel()
+        {
+            DH_Pnl_ServerDebug(false);
+        }
         #endregion
 
         #region <Server Type>
@@ -611,7 +651,7 @@ namespace Network_A.Auth
             byte[] frame = AuthProtoMapper.EncodeGrpcWebUnaryRequest(protoMessage);
             ApiResult<byte[]> webRaw = await RequestManager.Send<byte[]>(url, UnityWebRequest.kHttpVerbPOST, frame, auth, BuildGrpcWebHeaders(), ct, logTag);
 
-            if (!webRaw.IsSuccess) return ApiResult<AuthResponseDto>.Failure(webRaw.ErrorMessage, webRaw.StatusCode, webRaw.IsNetworkError, webRaw.RawBody, webRaw.RawBytes);
+            if (!webRaw.IsSuccess) return BuildAuthFailureFromWebRaw(webRaw);
 
             byte[] webMessage;
             Dictionary<string, string> trailers;
@@ -619,7 +659,7 @@ namespace Network_A.Auth
             if (!AuthProtoMapper.TryDecodeGrpcWebUnaryResponse(webRaw.RawBytes, out webMessage, out trailers)) return ApiResult<AuthResponseDto>.Failure("Invalid gRPC-Web response", webRaw.StatusCode, false, webRaw.RawBody, webRaw.RawBytes);
 
             string grpcStatus = ReadTrailer(trailers, "grpc-status");
-            if (!string.IsNullOrEmpty(grpcStatus) && grpcStatus != "0") return ApiResult<AuthResponseDto>.Failure(ReadTrailer(trailers, "grpc-message"), webRaw.StatusCode, false, webRaw.RawBody, webRaw.RawBytes);
+            if (!string.IsNullOrEmpty(grpcStatus) && grpcStatus != "0") return BuildAuthFailureFromGrpcTrailers(webRaw, trailers);
 
             AuthResponseDto webDto = AuthProtoMapper.DecodeAuthResponse(webMessage);
             return ApiResult<AuthResponseDto>.Success(webDto, webRaw.StatusCode, webRaw.RawBody, webRaw.RawBytes);
@@ -818,6 +858,7 @@ namespace Network_A.Auth
             }
 
             SecureTokenStorage.SaveTokens(dto.accessToken, string.IsNullOrEmpty(dto.refreshToken) ? previousRefreshToken : dto.refreshToken);
+
             NetworkFileLogger.TokenState("REFRESH_SUCCESS", SecureTokenStorage.GetAccessToken(), SecureTokenStorage.GetRefreshToken());
 
             return true;
@@ -838,12 +879,76 @@ namespace Network_A.Auth
         #endregion
 
         #region <Helpers>
+
+        private void UpdateServerDebugText(string stage, string detail)
+        {
+            if (txt_ServerDebug == null) return;
+
+            txt_ServerDebug.text = BuildServerDebugText(stage, detail);
+
+            if (showServerDebugPanelOnServerMessage) DH_Pnl_ServerDebug(true);
+        }
+
+        private string BuildServerDebugText(string stage, string detail)
+        {
+            string userId = CurrentUser != null ? SafeText(CurrentUser.id) : "-";
+            string userName = CurrentUser != null ? SafeText(CurrentUser.emailOrUsername) : "-";
+            string createdAtUnix = CurrentUser != null ? CurrentUser.createdAtUnix.ToString() : "-";
+
+            return
+                "گزارش سرور\n" +
+                "------------------------------\n" +
+                RtlLine("مرحله", stage) +
+                RtlLine("پیام", detail) +
+                "\n" +
+
+                "اتصال\n" +
+                RtlLine("حالت سرور", serverType.ToString()) +
+                RtlLine("نوع ارتباط", ServerConfig.CurrentTransportKind.ToString()) +
+                RtlLine("آدرس سرور", ServerConfig.CurrentEndpoint.ToString()) +
+                RtlLine("وضعیت سلامت", hasPing ? "Connected" : "Not Connected") +
+                "\n" +
+
+                "ورود کاربر\n" +
+                RtlLine("وارد شده", isLogin ? "Yes" : "No") +
+                RtlLine("اکسس توکن", HasAccessToken() ? "Exists" : "Empty") +
+                RtlLine("رفرش توکن", HasRefreshToken() ? "Exists" : "Empty") +
+                "\n" +
+
+                "کاربر دریافت شده از سرور\n" +
+                RtlLine("شناسه", userId) +
+                RtlLine("نام کاربر", userName) +
+                RtlLine("تاریخ ساخت یونیکس", createdAtUnix) +
+                "\n" +
+
+                RtlLine("زمان کلاینت", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        }
+
+        private string Ltr(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "-";
+            return "\u200E" + value + "\u200E";
+        }
+
+        private string RtlLine(string label, string value)
+        {
+            return label + ": " + Ltr(value) + "\n";
+        }
+
+        private string SafeText(string value)
+        {
+            return string.IsNullOrEmpty(value) ? "-" : value;
+        }
+
         //* Stores access and refresh token if the response contains them.
         private void SaveTokensIfPresent(ApiResult<AuthResponseDto> result)
         {
+
             if (result == null || !result.IsSuccess || result.Data == null) return;
             if (string.IsNullOrEmpty(result.Data.accessToken)) return;
             SecureTokenStorage.SaveTokens(result.Data.accessToken, result.Data.refreshToken);
+
+
             NetworkFileLogger.TokenState("SAVE_TOKENS", SecureTokenStorage.GetAccessToken(), SecureTokenStorage.GetRefreshToken());
         }
 
@@ -866,17 +971,34 @@ namespace Network_A.Auth
         //* Validates user input before sending auth request.
         private bool ValidateCredentials(string user, string pass, string stage)
         {
+            string stageKey = string.IsNullOrEmpty(stage) ? string.Empty : stage.ToUpperInvariant();
+            string actionName = stageKey == "REGISTER" ? "ثبت نام" : "ورود";
+
             if (string.IsNullOrWhiteSpace(user))
             {
-                SetStatus("نام کاربری وارد نشده است");
-                NetworkFileLogger.Warning(stage, "Username is empty.");
+                ShowWarningMessage("نام کاربری وارد نشده است");
+                NetworkFileLogger.Warning(stage, "Username is empty before " + actionName + ".");
+                return false;
+            }
+
+            if (user.Trim().Length < minUsernameLength)
+            {
+                ShowWarningMessage("نام کاربری باید حداقل " + minUsernameLength + " کاراکتر باشد");
+                NetworkFileLogger.Warning(stage, "Username length is less than " + minUsernameLength + " before " + actionName + ".");
                 return false;
             }
 
             if (string.IsNullOrEmpty(pass))
             {
-                SetStatus("رمز عبور وارد نشده است");
-                NetworkFileLogger.Warning(stage, "Password is empty.");
+                ShowWarningMessage("رمز عبور وارد نشده است");
+                NetworkFileLogger.Warning(stage, "Password is empty before " + actionName + ".");
+                return false;
+            }
+
+            if (pass.Length < minPasswordLength)
+            {
+                ShowWarningMessage("رمز عبور باید حداقل " + minPasswordLength + " کاراکتر باشد");
+                NetworkFileLogger.Warning(stage, "Password length is less than " + minPasswordLength + " before " + actionName + ".");
                 return false;
             }
 
@@ -920,12 +1042,139 @@ namespace Network_A.Auth
             return trailers.TryGetValue(key.ToLowerInvariant(), out value) ? value : string.Empty;
         }
 
+        //* Builds an auth failure from a gRPC-Web raw response and preserves server error codes.
+        private ApiResult<AuthResponseDto> BuildAuthFailureFromWebRaw(ApiResult<byte[]> webRaw)
+        {
+            if (webRaw == null) return ApiResult<AuthResponseDto>.Failure("Unknown auth error", 0, true, string.Empty, new byte[0]);
+
+            string errorMessage = ExtractGrpcWebAuthErrorMessage(webRaw);
+            if (string.IsNullOrEmpty(errorMessage)) errorMessage = webRaw.ErrorMessage;
+
+            return ApiResult<AuthResponseDto>.Failure(errorMessage, webRaw.StatusCode, webRaw.IsNetworkError, webRaw.RawBody, webRaw.RawBytes);
+        }
+
+        //* Builds an auth failure from decoded gRPC-Web trailers.
+        private ApiResult<AuthResponseDto> BuildAuthFailureFromGrpcTrailers(ApiResult<byte[]> webRaw, Dictionary<string, string> trailers)
+        {
+            string grpcMessage = DecodeGrpcErrorMessage(ReadTrailer(trailers, "grpc-message"));
+            string grpcStatus = ReadTrailer(trailers, "grpc-status");
+            string knownError = FindKnownAuthErrorToken(grpcMessage);
+
+            if (!string.IsNullOrEmpty(knownError)) grpcMessage = knownError;
+            if (string.IsNullOrEmpty(grpcMessage)) grpcMessage = "GRPC_STATUS_" + grpcStatus;
+
+            return ApiResult<AuthResponseDto>.Failure(grpcMessage, webRaw.StatusCode, false, webRaw.RawBody, webRaw.RawBytes);
+        }
+
+        //* Extracts a useful auth error from gRPC-Web bytes, body, and ErrorMessage.
+        private string ExtractGrpcWebAuthErrorMessage(ApiResult<byte[]> webRaw)
+        {
+            if (webRaw == null) return string.Empty;
+
+            string knownError = FindKnownAuthErrorToken(webRaw.ErrorMessage, webRaw.RawBody, ReadKnownAuthErrorFromBytes(webRaw.RawBytes));
+            if (!string.IsNullOrEmpty(knownError)) return knownError;
+
+            if (webRaw.RawBytes != null && webRaw.RawBytes.Length > 0)
+            {
+                byte[] messageBytes;
+                Dictionary<string, string> trailers;
+
+                if (AuthProtoMapper.TryDecodeGrpcWebUnaryResponse(webRaw.RawBytes, out messageBytes, out trailers))
+                {
+                    string grpcMessage = DecodeGrpcErrorMessage(ReadTrailer(trailers, "grpc-message"));
+                    string grpcStatus = ReadTrailer(trailers, "grpc-status");
+                    string trailerKnownError = FindKnownAuthErrorToken(grpcMessage);
+
+                    if (!string.IsNullOrEmpty(trailerKnownError)) return trailerKnownError;
+                    if (!string.IsNullOrEmpty(grpcMessage)) return grpcMessage;
+                    if (!string.IsNullOrEmpty(grpcStatus) && grpcStatus != "0") return "GRPC_STATUS_" + grpcStatus;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(webRaw.RawBody)) return webRaw.RawBody;
+            return webRaw.ErrorMessage;
+        }
+
         //* Reads auth message safely.
         private string ReadAuthMessage(ApiResult<AuthResponseDto> result)
         {
             if (result == null) return "null";
             if (result.Data != null && !string.IsNullOrEmpty(result.Data.message)) return result.Data.message;
             return result.ErrorMessage;
+        }
+
+        //* Combines error fields so UI mapping can see gRPC-Web trailer errors.
+        private string CombineErrorParts(params string[] parts)
+        {
+            if (parts == null || parts.Length == 0) return string.Empty;
+
+            string combined = string.Empty;
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (string.IsNullOrEmpty(parts[i])) continue;
+                if (!string.IsNullOrEmpty(combined)) combined += " | ";
+                combined += parts[i];
+            }
+
+            return combined;
+        }
+
+        //* Reads known auth error tokens from raw bytes when gRPC-Web puts them in trailers.
+        private string ReadKnownAuthErrorFromBytes(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return string.Empty;
+
+            try
+            {
+                string text = Encoding.UTF8.GetString(bytes);
+                return FindKnownAuthErrorToken(text);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        //* Finds server auth error tokens in any received text.
+        private string FindKnownAuthErrorToken(params string[] values)
+        {
+            if (values == null || values.Length == 0) return string.Empty;
+
+            for (int i = 0; i < values.Length; i++)
+            {
+                string value = DecodeGrpcErrorMessage(values[i]);
+                if (string.IsNullOrEmpty(value)) continue;
+
+                string upper = value.ToUpperInvariant();
+
+                if (upper.Contains("EMAIL_ALREADY_EXISTS")) return "EMAIL_ALREADY_EXISTS";
+                if (upper.Contains("USERNAME_ALREADY_EXISTS")) return "USERNAME_ALREADY_EXISTS";
+                if (upper.Contains("INVALID_CREDENTIALS")) return "INVALID_CREDENTIALS";
+                if (upper.Contains("TOKEN_EXPIRED")) return "TOKEN_EXPIRED";
+                if (upper.Contains("AUTHENTICATION_FAILED")) return "AUTHENTICATION_FAILED";
+            }
+
+            return string.Empty;
+        }
+
+        //* Decodes gRPC-Web error text so mapped messages work with encoded trailers.
+        private string DecodeGrpcErrorMessage(string rawError)
+        {
+            if (string.IsNullOrEmpty(rawError)) return string.Empty;
+
+            string decoded = rawError.Replace("+", " ");
+
+            try
+            {
+                decoded = UnityWebRequest.UnEscapeURL(decoded);
+            }
+            catch
+            {
+                decoded = rawError;
+            }
+
+            return decoded;
         }
 
         //* Returns true if access token exists.
@@ -966,6 +1215,7 @@ namespace Network_A.Auth
         private void ShowInfoMessage(string message)
         {
             SetStatus(message);
+            UpdateServerDebugText("Info", message);
             MainMenuMessageManager.Info(message);
         }
 
@@ -973,6 +1223,7 @@ namespace Network_A.Auth
         private void ShowSuccessMessage(string message)
         {
             SetStatus(message);
+            UpdateServerDebugText("Success", message);
             MainMenuMessageManager.Success(message);
         }
 
@@ -980,6 +1231,7 @@ namespace Network_A.Auth
         private void ShowWarningMessage(string message)
         {
             SetStatus(message);
+            UpdateServerDebugText("Warning", message);
             MainMenuMessageManager.Warning(message);
         }
 
@@ -987,13 +1239,14 @@ namespace Network_A.Auth
         private void ShowErrorMessage(string message)
         {
             SetStatus(message);
+            UpdateServerDebugText("Error", message);
             MainMenuMessageManager.Error(message);
         }
 
         //* Converts technical auth/network errors to user-friendly Persian messages.
         private string BuildUserMessage(string stage, ApiResult<AuthResponseDto> result)
         {
-            string raw = result != null ? result.ErrorMessage : string.Empty;
+            string raw = result != null ? CombineErrorParts(result.ErrorMessage, result.RawBody, ReadKnownAuthErrorFromBytes(result.RawBytes)) : string.Empty;
             int status = result != null ? result.StatusCode : 0;
             return BuildUserMessage(stage, raw, status);
         }
@@ -1001,7 +1254,7 @@ namespace Network_A.Auth
         //* Converts technical user-data errors to user-friendly Persian messages.
         private string BuildUserMessage(string stage, ApiResult<GetUserDataResponseDto> result)
         {
-            string raw = result != null ? result.ErrorMessage : string.Empty;
+            string raw = result != null ? CombineErrorParts(result.ErrorMessage, result.RawBody, ReadKnownAuthErrorFromBytes(result.RawBytes)) : string.Empty;
             int status = result != null ? result.StatusCode : 0;
             return BuildUserMessage(stage, raw, status);
         }
@@ -1010,17 +1263,37 @@ namespace Network_A.Auth
         private string BuildUserMessage(string stage, string rawError, int statusCode)
         {
             string stageKey = string.IsNullOrEmpty(stage) ? string.Empty : stage.ToUpperInvariant();
-            string error = string.IsNullOrEmpty(rawError) ? string.Empty : rawError.ToLowerInvariant();
+            string decodedError = DecodeGrpcErrorMessage(rawError);
+            string error = string.IsNullOrEmpty(decodedError) ? string.Empty : decodedError.ToLowerInvariant();
 
             if (statusCode == 0) return "ارتباط با سرور برقرار نشد. لطفاً اتصال اینترنت را بررسی کنید.";
-            if (error.Contains("user already exists") || error.Contains("already_exists")) return "این ایمیل قبلاً ثبت شده است.";
-            if (error.Contains("invalid credentials")) return "ایمیل یا رمز عبور اشتباه است.";
+
+            if (stageKey == "REGISTER" && error.Contains("email_already_exists")) return "این نام کاربری قبلاً ثبت شده است.";
+
+            if (stageKey == "REGISTER")
+            {
+                if (error.Contains("username_already_exists")) return "این نام کاربری قبلاً ثبت شده است.";
+                if (error.Contains("username already exists")) return "این نام کاربری قبلاً ثبت شده است.";
+                if (error.Contains("user name already exists")) return "این نام کاربری قبلاً ثبت شده است.";
+                if (error.Contains("email_already_exists")) return "این نام کاربری قبلاً ثبت شده است.";
+                if (error.Contains("email already exists")) return "این نام کاربری قبلاً ثبت شده است.";
+                if (error.Contains("user already exists")) return "این نام کاربری قبلاً ثبت شده است.";
+                if (statusCode == 6) return "این نام کاربری قبلاً ثبت شده است.";
+            }
+
+            if (error.Contains("username_already_exists")) return "این نام کاربری قبلاً ثبت شده است.";
+            if (error.Contains("username already exists")) return "این نام کاربری قبلاً ثبت شده است.";
+            if (error.Contains("user name already exists")) return "این نام کاربری قبلاً ثبت شده است.";
+            if (error.Contains("email_already_exists")) return "این ایمیل قبلاً ثبت شده است.";
+            if (error.Contains("email already exists")) return "این ایمیل قبلاً ثبت شده است.";
+            if (error.Contains("invalid credentials")) return "نام کاربری یا رمز عبور اشتباه است.";
             if (error.Contains("jwt expired") || error.Contains("access token expired")) return "نشست شما منقضی شده است.";
             if (error.Contains("refresh token revoked")) return "ورود شما منقضی شده است. لطفاً دوباره وارد شوید.";
             if (error.Contains("refresh token") && error.Contains("required")) return "اطلاعات ورود کامل نیست. لطفاً دوباره وارد شوید.";
             if (error.Contains("missing authorization") || error.Contains("missing access token")) return "برای ادامه باید وارد حساب کاربری شوید.";
             if (error.Contains("deadline") || error.Contains("timeout")) return "پاسخ سرور بیش از حد طول کشید. لطفاً دوباره تلاش کنید.";
             if (error.Contains("cannot connect") || error.Contains("failed to connect")) return "اتصال به سرور برقرار نشد.";
+
             if (stageKey == "REGISTER") return "ثبت نام انجام نشد. لطفاً دوباره تلاش کنید.";
             if (stageKey == "LOGIN") return "ورود انجام نشد. لطفاً دوباره تلاش کنید.";
             if (stageKey == "LOGIN_INIT") return "دریافت اطلاعات کاربر انجام نشد.";
@@ -1029,6 +1302,9 @@ namespace Network_A.Auth
 
             return "عملیات انجام نشد. لطفاً دوباره تلاش کنید.";
         }
+
+
+
 
         #endregion
 

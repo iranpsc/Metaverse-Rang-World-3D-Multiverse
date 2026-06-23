@@ -10,12 +10,20 @@ namespace Network_A.Realtime.Protocol
         public const string Ack = "ack";
         public const string Error = "error";
 
+        public const string CreateRoom = "create_room";
+        public const string ListRooms = "list_rooms";
+        public const string RoomCreated = "room_created";
+        public const string RoomUpdated = "room_updated";
+        public const string RoomClosed = "room_closed";
+
         public const string JoinRoom = "join_room";
         public const string LeaveRoom = "leave_room";
         public const string PlayerAction = "player_action";
         public const string PlayerState = "player_state";
         public const string PlayerJoined = "player_joined";
         public const string PlayerLeft = "player_left";
+        public const string RoomMembersRequest = "room_members_request";
+        public const string RoomMembersSnapshot = "room_members_snapshot";
         public const string WorldEvent = "world_event";
 
         public const string ChatMessage = "message";

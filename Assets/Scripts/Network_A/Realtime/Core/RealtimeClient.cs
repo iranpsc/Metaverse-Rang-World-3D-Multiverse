@@ -70,7 +70,6 @@ namespace Network_A.Realtime.Core
             SetState(RealtimeConnectionState.Connecting);
             CleanupTransportReference(transport);
             lifecycleCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            if (config.connectTimeoutMs > 0) lifecycleCts.CancelAfter(config.connectTimeoutMs);
 
             transport = RealtimeTransportFactory.Create(config.transportKind);
             if (transport == null)
@@ -80,11 +79,30 @@ namespace Network_A.Realtime.Core
                 return false;
             }
 
-            BindTransportEvents(transport);
-            bool connected = await transport.ConnectAsync(config.serverUrl, headers ?? new Dictionary<string, string>(), lifecycleCts.Token);
+            IRealtimeTransport activeTransport = transport;
+            BindTransportEvents(activeTransport);
 
+            Task<bool> connectTask = activeTransport.ConnectAsync(config.serverUrl, headers ?? new Dictionary<string, string>(), lifecycleCts.Token);
+
+            if (config.connectTimeoutMs > 0)
+            {
+                Task timeoutTask = Task.Delay(config.connectTimeoutMs);
+                Task completedTask = await Task.WhenAny(connectTask, timeoutTask);
+
+                if (completedTask != connectTask)
+                {
+                    TransportErrorReceived?.Invoke("Realtime connect timeout after " + config.connectTimeoutMs + "ms.");
+                    await activeTransport.DisconnectAsync("Realtime connect timeout", CancellationToken.None);
+                    CleanupTransportReference(activeTransport);
+                    SetState(RealtimeConnectionState.Failed);
+                    return false;
+                }
+            }
+
+            bool connected = await connectTask;
             if (!connected)
             {
+                CleanupTransportReference(activeTransport);
                 SetState(RealtimeConnectionState.Failed);
                 return false;
             }
@@ -92,7 +110,6 @@ namespace Network_A.Realtime.Core
             SetState(RealtimeConnectionState.Connected);
             return true;
         }
-
         //* اِنولوپ آماده را از طریق ترنسپورت فعال ارسال می‌کند.
         public async Task<bool> SendEnvelopeAsync(RealtimeEnvelope envelope, CancellationToken cancellationToken = default)
         {

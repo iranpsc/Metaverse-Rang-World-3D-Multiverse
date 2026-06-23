@@ -222,15 +222,23 @@ namespace Network_A.Core
             byte[] bytes = new byte[0];
             int statusCode = 0;
 
+            Dictionary<string, string> responseHeaders = null;
+
             if (req != null)
             {
                 statusCode = (int)req.responseCode;
+                responseHeaders = req.GetResponseHeaders();
+
                 if (req.downloadHandler != null)
                 {
                     text = req.downloadHandler.text ?? string.Empty;
                     bytes = req.downloadHandler.data ?? new byte[0];
                 }
             }
+
+            string grpcStatus = ReadResponseHeader(responseHeaders, "grpc-status");
+            string grpcMessage = DecodeGrpcHeaderMessage(ReadResponseHeader(responseHeaders, "grpc-message"));
+            int grpcStatusCode = ParseGrpcStatusCode(grpcStatus, statusCode);
 
             if (!string.IsNullOrWhiteSpace(logTag) && req != null)
             {
@@ -239,13 +247,22 @@ namespace Network_A.Core
                 Debug.Log("[" + logTag + "] Result=" + req.result);
                 Debug.Log("[" + logTag + "] Error=" + req.error);
                 Debug.Log("[" + logTag + "] Body=" + text);
+                if (!string.IsNullOrEmpty(grpcStatus)) Debug.Log("[" + logTag + "] GrpcStatus=" + grpcStatus);
+                if (!string.IsNullOrEmpty(grpcMessage)) Debug.Log("[" + logTag + "] GrpcMessage=" + grpcMessage);
             }
 
-            NetworkFileLogger.Request(requestId, "RESPONSE", req != null ? req.url : "<null>", req != null ? req.method : "<null>", statusCode, "result=" + (req != null ? req.result.ToString() : "<null>") + " error=" + (req != null ? req.error : "<null>") + " textLength=" + text.Length + " bytes=" + bytes.Length);
+            NetworkFileLogger.Request(requestId, "RESPONSE", req != null ? req.url : "<null>", req != null ? req.method : "<null>", statusCode, "result=" + (req != null ? req.result.ToString() : "<null>") + " error=" + (req != null ? req.error : "<null>") + " textLength=" + text.Length + " bytes=" + bytes.Length + " grpcStatus=" + grpcStatus + " grpcMessage=" + grpcMessage);
 
             if (req == null)
             {
                 return ApiResult<T>.Failure("UnityWebRequest is null", statusCode, true, text, bytes);
+            }
+
+            if (IsGrpcErrorStatus(grpcStatus))
+            {
+                string message = !string.IsNullOrEmpty(grpcMessage) ? grpcMessage : (!string.IsNullOrEmpty(text) ? text : "gRPC error " + grpcStatus);
+                NetworkFileLogger.Request(requestId, "GRPC_WEB_ERROR", req.url, req.method, grpcStatusCode, "message=" + message);
+                return ApiResult<T>.Failure(message, grpcStatusCode, false, text, bytes);
             }
 
             if (req.result != UnityWebRequest.Result.Success)
@@ -262,7 +279,13 @@ namespace Network_A.Core
             if (typeof(T) == typeof(byte[]))
             {
                 if (bytes == null) bytes = new byte[0];
-                if (bytes.Length == 0) return ApiResult<T>.Failure("Empty binary response", statusCode, false, text, bytes);
+                if (bytes.Length == 0)
+                {
+                    string emptyMessage = BuildEmptyGrpcWebResponseMessage(responseHeaders);
+                    NetworkFileLogger.Request(requestId, "EMPTY_BINARY_RESPONSE", req.url, req.method, statusCode, emptyMessage);
+                    return ApiResult<T>.Failure(emptyMessage, statusCode, false, text, bytes);
+                }
+
                 NetworkFileLogger.Request(requestId, "SUCCESS_BYTES", req.url, req.method, statusCode, "bytes=" + bytes.Length);
                 return ApiResult<T>.Success((T)(object)bytes, statusCode, text, bytes);
             }
@@ -279,6 +302,69 @@ namespace Network_A.Core
                 NetworkFileLogger.Exception("REQUEST_MANAGER_PARSE", ex);
                 return ApiResult<T>.Failure(ex.Message, statusCode, false, text, bytes);
             }
+        }
+
+
+        //* Reads a response header with case-insensitive fallback.
+        static string ReadResponseHeader(Dictionary<string, string> headers, string key)
+        {
+            if (headers == null || string.IsNullOrEmpty(key)) return string.Empty;
+
+            string value;
+            if (headers.TryGetValue(key, out value)) return value ?? string.Empty;
+
+            foreach (var pair in headers)
+            {
+                if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase)) return pair.Value ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        //* Decodes grpc-message header so auth errors can be mapped correctly.
+        static string DecodeGrpcHeaderMessage(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+
+            string normalized = value.Replace("+", " ");
+
+            try
+            {
+                return UnityWebRequest.UnEscapeURL(normalized);
+            }
+            catch
+            {
+                return value;
+            }
+        }
+
+        //* Returns true when gRPC status header contains a real error.
+        static bool IsGrpcErrorStatus(string grpcStatus)
+        {
+            if (string.IsNullOrEmpty(grpcStatus)) return false;
+            return grpcStatus.Trim() != "0";
+        }
+
+        //* Parses gRPC status code and keeps HTTP status as fallback.
+        static int ParseGrpcStatusCode(string grpcStatus, int fallbackStatusCode)
+        {
+            int parsed;
+            if (int.TryParse(grpcStatus, out parsed)) return parsed;
+            return fallbackStatusCode;
+        }
+
+        //* Builds a safer message for empty gRPC-Web responses and includes exposed header info when available.
+        static string BuildEmptyGrpcWebResponseMessage(Dictionary<string, string> headers)
+        {
+            string grpcStatus = ReadResponseHeader(headers, "grpc-status");
+            string grpcMessage = DecodeGrpcHeaderMessage(ReadResponseHeader(headers, "grpc-message"));
+
+            if (IsGrpcErrorStatus(grpcStatus))
+            {
+                return !string.IsNullOrEmpty(grpcMessage) ? grpcMessage : "gRPC error " + grpcStatus;
+            }
+
+            return "Empty binary response";
         }
 
         //* Decides if RequestManager should run refresh and retry the same request.

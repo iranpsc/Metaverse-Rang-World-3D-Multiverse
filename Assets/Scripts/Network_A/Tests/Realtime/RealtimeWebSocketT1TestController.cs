@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Network_A.Auth;
 using Network_A.GameServer;
 using Network_A.Realtime.Auth;
 using Network_A.Realtime.Core;
@@ -8,14 +9,16 @@ using Network_A.Realtime.Protocol;
 using Network_A.Realtime.Stability;
 using Network_A.Realtime.Transport;
 using UnityEngine;
-
 namespace Network_A.Tests.Realtime
 {
     //* کنترلر تست تی‌وان است و مسیر کامل وب‌سوکت ریل‌تایم را از داخل یونیتی بررسی می‌کند.
+    [DefaultExecutionOrder(100)]
     public class RealtimeWebSocketT1TestController : MonoBehaviour
     {
         [Header("Connection")]
-        [SerializeField] private string serverUrl = "ws://127.0.0.1:8080";
+        [SerializeField] private string serverUrl = "ws://127.0.0.1:8080/ws";
+        [SerializeField] private bool useServerConfigUrl = true;
+        [SerializeField] private bool forceDedicatedServerConfig = true;
         [SerializeField] private RealtimeTransportKind transportKind = RealtimeTransportKind.WebSocket;
         [SerializeField] private bool runOnStart;
         [SerializeField] private bool autoDisconnectAtEnd = true;
@@ -45,6 +48,7 @@ namespace Network_A.Tests.Realtime
         private TaskCompletionSource<bool> ackWaiter;
         private string waitingAckPrefix = string.Empty;
         private string activeRoomId = string.Empty;
+        private string activeServerUrl = string.Empty;
         private bool isRunning;
         private bool eventsBound;
 
@@ -163,7 +167,7 @@ namespace Network_A.Tests.Realtime
         //* کُر ریل‌تایم را از طریق ترنسپورت وب‌سوکت وصل می‌کند.
         private async Task<bool> ConnectAsync()
         {
-            Log("Connecting to " + serverUrl);
+            Log("Connecting to " + activeServerUrl);
             bool connected = await realtimeClient.ConnectAsync(null, lifecycleCts.Token);
             Log("Connect result: " + connected);
             return connected;
@@ -248,9 +252,11 @@ namespace Network_A.Tests.Realtime
         //* کلاینت‌های تست را با کانفیگ وب‌سوکت می‌سازد و رویدادها را وصل می‌کند.
         private void CreateClients()
         {
+            activeServerUrl = ResolveRealtimeServerUrl();
+
             var config = new RealtimeConfig
             {
-                serverUrl = serverUrl,
+                serverUrl = activeServerUrl,
                 transportKind = transportKind,
                 connectTimeoutMs = waitTimeoutMs,
                 sendTimeoutMs = waitTimeoutMs,
@@ -344,6 +350,29 @@ namespace Network_A.Tests.Realtime
             heartbeatConnectionTimeoutHandler = null;
             heartbeatLogHandler = null;
             eventsBound = false;
+        }
+
+
+        //* آدرس وب‌سوکت ریل‌تایم را از سرورکانفیگ مرکزی می‌گیرد یا در حالت دستی از مقدار اینسپکتور استفاده می‌کند.
+        private string ResolveRealtimeServerUrl()
+        {
+            if (useServerConfigUrl)
+            {
+                if (forceDedicatedServerConfig)
+                {
+                    ServerConfig.UseDedicatedGrpcWeb();
+                }
+
+                ServerConfig.UseRealtimeWebSocketPath("/ws");
+                return ServerConfig.RealtimeWebSocketUrl;
+            }
+
+            if (!string.IsNullOrWhiteSpace(serverUrl))
+            {
+                return serverUrl.Trim();
+            }
+
+            return ServerConfig.RealtimeWebSocketUrl;
         }
 
         #endregion
