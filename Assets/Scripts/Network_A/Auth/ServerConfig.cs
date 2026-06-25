@@ -10,7 +10,7 @@ namespace Network_A.Auth
         public static Endpoint GrpcWebEndpoint = new Endpoint("localhost", 8443, true);
         public static Endpoint GrpcNativeEndpoint = new Endpoint("localhost", 50051, false);
         public static Endpoint DedicatedGrpcWebEndpoint = new Endpoint("dev-world-3d.metarang.com", 443, true);
-        public static Endpoint DedicatedGrpcNativeEndpoint = new Endpoint("dev-world-3d.metarang.com", 50051, true);
+        public static Endpoint DedicatedGrpcNativeEndpoint = new Endpoint("dev-world-3d.metarang.com", 50052, true);
 
         public static string ServiceName = "metaverse.v1.AuthService";
         public static string HealthServiceName = "metaverse.v1.HealthService";
@@ -18,6 +18,20 @@ namespace Network_A.Auth
         public static string ClientVersion = "1.0.0";
         public static int TimeoutSeconds = 15;
         public static string RealtimeWebSocketPath = "/ws";
+
+        #region gRPC Streaming Realtime
+
+        public static Endpoint RealtimeGrpcStreamingEndpoint = new Endpoint("localhost", 50051, false);
+        public static Endpoint DedicatedRealtimeGrpcStreamingEndpoint = new Endpoint("dev-world-3d.metarang.com", 50052, true);
+
+        public static string RealtimeStreamServiceName = "metaverse.v1.realtime.RealtimeStreamService";
+        public static string RealtimeStreamOpenMethodName = "Open";
+
+        public static string RealtimeGrpcStreamingTarget { get { return BuildRealtimeGrpcStreamingTarget(); } }
+        public static string RealtimeGrpcStreamingAddress { get { return BuildRealtimeGrpcStreamingAddress(); } }
+        public static string RealtimeGrpcStreamingMethod { get { return BuildRealtimeGrpcStreamingMethod(); } }
+
+        #endregion
 
         public static int RefreshRequestTokenFieldNumber = 1;
         public static int AuthReplyRefreshTokenFieldNumber = 4;
@@ -158,6 +172,60 @@ namespace Network_A.Auth
         {
             return CurrentTransportKind == TransportKind.GrpcNative;
         }
+
+        #region gRPC Streaming Realtime
+
+        //* Sets the local realtime gRPC streaming endpoint used by native clients during development.
+        public static void UseLocalRealtimeGrpcStreaming()
+        {
+            RealtimeGrpcStreamingEndpoint = new Endpoint("localhost", 50051, false);
+        }
+
+        //* Sets the VPS realtime gRPC streaming endpoint used by native clients.
+        public static void UseDedicatedRealtimeGrpcStreaming()
+        {
+            RealtimeGrpcStreamingEndpoint = DedicatedRealtimeGrpcStreamingEndpoint;
+        }
+
+        //* Sets a dedicated realtime gRPC streaming endpoint and keeps the realtime stream target centralized.
+        public static void UseDedicatedRealtimeGrpcStreaming(string host, int port, bool useTls)
+        {
+            DedicatedRealtimeGrpcStreamingEndpoint = new Endpoint(host, port, useTls);
+            UseDedicatedRealtimeGrpcStreaming();
+        }
+
+        //* Sets a custom realtime gRPC streaming endpoint.
+        public static void UseRealtimeGrpcStreamingEndpoint(Endpoint endpoint)
+        {
+            RealtimeGrpcStreamingEndpoint = endpoint;
+        }
+
+        //* Sets the realtime gRPC streaming service and method names used by the native stream transport.
+        public static void UseRealtimeGrpcStreamingService(string serviceName, string methodName)
+        {
+            if (!string.IsNullOrWhiteSpace(serviceName)) RealtimeStreamServiceName = serviceName.Trim();
+            if (!string.IsNullOrWhiteSpace(methodName)) RealtimeStreamOpenMethodName = methodName.Trim();
+        }
+
+        //* Builds the realtime gRPC streaming native target address.
+        public static string BuildRealtimeGrpcStreamingTarget()
+        {
+            return RealtimeGrpcStreamingEndpoint.Host + ":" + RealtimeGrpcStreamingEndpoint.Port;
+        }
+
+        //* Builds the realtime gRPC streaming address with scheme for GrpcChannel based clients.
+        public static string BuildRealtimeGrpcStreamingAddress()
+        {
+            return RealtimeGrpcStreamingEndpoint.ToHttpBaseUrl();
+        }
+
+        //* Builds the realtime gRPC streaming full method path.
+        public static string BuildRealtimeGrpcStreamingMethod()
+        {
+            return BuildGrpcNativeMethod(RealtimeStreamServiceName, RealtimeStreamOpenMethodName);
+        }
+
+        #endregion
 
         //* Normalizes URL path text so callers can pass ws or /ws safely.
         private static string NormalizePath(string path, string fallbackPath)

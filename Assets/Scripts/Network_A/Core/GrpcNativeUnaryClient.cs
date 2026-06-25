@@ -1,4 +1,11 @@
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
+/*
+این فایل ارسال Unary جی‌آر‌پی‌سی نیتیو را انجام می‌دهد.
+در ادیتور برای جلوگیری از گیر کردن Unity هنگام Reload Domain، کانال به صورت موقت ساخته و با تایم‌اوت کوتاه بسته می‌شود.
+در بیلد نیتیو، کانال قابل استفاده مجدد می‌ماند تا کارایی بهتر باشد.
+WebGL این فایل را کامپایل نمی‌کند.
+*/
+
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -12,20 +19,66 @@ namespace Network_A.Core
     {
         private static Channel _channel;
         private static CallInvoker _callInvoker;
+        private const int ShutdownTimeoutMs = 1500;
 
         private static readonly Marshaller<byte[]> ByteArrayMarshaller = Marshallers.Create(
             bytes => bytes ?? new byte[0],
             bytes => bytes ?? new byte[0]
         );
 
-        //* Sends a native gRPC unary request using a service and method name.
+        //* این تابع یک درخواست Unary جی‌آر‌پی‌سی نیتیو را با نام سرویس و متد ارسال می‌کند.
         public static async Task<ApiResult<byte[]>> SendAsync(string serviceName, string methodName, byte[] protoMessage, bool auth, Dictionary<string, string> headers = null, CancellationToken ct = default(CancellationToken), string logTag = "")
         {
             if (string.IsNullOrWhiteSpace(serviceName)) return ApiResult<byte[]>.Failure("Native gRPC service name is empty.", 0, false);
             if (string.IsNullOrWhiteSpace(methodName)) return ApiResult<byte[]>.Failure("Native gRPC method name is empty.", 0, false);
 
-            EnsureChannel();
+#if UNITY_EDITOR
+            return await SendWithTemporaryEditorChannelAsync(serviceName, methodName, protoMessage, auth, headers, ct, logTag);
+#else
+            return await SendWithSharedChannelAsync(serviceName, methodName, protoMessage, auth, headers, ct, logTag);
+#endif
+        }
 
+        //* این تابع یک درخواست Unary جی‌آر‌پی‌سی نیتیو را با مسیر کامل متد ارسال می‌کند.
+        public static Task<ApiResult<byte[]>> SendByPathAsync(string methodPath, byte[] protoMessage, bool auth, Dictionary<string, string> headers = null, CancellationToken ct = default(CancellationToken), string logTag = "")
+        {
+            string serviceName;
+            string methodName;
+
+            if (!TrySplitMethodPath(methodPath, out serviceName, out methodName)) return Task.FromResult(ApiResult<byte[]>.Failure("Invalid native gRPC method path: " + methodPath, 0, false));
+
+            return SendAsync(serviceName, methodName, protoMessage, auth, headers, ct, logTag);
+        }
+
+#if UNITY_EDITOR
+        //* این تابع در ادیتور برای هر درخواست یک کانال موقت می‌سازد تا کانال باز، ریلود دامین را نگه ندارد.
+        private static async Task<ApiResult<byte[]>> SendWithTemporaryEditorChannelAsync(string serviceName, string methodName, byte[] protoMessage, bool auth, Dictionary<string, string> headers, CancellationToken ct, string logTag)
+        {
+            Channel channel = null;
+
+            try
+            {
+                CallInvoker callInvoker = CreateChannelAndInvoker(out channel);
+                ApiResult<byte[]> result = await SendWithInvokerAsync(callInvoker, serviceName, methodName, protoMessage, auth, headers, ct, logTag);
+                return result;
+            }
+            finally
+            {
+                await ShutdownChannelWithTimeoutAsync(channel, "NATIVE_GRPC_EDITOR_CHANNEL_SHUTDOWN");
+            }
+        }
+#else
+        //* این تابع در بیلد نیتیو از کانال مشترک استفاده می‌کند تا برای هر درخواست کانال جدید ساخته نشود.
+        private static async Task<ApiResult<byte[]>> SendWithSharedChannelAsync(string serviceName, string methodName, byte[] protoMessage, bool auth, Dictionary<string, string> headers, CancellationToken ct, string logTag)
+        {
+            EnsureSharedChannel();
+            return await SendWithInvokerAsync(_callInvoker, serviceName, methodName, protoMessage, auth, headers, ct, logTag);
+        }
+#endif
+
+        //* این تابع عملیات واقعی ارسال Unary را روی کال‌این‌وُکِر داده‌شده انجام می‌دهد.
+        private static async Task<ApiResult<byte[]>> SendWithInvokerAsync(CallInvoker callInvoker, string serviceName, string methodName, byte[] protoMessage, bool auth, Dictionary<string, string> headers, CancellationToken ct, string logTag)
+        {
             var method = new Method<byte[], byte[]>(MethodType.Unary, serviceName, methodName, ByteArrayMarshaller, ByteArrayMarshaller);
             var metadata = GrpcMetadataAdapter.BuildMetadata(auth, headers);
             var deadline = DateTime.UtcNow.AddSeconds(ServerConfig.TimeoutSeconds);
@@ -35,7 +88,7 @@ namespace Network_A.Core
             {
                 NetworkFileLogger.Request(logTag, "NATIVE_GRPC_SEND", ServerConfig.BuildGrpcNativeTarget(), "RPC", 0, serviceName + "/" + methodName + " bytes=" + ReadLength(protoMessage) + " auth=" + auth);
 
-                byte[] responseBytes = await _callInvoker.AsyncUnaryCall(method, null, options, protoMessage ?? new byte[0]);
+                byte[] responseBytes = await callInvoker.AsyncUnaryCall(method, null, options, protoMessage ?? new byte[0]);
 
                 NetworkFileLogger.Request(logTag, "NATIVE_GRPC_RESPONSE", ServerConfig.BuildGrpcNativeTarget(), "RPC", 200, serviceName + "/" + methodName + " bytes=" + ReadLength(responseBytes));
 
@@ -57,53 +110,66 @@ namespace Network_A.Core
             }
         }
 
-        //* Sends a native gRPC unary request using a full method path.
-        public static Task<ApiResult<byte[]>> SendByPathAsync(string methodPath, byte[] protoMessage, bool auth, Dictionary<string, string> headers = null, CancellationToken ct = default(CancellationToken), string logTag = "")
-        {
-            string serviceName;
-            string methodName;
-
-            if (!TrySplitMethodPath(methodPath, out serviceName, out methodName)) return Task.FromResult(ApiResult<byte[]>.Failure("Invalid native gRPC method path: " + methodPath, 0, false));
-
-            return SendAsync(serviceName, methodName, protoMessage, auth, headers, ct, logTag);
-        }
-
-        //* Creates the native gRPC channel once and reuses it.
-        private static void EnsureChannel()
+#if !UNITY_EDITOR
+        //* این تابع کانال مشترک جی‌آر‌پی‌سی نیتیو را در بیلد نیتیو می‌سازد و نگه می‌دارد.
+        private static void EnsureSharedChannel()
         {
             if (_channel != null && _callInvoker != null) return;
 
+            _callInvoker = CreateChannelAndInvoker(out _channel);
+        }
+#endif
+
+        //* این تابع کانال جی‌آر‌پی‌سی را بر اساس تنظیمات ServerConfig می‌سازد.
+        private static CallInvoker CreateChannelAndInvoker(out Channel channel)
+        {
             string target = ServerConfig.BuildGrpcNativeTarget();
             ChannelCredentials credentials = ServerConfig.GrpcNativeEndpoint.UseTls ? new SslCredentials() : ChannelCredentials.Insecure;
 
-            _channel = new Channel(target, credentials);
-            _callInvoker = _channel.CreateCallInvoker();
+            channel = new Channel(target, credentials);
 
             NetworkFileLogger.Info("NATIVE_GRPC", "Native channel created. target=" + target + " tls=" + ServerConfig.GrpcNativeEndpoint.UseTls);
+
+            return channel.CreateCallInvoker();
         }
 
-        //* Shuts down the native gRPC channel.
+        //* این تابع کانال مشترک را با تایم‌اوت کوتاه خاموش می‌کند تا خروج از Play Mode گیر نکند.
         public static async Task ShutdownAsync()
         {
-            if (_channel == null) return;
+            Channel channel = _channel;
+            _channel = null;
+            _callInvoker = null;
+
+            await ShutdownChannelWithTimeoutAsync(channel, "NATIVE_GRPC_SHUTDOWN");
+        }
+
+        //* این تابع خاموش کردن کانال را با سقف زمانی انجام می‌دهد و اجازه نمی‌دهد ادیتور معطل بماند.
+        private static async Task ShutdownChannelWithTimeoutAsync(Channel channel, string logTag)
+        {
+            if (channel == null) return;
 
             try
             {
-                await _channel.ShutdownAsync();
-                NetworkFileLogger.Info("NATIVE_GRPC", "Native channel shutdown completed.");
+                Task shutdownTask = channel.ShutdownAsync();
+                Task finishedTask = await Task.WhenAny(shutdownTask, Task.Delay(ShutdownTimeoutMs));
+
+                if (finishedTask == shutdownTask)
+                {
+                    await shutdownTask;
+                    NetworkFileLogger.Info("NATIVE_GRPC", logTag + " completed.");
+                }
+                else
+                {
+                    NetworkFileLogger.Warning("NATIVE_GRPC", logTag + " timed out after " + ShutdownTimeoutMs + "ms.");
+                }
             }
             catch (Exception ex)
             {
-                NetworkFileLogger.Exception("NATIVE_GRPC_SHUTDOWN", ex);
-            }
-            finally
-            {
-                _channel = null;
-                _callInvoker = null;
+                NetworkFileLogger.Exception(logTag, ex);
             }
         }
 
-        //* Splits a native gRPC method path into service and method.
+        //* این تابع مسیر کامل متد جی‌آر‌پی‌سی را به نام سرویس و نام متد جدا می‌کند.
         private static bool TrySplitMethodPath(string methodPath, out string serviceName, out string methodName)
         {
             serviceName = string.Empty;
@@ -123,13 +189,13 @@ namespace Network_A.Core
             return !string.IsNullOrWhiteSpace(serviceName) && !string.IsNullOrWhiteSpace(methodName);
         }
 
-        //* Returns byte array length safely.
+        //* این تابع طول آرایه بایت را به شکل امن برمی‌گرداند.
         private static int ReadLength(byte[] bytes)
         {
             return bytes == null ? 0 : bytes.Length;
         }
 
-        //* Detects connection-level native gRPC errors.
+        //* این تابع خطاهای سطح اتصال جی‌آر‌پی‌سی نیتیو را تشخیص می‌دهد.
         private static bool IsNetworkError(StatusCode statusCode)
         {
             return statusCode == StatusCode.Unavailable ||

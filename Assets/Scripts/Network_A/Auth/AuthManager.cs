@@ -32,6 +32,16 @@ namespace Network_A.Auth
         [SerializeField] private string customHost = "localhost";
         [SerializeField] private int customPort = 8443;
         [SerializeField] private bool customUseTls = true;
+
+        [Header("Native Dedicated gRPC")]
+        [SerializeField] private string nativeDedicatedHost = "dev-world-3d.metarang.com";
+        [SerializeField] private int nativeDedicatedPort = 50052;
+        [SerializeField] private bool nativeDedicatedUseTls = true;
+
+#if UNITY_EDITOR
+        [Header("Editor Native Auth Test")]
+        [SerializeField] private bool editorUseNativeGrpcAuth;
+#endif
         #endregion
 
         #region <Run Options>
@@ -249,10 +259,30 @@ namespace Network_A.Auth
         //* Runs after Register/Login success and also on next app opens when refresh token exists.
         public async Task Login_Init()
         {
+            EnsureAuthServerConfig();
+
             NetworkFileLogger.Auth("LOGIN_INIT_START", true, "Login_Init started.", string.Empty, HasAccessToken(), HasRefreshToken());
             ShowInfoMessage("در حال دریافت اطلاعات کاربر | Request: GetUserData | Function: Login_Init");
 
             ApiResult<GetUserDataResponseDto> res = await GetUserDataAsync();
+
+            if (res != null && !res.IsSuccess && IsUnauthorizedOrExpired(res.StatusCode, res.ErrorMessage) && HasRefreshToken())
+            {
+                NetworkFileLogger.Warning("LOGIN_INIT_REFRESH", "GetUserData failed with expired or unauthenticated token. Trying refresh before showing login UI. status=" + res.StatusCode + " error=" + res.ErrorMessage);
+                ShowInfoMessage("نشست کاربری در حال تمدید است...");
+
+                bool refreshed = await RefreshInternalAsync();
+
+                if (refreshed)
+                {
+                    NetworkFileLogger.Info("LOGIN_INIT_REFRESH", "Refresh succeeded. Retrying GetUserData.");
+                    res = await GetUserDataAsync();
+                }
+                else
+                {
+                    NetworkFileLogger.Warning("LOGIN_INIT_REFRESH", "Refresh failed. Login UI is required.");
+                }
+            }
 
             if (res == null)
             {
@@ -265,7 +295,7 @@ namespace Network_A.Auth
             if (!res.IsSuccess)
             {
                 isLogin = false;
-                if (res.StatusCode == 401)
+                if (IsUnauthorizedOrExpired(res.StatusCode, res.ErrorMessage))
                 {
                     ShowWarningMessage("نشست کاربری منقضی شده است. لطفاً دوباره وارد شوید.");
                     ShowLoginRequired();
@@ -481,6 +511,8 @@ namespace Network_A.Auth
         {
             if (isCheckingNet) return;
 
+            EnsureAuthServerConfig();
+
             isCheckingNet = true;
             NetworkFileLogger.Info("CHECK_NET", "Health check started. transport=" + ServerConfig.CurrentTransportKind);
 
@@ -490,7 +522,7 @@ namespace Network_A.Auth
 
                 if (ServerConfig.IsGrpcNative())
                 {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
                     res = await GrpcNativeUnaryClient.SendAsync(ServerConfig.HealthServiceName, "Check", AuthProtoMapper.EncodeEmptyRequest(), false, null, default(CancellationToken), "HEALTH_NATIVE");
 #else
                     res = ApiResult<byte[]>.Failure("Native gRPC is enabled in ServerConfig, but this platform is not enabled for Native health.", 0, true);
@@ -548,6 +580,18 @@ namespace Network_A.Auth
         {
             return string.IsNullOrEmpty(SecureTokenStorage.GetRefreshToken());
         }
+
+        //* این تابع خطای منقضی شدن یا نامعتبر بودن آث را برای مسیر وب‌جی‌آر‌پی‌سی و جی‌آر‌پی‌سی نیتیو یکسان تشخیص می دهد.
+        private bool IsUnauthorizedOrExpired(int statusCode, string errorMessage)
+        {
+            if (statusCode == 401) return true;
+            if (statusCode == 16) return true;
+
+            string message = errorMessage ?? string.Empty;
+            return message.IndexOf("expired", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   message.IndexOf("unauth", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   message.IndexOf("Authentication failed", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
         #endregion
 
         #region <Panels>
@@ -602,7 +646,15 @@ namespace Network_A.Auth
                     break;
 
                 case ServerType.Dedicated:
-                    ServerConfig.UseEndpoint(new Endpoint(dedicatedHost, dedicatedPort, dedicatedUseTls));
+                    if (ServerConfig.IsGrpcNative())
+                    {
+                        ServerConfig.UseGrpcNativeEndpoint(new Endpoint(nativeDedicatedHost, nativeDedicatedPort, nativeDedicatedUseTls));
+                    }
+                    else
+                    {
+                        ServerConfig.UseGrpcWebEndpoint(new Endpoint(dedicatedHost, dedicatedPort, dedicatedUseTls));
+                    }
+
                     Debug.Log("Server Mode : Dedicated");
                     NetworkFileLogger.Info("SERVER_CONFIG", "Server Mode : Dedicated | transport=" + ServerConfig.CurrentTransportKind + " endpoint=" + ServerConfig.CurrentEndpoint.ToString());
                     break;
@@ -614,15 +666,34 @@ namespace Network_A.Auth
                     break;
             }
         }
+
+        //* این تابع قبل از هر درخواست آث، مسیر آث را دوباره از روی تنظیمات همین آث‌منیجر قفل می کند تا اسکریپت های دیگر آن را تغییر ندهند.
+        private void EnsureAuthServerConfig()
+        {
+            ApplyServerType();
+
+            NetworkFileLogger.Info(
+                "AUTH_CONFIG_LOCK",
+                "Auth config locked | transport=" + ServerConfig.CurrentTransportKind +
+                " endpoint=" + ServerConfig.CurrentEndpoint.ToString()
+            );
+        }
         //* Selects the default transport for the current Unity platform.
+        //* این تابع ترنسپورت آث را بر اساس پلتفرم انتخاب می کند و در ادیتور فقط با گزینه تستی به جی‌آر‌پی‌سی نیتیو می رود.
+        //* این تابع ترنسپورت آث را بر اساس پلتفرم انتخاب می کند و در ادیتور فقط با گزینه تستی به جی‌آر‌پی‌سی نیتیو می رود.
         private void ApplyDefaultTransportForPlatform()
         {
+#if UNITY_EDITOR
+            NetworkFileLogger.Info("AUTH_TRANSPORT_SELECT", "UNITY_EDITOR | editorUseNativeGrpcAuth=" + editorUseNativeGrpcAuth);
+#endif
 #if UNITY_WEBGL && !UNITY_EDITOR
     ServerConfig.UseTransport(TransportKind.GrpcWeb);
-#elif UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#elif UNITY_EDITOR
+            ServerConfig.UseTransport(editorUseNativeGrpcAuth ? TransportKind.GrpcNative : TransportKind.GrpcWeb);
+#elif UNITY_STANDALONE_WIN || UNITY_ANDROID
     ServerConfig.UseTransport(TransportKind.GrpcNative);
 #else
-            ServerConfig.UseTransport(TransportKind.GrpcWeb);
+    ServerConfig.UseTransport(TransportKind.GrpcWeb);
 #endif
         }
         #endregion
@@ -631,9 +702,11 @@ namespace Network_A.Auth
         //* Sends an AuthReply unary request through the selected transport and decodes it internally.
         private async Task<ApiResult<AuthResponseDto>> SendAuthUnaryAsync(string url, byte[] protoMessage, bool auth, string logTag, CancellationToken ct)
         {
+            EnsureAuthServerConfig();
+
             if (ServerConfig.IsGrpcNative())
             {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
                 string methodName = GetNativeAuthMethodName(logTag);
                 ApiResult<byte[]> raw = await GrpcNativeUnaryClient.SendAsync(ServerConfig.ServiceName, methodName, protoMessage, auth, null, ct, logTag + "_NATIVE");
 
@@ -668,9 +741,11 @@ namespace Network_A.Auth
         //* Sends a GetUserData unary request through the selected transport and decodes it internally.
         private async Task<ApiResult<GetUserDataResponseDto>> SendGetUserDataUnaryAsync(string url, byte[] protoMessage, bool auth, string logTag, CancellationToken ct)
         {
+            EnsureAuthServerConfig();
+
             if (ServerConfig.IsGrpcNative())
             {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
                 ApiResult<byte[]> raw = await GrpcNativeUnaryClient.SendAsync(ServerConfig.ServiceName, "GetUserData", protoMessage, auth, null, ct, logTag + "_NATIVE");
 
                 if (!raw.IsSuccess) return ApiResult<GetUserDataResponseDto>.Failure(raw.ErrorMessage, raw.StatusCode, raw.IsNetworkError, raw.RawBody, raw.RawBytes);
@@ -704,6 +779,8 @@ namespace Network_A.Auth
         //* Refreshes token without entering the main RequestManager queue.
         async Task<bool> RefreshInternalAsync()
         {
+            EnsureAuthServerConfig();
+
             string refreshToken = SecureTokenStorage.GetRefreshToken();
             NetworkFileLogger.TokenState("REFRESH_BEFORE_SEND", SecureTokenStorage.GetAccessToken(), refreshToken);
 
@@ -717,7 +794,7 @@ namespace Network_A.Auth
 
             if (ServerConfig.IsGrpcNative())
             {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
                 ApiResult<byte[]> raw = await GrpcNativeUnaryClient.SendAsync(
                     ServerConfig.ServiceName,
                     "Refresh",

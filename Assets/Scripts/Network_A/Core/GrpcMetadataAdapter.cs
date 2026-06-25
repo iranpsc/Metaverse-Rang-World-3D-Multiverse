@@ -1,5 +1,5 @@
 
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
 using System.Collections.Generic;
 using Grpc.Core;
 using Network_A.Auth;
