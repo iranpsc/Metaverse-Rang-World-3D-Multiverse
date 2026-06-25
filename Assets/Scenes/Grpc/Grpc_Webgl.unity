@@ -1087,7 +1087,7 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 0}
+      - m_Target: {fileID: 548850778}
         m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeLoginConnectHoldUnityTest,
           Assembly-CSharp
         m_MethodName: StartTestButton
@@ -2155,7 +2155,7 @@ Canvas:
   m_GameObject: {fileID: 445804856}
   m_Enabled: 1
   serializedVersion: 3
-  m_RenderMode: 0
+  m_RenderMode: 1
   m_Camera: {fileID: 330585545}
   m_PlaneDistance: 100
   m_PixelPerfect: 0
@@ -2163,7 +2163,7 @@ Canvas:
   m_OverrideSorting: 0
   m_OverridePixelPerfect: 0
   m_SortingBucketNormalizedSize: 0
-  m_VertexColorAlwaysGammaSpace: 1
+  m_VertexColorAlwaysGammaSpace: 0
   m_AdditionalShaderChannelsFlag: 25
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
@@ -2686,8 +2686,28 @@ GameObject:
   - component: {fileID: 548850755}
   - component: {fileID: 548850756}
   - component: {fileID: 548850757}
-  - component: {fileID: 548850782}
-  - component: {fileID: 548850783}
+  - component: {fileID: 548850758}
+  - component: {fileID: 548850759}
+  - component: {fileID: 548850760}
+  - component: {fileID: 548850761}
+  - component: {fileID: 548850762}
+  - component: {fileID: 548850763}
+  - component: {fileID: 548850764}
+  - component: {fileID: 548850765}
+  - component: {fileID: 548850766}
+  - component: {fileID: 548850767}
+  - component: {fileID: 548850768}
+  - component: {fileID: 548850769}
+  - component: {fileID: 548850770}
+  - component: {fileID: 548850771}
+  - component: {fileID: 548850772}
+  - component: {fileID: 548850773}
+  - component: {fileID: 548850774}
+  - component: {fileID: 548850775}
+  - component: {fileID: 548850776}
+  - component: {fileID: 548850778}
+  - component: {fileID: 548850779}
+  - component: {fileID: 548850780}
   m_Layer: 0
   m_Name: Controller
   m_TagString: Untagged
@@ -2732,11 +2752,11 @@ MonoBehaviour:
   nativeDedicatedHost: dev-world-3d.metarang.com
   nativeDedicatedPort: 50052
   nativeDedicatedUseTls: 1
-  editorUseNativeGrpcAuth: 1
+  editorUseNativeGrpcAuth: 0
   clearTokensOnStart: 0
   checkNetOnStart: 1
   autoLoginInitAfterHealth: 1
-  showRegisterPanelIfFirstInstall: 0
+  showRegisterPanelIfFirstInstall: 1
   pnl_Reg: {fileID: 1248299304}
   in_RegUserName: {fileID: 179605467}
   in_RegPass: {fileID: 1232940449}
@@ -2792,29 +2812,570 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ExitGameButton
   btnExit: {fileID: 1075053853}
   quitTimeoutSeconds: 2.5
---- !u!114 &548850782
+--- !u!114 &548850758
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 548850751}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ba21d0652df310f49a0fc7f0b4fd181c, type: 3}
+  m_Script: {fileID: 11500000, guid: 1e54e55d21a36fd4a8ff4cb976065523, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeGrpcStreamingG7RoomLobbyTestController
-  serverUrl: grpcs://dev-world-3d.metarang.com:50052
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT1TestController
+  serverUrl: wss://dev-world-3d.metarang.com/ws
   useServerConfigUrl: 1
   forceDedicatedServerConfig: 1
-  transportKind: 2
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t1_room
+  playerActionType: unity_t1_action
+  sendPlayerState: 1
+  waitTimeoutMs: 10000
+  heartbeatPingIntervalMs: 5000
+  heartbeatPongTimeoutMs: 3000
+--- !u!114 &548850759
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5453c99716b3a1d4d8e3a939e4141beb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT2MultiClientTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t2_room
+  playerActionType: unity_t2_action
+  requireBroadcastSentGreaterThanZero: 1
+  waitForClientBActionEnvelope: 1
+  waitTimeoutMs: 10000
+--- !u!114 &548850760
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7e9535cbe769ea41a36bcc6ec367a9a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT25PresenceBroadcastTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t25_room
+  requirePlayerJoinedBroadcast: 1
+  requirePlayerLeftBroadcast: 1
+  waitTimeoutMs: 10000
+--- !u!114 &548850761
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 43144aa86284d2841b856cf0b0772015, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT3ReconnectTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t3_room
+  beforeReconnectActionType: unity_t3_before_reconnect
+  afterReconnectActionType: unity_t3_after_reconnect
+  waitTimeoutMs: 10000
+  reconnectDelayMs: 700
+--- !u!114 &548850762
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 056668eef3c487c45bfc23713bf65b36, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT4MessageQueueTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t4_room
+  beforeDisconnectActionType: unity_t4_before_disconnect
+  queuedActionType: unity_t4_queued_during_disconnect
+  afterFlushActionType: unity_t4_after_flush
+  waitTimeoutMs: 10000
+  reconnectDelayMs: 700
+--- !u!114 &548850763
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1bede927cd6193e4a895b6b0f2b94299, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT5ReliablePolicyTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t5_room
+  beforeDisconnectActionType: unity_t5_before_disconnect
+  queuedActionType: unity_t5_queued_during_disconnect
+  afterFlushActionType: unity_t5_after_flush
+  droppedPlayerStatePhase: unity_t5_disconnected_player_state
+  waitTimeoutMs: 10000
+  reconnectDelayMs: 700
+--- !u!114 &548850764
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 809deb430e9a3cc4794d11535c7c5d65, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT6ReliableAckRetryTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t6_room
+  beforeDisconnectActionType: unity_t6_before_disconnect
+  queuedActionType: unity_t6_queued_during_disconnect
+  afterFlushActionType: unity_t6_after_flush
+  droppedPlayerStatePhase: unity_t6_disconnected_player_state
+  waitTimeoutMs: 10000
+  reconnectDelayMs: 700
+  reliableAckTimeoutMs: 3000
+  reliableMaxSendAttempts: 2
+  reliableRetryDelayMs: 250
+--- !u!114 &548850765
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 49247a5af84d98c46b362476fd6a0fd6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT7AutoReconnectTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t7_room
+  beforeDisconnectActionType: unity_t7_before_disconnect
+  queuedActionType: unity_t7_queued_during_auto_reconnect
+  afterRecoveryActionType: unity_t7_after_recovery
+  waitTimeoutMs: 10000
+  recoveryTimeoutMs: 60000
+  autoReconnectInitialDelayMs: 800
+  autoReconnectMaxAttempts: 4
+  reliableAckTimeoutMs: 3000
+  reliableMaxSendAttempts: 2
+  reliableRetryDelayMs: 250
+--- !u!114 &548850766
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cfcf93af72eba1c478ce014960e93d5c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketT8LongRunStressTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_t8_room
+  beforeDisconnectActionType: unity_t8_before_disconnect
+  queuedActionType: unity_t8_queued_during_recovery
+  afterRecoveryActionType: unity_t8_after_recovery
+  finalActionType: unity_t8_final_action
+  recoveryCycleCount: 3
+  reliableActionsBeforeEachDrop: 1
+  reliableActionsQueuedEachDrop: 1
+  unreliableStateMessagesEachDrop: 2
+  waitTimeoutMs: 10000
+  recoveryTimeoutMs: 60000
+  autoReconnectInitialDelayMs: 900
+  autoReconnectMaxAttempts: 5
+  reliableAckTimeoutMs: 3000
+  reliableMaxSendAttempts: 2
+  reliableRetryDelayMs: 250
+--- !u!114 &548850767
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 514559a97762e4841a40bdd771a8e2af, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG1MovementIntegrationTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_g1_room
+  clientAPlayerId: unity_g1_client_a
+  clientBPlayerId: unity_g1_client_b
+  firstPosition: {x: 1, y: 0, z: 1}
+  secondPosition: {x: 2, y: 0, z: 1.5}
+  positionTolerance: 0.2
+  waitTimeoutMs: 10000
+  reliableAckTimeoutMs: 3000
+--- !u!114 &548850768
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6268a8ee5d3daae42aacf5a3b3dbb616, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG2RemoteSpawnDespawnTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_g2_room
+  clientAPlayerIdFallback: unity_g2_client_a
+  clientBPlayerIdFallback: unity_g2_client_b
+  useConnectionIdAsNetworkPlayerId: 1
+  remoteMovementPosition: {x: 3, y: 0, z: 2}
+  positionTolerance: 0.25
+  waitTimeoutMs: 10000
+  reliableAckTimeoutMs: 3000
+--- !u!114 &548850769
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b41a8a7e94fc76d4cae3daf882f10fb9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG3PresenceGameplayBindingTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_g3_room
+  clientAPlayerIdFallback: unity_g3_client_a
+  clientBPlayerIdFallback: unity_g3_client_b
+  useConnectionIdAsNetworkPlayerId: 1
+  clientBMovementPosition: {x: 4, y: 0, z: 2.5}
+  positionTolerance: 0.25
+  waitTimeoutMs: 10000
+  reliableAckTimeoutMs: 3000
+--- !u!114 &548850770
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8e4dfc4eae7127e4fa4158ba35702391, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG4WorldEventIntegrationTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  autoDisconnectAtEnd: 1
+  accessTokenOverride: 
+  useStoredTokenWhenOverrideIsEmpty: 1
+  roomIdPrefix: unity_g4_room
+  clientAPlayerIdFallback: unity_g4_client_a
+  clientBPlayerIdFallback: unity_g4_client_b
+  useConnectionIdAsNetworkPlayerId: 1
+  worldObjectId: g4_door_01
+  worldStateKey: isOpen
+  worldBoolValue: 1
+  worldEventSequence: 1
+  waitTimeoutMs: 10000
+  reliableAckTimeoutMs: 3000
+--- !u!114 &548850771
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 909455f1d363e10489177168ac406258, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG5WebGLAdapterSmokeTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  runOnStart: 0
+  disconnectAtEnd: 1
+  connectTimeoutMs: 10000
+  sendTimeoutMs: 10000
+--- !u!114 &548850772
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 444b80c750037f4468474cd685772ec3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG57WebGLMultiUserGameplayTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  roomId: webgl_g57_room
+  runOnStart: 0
+  readRoleFromUrl: 1
+  defaultRole: 0
+  disconnectAtEnd: 0
+  connectTimeoutMs: 10000
+  sendTimeoutMs: 10000
+  waitTimeoutMs: 15000
+  senderStartDelayMs: 1500
+  reliableAckTimeoutMs: 5000
+  senderPlayerId: webgl_sender_player
+  senderPosition: {x: 1.5, y: 0, z: 2.5}
+  senderVelocity: {x: 0.25, y: 0, z: 0.5}
+  senderYaw: 45
+  actionType: webgl_test_fire
+  worldEventType: webgl_test_object_state
+--- !u!114 &548850773
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c04e804880324c842ae4058977c02492, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG58WebGLMultiUserCleanupTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  roomId: webgl_g58_cleanup_room
+  runOnStart: 0
+  readRoleFromUrl: 1
+  defaultRole: 0
+  disconnectAtEnd: 1
+  connectTimeoutMs: 10000
+  sendTimeoutMs: 10000
+  waitTimeoutMs: 15000
+  leaverStartDelayMs: 1500
+  leaveAfterJoinDelayMs: 2500
+  reliableAckTimeoutMs: 5000
+  sendMovementBeforeLeave: 1
+  leaverPlayerId: webgl_g58_leaver_player
+  leaverPosition: {x: 3, y: 0, z: 1}
+  leaverVelocity: {x: 0.15, y: 0, z: 0.2}
+  leaverYaw: 90
+--- !u!114 &548850774
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2ed4b9d3823d19048be64774d967bc8e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG59WebGLMultiUserRecoveryTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  roomId: webgl_g59_recovery_room
+  runOnStart: 0
+  readRoleFromUrl: 1
+  defaultRole: 0
+  leaveRoomAtEnd: 1
+  disconnectAtEnd: 1
+  connectTimeoutMs: 10000
+  sendTimeoutMs: 10000
+  waitTimeoutMs: 20000
+  recoveryTimeoutMs: 60000
+  recoveringStartDelayMs: 1500
+  afterRecoverySendDelayMs: 1000
+  reliableAckTimeoutMs: 5000
+  autoReconnectInitialDelayMs: 800
+  autoReconnectMaxAttempts: 5
+  autoReconnectMaxDelayMs: 8000
+  recoveringPlayerId: webgl_g59_recovering_player
+  queuedWorldEventType: webgl_g59_queued_during_recovery
+  afterRecoveryWorldEventType: webgl_g59_after_recovery
+  recoveryPosition: {x: 5, y: 0, z: 2}
+  recoveryVelocity: {x: 0.2, y: 0, z: 0.1}
+  recoveryYaw: 120
+--- !u!114 &548850775
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e40ce8d2065c15c48bc9ced2b5a4f1e6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG510WebGLRepeatedRecoveryTestController
+  serverUrl: wss://dev-world-3d.metarang.com:443/ws
+  transportKind: 1
+  roomId: webgl_g510_repeated_recovery_room
+  runOnStart: 0
+  readRoleFromUrl: 1
+  defaultRole: 0
+  leaveRoomAtEnd: 1
+  disconnectAtEnd: 1
+  recoveryCycleCount: 3
+  delayBetweenCyclesMs: 1200
+  recoveringStartDelayMs: 1500
+  afterRecoverySendDelayMs: 500
+  connectTimeoutMs: 10000
+  sendTimeoutMs: 10000
+  waitTimeoutMs: 20000
+  recoveryTimeoutMs: 60000
+  reliableAckTimeoutMs: 5000
+  autoReconnectInitialDelayMs: 800
+  autoReconnectMaxAttempts: 5
+  autoReconnectMaxDelayMs: 8000
+  recoveringPlayerId: webgl_g510_recovering_player
+  queuedWorldEventType: webgl_g510_queued_during_recovery
+  afterRecoveryWorldEventType: webgl_g510_after_recovery
+  recoveryPosition: {x: 5, y: 0, z: 2}
+  recoveryVelocity: {x: 0.2, y: 0, z: 0.1}
+  recoveryYaw: 120
+--- !u!114 &548850776
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7790e4169b0fd474a985ca18f8f436e8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG6TeamRoomChatTestController
+  serverUrl: wss://dev-world-3d.metarang.com/ws
+  useServerConfigUrl: 1
+  forceDedicatedServerConfig: 1
+  transportKind: 1
+  roomIdPrefix: webgl_g6_team_room
+  chatActionType: webgl_g6_chat_message
+  clientLabel: User
+  connectTimeoutMs: 10000
+  sendTimeoutMs: 10000
+  waitTimeoutMs: 15000
+  reliableAckTimeoutMs: 5000
+  roomInput: {fileID: 983304826}
+  messageInput: {fileID: 1765671335}
+  roomText: {fileID: 1013804925}
+  statusText: {fileID: 1414544931}
+  logText: {fileID: 655918304}
+--- !u!114 &548850778
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6188eb6fe0da0de4292626da690cd144, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeLoginConnectHoldUnityTest
+  websocketUrl: wss://dev-world-3d.metarang.com:443/ws
+  connectUiTimeoutMs: 0
+  holdMs: 45000
+  tickMs: 1000
+  receiveBufferSize: 8192
+  startButton: {fileID: 183635061}
+  stopButton: {fileID: 852626652}
+  statusText: {fileID: 1013804925}
+  logText: {fileID: 655918304}
+--- !u!114 &548850779
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 548850751}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4e0026ded71652b4a9c9fa3c6d234846, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Tests.Realtime.RealtimeWebSocketG7RoomLobbyTestController
+  serverUrl: wss://dev-world-3d.metarang.com/ws
+  useServerConfigUrl: 1
+  forceDedicatedServerConfig: 1
+  transportKind: 1
   disableCoreConnectTimeoutAfterConnect: 1
-  roomNamePrefix: Native gRPC G7 Lobby Room
-  roomDescription: Room created by Unity Native gRPC G7 Room Lobby test.
+  roomNamePrefix: WebGL G7 Lobby Room
+  roomDescription: Room created by Unity G7 Room Lobby test.
   roomVisibility: public
   maxPlayers: 20
   chatActionType: webgl_g7_lobby_chat
-  clientLabel: Native
+  clientLabel: User
   blockCreateRoomWhenCurrentUserAlreadyOwnsRoom: 1
   currentOwnerNameForCreateRoomCheck: 
   connectTimeoutMs: 10000
@@ -2843,7 +3404,7 @@ MonoBehaviour:
   roomListItemPrefab: {fileID: -8573300936416691389, guid: 5d6fd8fc0e8c0f34eae3a52286964655, type: 3}
   disableRoomListWhileJoining: 1
   clearRoomListOnJoinSuccess: 0
---- !u!114 &548850783
+--- !u!114 &548850780
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -2857,8 +3418,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::G7ThreeDModeController
   button3D: {fileID: 666658907}
   objectsToDisableWhen3DStarts:
-  - {fileID: 1142398536}
   - {fileID: 501264939}
+  - {fileID: 1142398536}
   objectsToEnableWhen3DStarts: []
   world3DRoot: {fileID: 923645414}
   playersRoot: {fileID: 591212490}
@@ -2873,15 +3434,15 @@ MonoBehaviour:
   showPlayerNameTexts: 1
   playerNameTextPrefab: {fileID: 7953333707647921424, guid: 73e6ccee1f5e1d94dbce7d6ed8a212ee, type: 3}
   playerNameObjectName: Name_Text
-  playerNameLocalPosition: {x: 0, y: 2.25, z: 0}
+  playerNameLocalPosition: {x: 0, y: 1.21, z: 0}
   playerNameRectSize: {x: 4, y: 0.7}
-  playerNameLocalScale: 0.08
+  playerNameLocalScale: 0.0117
   playerNameFontSize: 4
   localPlayerNameColor: {r: 1, g: 1, b: 1, a: 1}
   remotePlayerNameColor: {r: 1, g: 1, b: 1, a: 1}
   rotateNameTextsToCamera: 1
   rotateNameTextRootObject: 1
-  flipNameTextAfterLookAt: 1
+  flipNameTextAfterLookAt: 0
   fallbackLocalPlayerName: You
   startIn3DMode: 0
   resetLocalPlayerOnEnter: 1
@@ -3450,8 +4011,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 548850782}
-        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeGrpcStreamingG7RoomLobbyTestController,
+      - m_Target: {fileID: 548850779}
+        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeWebSocketG7RoomLobbyTestController,
           Assembly-CSharp
         m_MethodName: SendMessageButton
         m_Mode: 1
@@ -3846,7 +4407,7 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 548850783}
+      - m_Target: {fileID: 548850780}
         m_TargetAssemblyTypeName: G7ThreeDModeController, Assembly-CSharp
         m_MethodName: EnterThreeDMode
         m_Mode: 1
@@ -4317,8 +4878,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 548850782}
-        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeGrpcStreamingG7RoomLobbyTestController,
+      - m_Target: {fileID: 548850779}
+        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeWebSocketG7RoomLobbyTestController,
           Assembly-CSharp
         m_MethodName: ListRoomsButton
         m_Mode: 1
@@ -5049,8 +5610,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 548850782}
-        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeGrpcStreamingG7RoomLobbyTestController,
+      - m_Target: {fileID: 548850779}
+        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeWebSocketG7RoomLobbyTestController,
           Assembly-CSharp
         m_MethodName: DisconnectButton
         m_Mode: 1
@@ -5186,8 +5747,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 923645415}
-  - component: {fileID: 923645416}
   - component: {fileID: 923645417}
+  - component: {fileID: 923645416}
   m_Layer: 0
   m_Name: World_3D_Root
   m_TagString: Untagged
@@ -5236,11 +5797,11 @@ MonoBehaviour:
   m_GameObject: {fileID: 923645414}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 12ffe6e20ece52f48bd1fe01dcc4fa21, type: 3}
+  m_Script: {fileID: 11500000, guid: 0a51736a8a909ee4493aa500b19fc081, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::G7GrpcStreamingRealtime3DMultiplayerController
-  roomLobbyController: {fileID: 0}
-  threeDModeController: {fileID: 0}
+  m_EditorClassIdentifier: Assembly-CSharp::G7Realtime3DMultiplayerController
+  roomLobbyController: {fileID: 548850779}
+  threeDModeController: {fileID: 548850780}
   sendRatePerSecond: 12
   sendOnlyWhenChanged: 1
   minPositionDelta: 0.015
@@ -5251,8 +5812,8 @@ MonoBehaviour:
   requestSnapshotWhenPlayerJoins: 1
   clearRemotePlayersOnLeave: 1
   clearRemotePlayersOnDisconnect: 1
-  removeRemotePlayersWhenStateTimeout: 0
-  remotePlayerStateTimeoutSeconds: 800
+  removeRemotePlayersWhenStateTimeout: 1
+  remotePlayerStateTimeoutSeconds: 8
   remoteTimeoutCheckIntervalSeconds: 1
 --- !u!1 &964856339
 GameObject:
@@ -6734,37 +7295,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1132734317}
   m_CullTransparentMesh: 1
---- !u!1 &1139186769
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1139186770}
-  m_Layer: 0
-  m_Name: GameObject
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1139186770
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1139186769}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1142398536
 GameObject:
   m_ObjectHideFlags: 0
@@ -6800,7 +7330,6 @@ RectTransform:
   - {fileID: 1627937765}
   - {fileID: 1462809500}
   - {fileID: 666658906}
-  - {fileID: 1795686864}
   m_Father: {fileID: 445804861}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
@@ -7509,50 +8038,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.ContentSizeFitter
   m_HorizontalFit: 0
   m_VerticalFit: 1
---- !u!1 &1382143796
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1382143798}
-  - component: {fileID: 1382143797}
-  m_Layer: 0
-  m_Name: CoroutineRunner
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1382143797
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1382143796}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4906d115435f4ce4bafeb4d99269894e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::CoroutineRunner
---- !u!4 &1382143798
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1382143796}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1390452500
 GameObject:
   m_ObjectHideFlags: 0
@@ -7985,8 +8470,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 548850782}
-        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeGrpcStreamingG7RoomLobbyTestController,
+      - m_Target: {fileID: 548850779}
+        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeWebSocketG7RoomLobbyTestController,
           Assembly-CSharp
         m_MethodName: CreateRoomButton
         m_Mode: 1
@@ -8169,6 +8654,50 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1408736761}
   m_CullTransparentMesh: 1
+--- !u!1 &1413328767
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1413328769}
+  - component: {fileID: 1413328768}
+  m_Layer: 0
+  m_Name: CoroutineRunner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1413328768
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1413328767}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4906d115435f4ce4bafeb4d99269894e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CoroutineRunner
+--- !u!4 &1413328769
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1413328767}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1414544929
 GameObject:
   m_ObjectHideFlags: 0
@@ -9206,8 +9735,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 548850782}
-        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeGrpcStreamingG7RoomLobbyTestController,
+      - m_Target: {fileID: 548850779}
+        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeWebSocketG7RoomLobbyTestController,
           Assembly-CSharp
         m_MethodName: ConnectAndAuthButton
         m_Mode: 1
@@ -11092,140 +11621,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1765671333}
   m_CullTransparentMesh: 1
---- !u!1 &1795686863
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1795686864}
-  - component: {fileID: 1795686867}
-  - component: {fileID: 1795686866}
-  - component: {fileID: 1795686865}
-  m_Layer: 5
-  m_Name: Btn_3D (1)
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!224 &1795686864
-RectTransform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1795686863}
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 2007784951}
-  m_Father: {fileID: 1142398537}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0}
-  m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: -0.000099182, y: 307}
-  m_SizeDelta: {x: 2014.2, y: 775.2998}
-  m_Pivot: {x: 0.5, y: 0.5}
---- !u!114 &1795686865
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1795686863}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Button
-  m_Navigation:
-    m_Mode: 3
-    m_WrapAround: 0
-    m_SelectOnUp: {fileID: 0}
-    m_SelectOnDown: {fileID: 0}
-    m_SelectOnLeft: {fileID: 0}
-    m_SelectOnRight: {fileID: 0}
-  m_Transition: 1
-  m_Colors:
-    m_NormalColor: {r: 1, g: 1, b: 1, a: 1}
-    m_HighlightedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
-    m_PressedColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 1}
-    m_SelectedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
-    m_DisabledColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 0.5019608}
-    m_ColorMultiplier: 1
-    m_FadeDuration: 0.1
-  m_SpriteState:
-    m_HighlightedSprite: {fileID: 0}
-    m_PressedSprite: {fileID: 0}
-    m_SelectedSprite: {fileID: 0}
-    m_DisabledSprite: {fileID: 0}
-  m_AnimationTriggers:
-    m_NormalTrigger: Normal
-    m_HighlightedTrigger: Highlighted
-    m_PressedTrigger: Pressed
-    m_SelectedTrigger: Selected
-    m_DisabledTrigger: Disabled
-  m_Interactable: 1
-  m_TargetGraphic: {fileID: 1795686866}
-  m_OnClick:
-    m_PersistentCalls:
-      m_Calls:
-      - m_Target: {fileID: 0}
-        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeGrpcStreamingU5NativeSmokeTestController,
-          Assembly-CSharp
-        m_MethodName: RunFullGrpcStreamingU5TestButton
-        m_Mode: 1
-        m_Arguments:
-          m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-          m_IntArgument: 0
-          m_FloatArgument: 0
-          m_StringArgument: 
-          m_BoolArgument: 0
-        m_CallState: 2
---- !u!114 &1795686866
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1795686863}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
-  m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_RaycastTarget: 1
-  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
-  m_Maskable: 1
-  m_OnCullStateChanged:
-    m_PersistentCalls:
-      m_Calls: []
-  m_Sprite: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
-  m_Type: 1
-  m_PreserveAspect: 0
-  m_FillCenter: 1
-  m_FillMethod: 4
-  m_FillAmount: 1
-  m_FillClockwise: 1
-  m_FillOrigin: 0
-  m_UseSpriteMesh: 0
-  m_PixelsPerUnitMultiplier: 1
---- !u!222 &1795686867
-CanvasRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1795686863}
-  m_CullTransparentMesh: 1
 --- !u!1 &1804283344
 GameObject:
   m_ObjectHideFlags: 0
@@ -12482,144 +12877,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2000798206}
   m_CullTransparentMesh: 1
---- !u!1 &2007784950
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 2007784951}
-  - component: {fileID: 2007784953}
-  - component: {fileID: 2007784952}
-  m_Layer: 5
-  m_Name: Text (TMP)
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!224 &2007784951
-RectTransform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2007784950}
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1795686864}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
-  m_Pivot: {x: 0.5, y: 0.5}
---- !u!114 &2007784952
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2007784950}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f4688fdb7df04437aeb418b961361dc5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.TextMeshPro::TMPro.TextMeshProUGUI
-  m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_RaycastTarget: 1
-  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
-  m_Maskable: 1
-  m_OnCullStateChanged:
-    m_PersistentCalls:
-      m_Calls: []
-  m_text: '3D
-
-'
-  m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_fontSharedMaterials: []
-  m_fontMaterial: {fileID: 0}
-  m_fontMaterials: []
-  m_fontColor32:
-    serializedVersion: 2
-    rgba: 4281479730
-  m_fontColor: {r: 0.19607843, g: 0.19607843, b: 0.19607843, a: 1}
-  m_enableVertexGradient: 0
-  m_colorMode: 3
-  m_fontColorGradient:
-    topLeft: {r: 1, g: 1, b: 1, a: 1}
-    topRight: {r: 1, g: 1, b: 1, a: 1}
-    bottomLeft: {r: 1, g: 1, b: 1, a: 1}
-    bottomRight: {r: 1, g: 1, b: 1, a: 1}
-  m_fontColorGradientPreset: {fileID: 0}
-  m_spriteAsset: {fileID: 0}
-  m_tintAllSprites: 0
-  m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: -1183493901
-  m_overrideHtmlColors: 0
-  m_faceColor:
-    serializedVersion: 2
-    rgba: 4294967295
-  m_fontSize: 423.69
-  m_fontSizeBase: 423.69
-  m_fontWeight: 400
-  m_enableAutoSizing: 0
-  m_fontSizeMin: 18
-  m_fontSizeMax: 154.22
-  m_fontStyle: 0
-  m_HorizontalAlignment: 2
-  m_VerticalAlignment: 512
-  m_textAlignment: 65535
-  m_characterSpacing: 0
-  m_wordSpacing: 0
-  m_lineSpacing: 0
-  m_lineSpacingMax: 0
-  m_paragraphSpacing: 0
-  m_charWidthMaxAdj: 0
-  m_TextWrappingMode: 1
-  m_wordWrappingRatios: 0.4
-  m_overflowMode: 0
-  m_linkedTextComponent: {fileID: 0}
-  parentLinkedComponent: {fileID: 0}
-  m_enableKerning: 0
-  m_ActiveFontFeatures: 6e72656b
-  m_enableExtraPadding: 0
-  checkPaddingRequired: 0
-  m_isRichText: 1
-  m_EmojiFallbackSupport: 1
-  m_parseCtrlCharacters: 1
-  m_isOrthographic: 1
-  m_isCullingEnabled: 0
-  m_horizontalMapping: 0
-  m_verticalMapping: 0
-  m_uvLineOffset: 0
-  m_geometrySortingOrder: 0
-  m_IsTextObjectScaleStatic: 0
-  m_VertexBufferAutoSizeReduction: 0
-  m_useMaxVisibleDescender: 1
-  m_pageToDisplay: 1
-  m_margin: {x: 0, y: 0, z: 0, w: 0}
-  m_isUsingLegacyAnimationComponent: 0
-  m_isVolumetricText: 0
-  m_hasFontAssetChanged: 0
-  m_baseMaterial: {fileID: 0}
-  m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
---- !u!222 &2007784953
-CanvasRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2007784950}
-  m_CullTransparentMesh: 1
 --- !u!1 &2011086960
 GameObject:
   m_ObjectHideFlags: 0
@@ -12987,8 +13244,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 548850782}
-        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeGrpcStreamingG7RoomLobbyTestController,
+      - m_Target: {fileID: 548850779}
+        m_TargetAssemblyTypeName: Network_A.Tests.Realtime.RealtimeWebSocketG7RoomLobbyTestController,
           Assembly-CSharp
         m_MethodName: LeaveRoomButton
         m_Mode: 1
@@ -13044,10 +13301,9 @@ SceneRoots:
   m_Roots:
   - {fileID: 548850753}
   - {fileID: 1399247279}
-  - {fileID: 330585546}
-  - {fileID: 591212490}
-  - {fileID: 1382143798}
   - {fileID: 445804861}
   - {fileID: 923645415}
   - {fileID: 1113099716}
-  - {fileID: 1139186770}
+  - {fileID: 591212490}
+  - {fileID: 330585546}
+  - {fileID: 1413328769}
