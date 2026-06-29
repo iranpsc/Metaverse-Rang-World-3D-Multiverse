@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Network_A.Realtime.Core;
@@ -8,495 +9,879 @@ using UnityEngine;
 
 namespace Network_A.GameServer
 {
-    //* کلاینت گیم‌سرور است و فقط از RealtimeClient برای ارسال پیام‌های بازی استفاده می‌کند.
+    //* این کلاس فَسِید قدیمی گیم سرور روی RealtimeClient است و برای مسیر G7 و تست‌های قدیمی استفاده می‌شود.
     public class GameServerClient : IDisposable
     {
         private readonly RealtimeClient realtimeClient;
-        private readonly GameServerEvents events;
         private bool isDisposed;
-        private string currentRoomId = string.Empty;
-        private string lastKnownRoomId = string.Empty;
 
-        public GameServerEvents Events => events;
-        public string CurrentRoomId => currentRoomId;
-        public string LastKnownRoomId => lastKnownRoomId;
-        public bool HasRoom => !string.IsNullOrWhiteSpace(currentRoomId);
-        public bool HasLastKnownRoom => !string.IsNullOrWhiteSpace(lastKnownRoomId);
+        public GameServerClientEvents Events { get; private set; } = new GameServerClientEvents();
 
-        #region <Constructor>
+        public bool HasRoom { get; private set; }
+        public string CurrentRoomId { get; private set; } = string.Empty;
+        public string RoomId => CurrentRoomId;
+        public string LastKnownRoomId { get; private set; } = string.Empty;
 
-        //* گیم‌سرورکلاینت را به کُر ریل‌تایم وصل می‌کند و هَندلِرهای گیم را ثبت می‌کند.
+        //* این سازنده فقط برای سازگاری با تست‌هایی است که کلاینت را بدون ریل تایم کلاینت می‌سازند.
+        public GameServerClient()
+        {
+            Events.RaiseLog("GameServerClient created without RealtimeClient.");
+        }
+
+        //* این سازنده مسیر اصلی G7 است و گیم سرور کلاینت را به RealtimeClient وصل می‌کند.
         public GameServerClient(RealtimeClient realtimeClient)
         {
-            this.realtimeClient = realtimeClient ?? throw new ArgumentNullException(nameof(realtimeClient));
-            events = new GameServerEvents();
-            RegisterGameHandlers();
+            this.realtimeClient = realtimeClient;
+            BindRealtimeEvents();
+            Events.RaiseLog("GameServerClient bound to RealtimeClient.");
         }
 
-        #endregion
+        //* این تابع درخواست جوین روم را با مسیر reliable ارسال می‌کند.
+        public async Task<RealtimeReliableSendResult> JoinRoomReliableAsync(
+            string roomId,
+            RealtimeReliableSendOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            if (string.IsNullOrWhiteSpace(safeRoomId))
+            {
+                return CreateReliableResult(false, 0, "room_id_empty");
+            }
 
-        #region <Room Flow>
+            string messageId = "join_room_" + Guid.NewGuid().ToString("N");
+            string payloadJson = "{\"roomId\":\"" + EscapeJson(safeRoomId) + "\"}";
+            RealtimeEnvelope envelope = BuildEnvelope("game", "join_room", safeRoomId, payloadJson, true, messageId);
 
-        //* درخواست ورود به روم را از طریق کانال game به سرور می‌فرستد.
+            RealtimeReliableSendResult result = await SendReliableEnvelopeAsync(envelope, options, cancellationToken);
+
+            if (IsReliableSuccess(result))
+            {
+                HasRoom = true;
+                CurrentRoomId = safeRoomId;
+                LastKnownRoomId = safeRoomId;
+                Events.RaiseAck(GameServerAckResult.Processed(messageId, "join_room_processed", safeRoomId));
+            }
+
+            return result;
+        }
+
+        //* این تابع درخواست جوین روم را با مسیر ساده ارسال می‌کند.
         public async Task<bool> JoinRoomAsync(string roomId, CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return false;
-            if (string.IsNullOrWhiteSpace(roomId)) return FailSend("Room id is empty.");
+            RealtimeReliableSendResult result = await JoinRoomReliableAsync(roomId, null, cancellationToken);
+            return IsReliableSuccess(result);
+        }
 
-            string safeRoomId = EscapeJson(roomId.Trim());
-            string payloadJson = "{\"roomId\":\"" + safeRoomId + "\"}";
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("join_room"), RealtimeChannels.Game, RealtimeMessageTypes.JoinRoom, payloadJson, roomId.Trim(), true);
-            bool sent = await realtimeClient.SendEnvelopeWithPolicyAsync(envelope, RealtimeDeliveryPolicy.ReliableNoQueue, true, cancellationToken);
+        //* این تابع درخواست خروج از روم را ارسال می‌کند و بعد از ارسال موفق، اَک داخلی سازگار با G7 می‌سازد.
+        public async Task<bool> LeaveRoomAsync(string roomId, CancellationToken cancellationToken = default)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            if (string.IsNullOrWhiteSpace(safeRoomId)) safeRoomId = CurrentRoomId;
+            if (string.IsNullOrWhiteSpace(safeRoomId)) safeRoomId = LastKnownRoomId;
+
+            if (string.IsNullOrWhiteSpace(safeRoomId))
+            {
+                Events.RaiseLog("Leave skipped. Room id is empty.");
+                return false;
+            }
+
+            string messageId = "leave_room_" + Guid.NewGuid().ToString("N");
+            string payloadJson = "{\"roomId\":\"" + EscapeJson(safeRoomId) + "\"}";
+            RealtimeEnvelope envelope = BuildEnvelope("game", "leave_room", safeRoomId, payloadJson, true, messageId);
+
+            bool sent = await SendEnvelopeWithPolicyAsync(envelope, "Reliable", true, cancellationToken);
 
             if (sent)
             {
-                currentRoomId = roomId.Trim();
-                lastKnownRoomId = currentRoomId;
-                events.RaiseLog("Join room message sent: " + currentRoomId);
-            }
-            else
-            {
-                events.RaiseLog("Join room message was not sent: " + roomId);
+                HasRoom = false;
+                CurrentRoomId = string.Empty;
+                LastKnownRoomId = safeRoomId;
+                Events.RaiseAck(GameServerAckResult.Processed(messageId, "leave_room_processed", safeRoomId));
             }
 
             return sent;
         }
 
-        //* درخواست ورود به روم را با انتظار اَک داخلی کُر می‌فرستد و برای ریکانکت خودکار استفاده می‌شود.
-        public async Task<RealtimeReliableSendResult> JoinRoomReliableAsync(string roomId, RealtimeReliableSendOptions options = null, CancellationToken cancellationToken = default)
+        //* این تابع درخواست خروج از روم را با خروجی reliable برای تست‌های قدیمی فراهم می‌کند.
+        public async Task<RealtimeReliableSendResult> LeaveRoomReliableAsync(
+            string roomId,
+            RealtimeReliableSendOptions options,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return RealtimeReliableSendResult.Failed(string.Empty, 0, "GameServerClient is disposed.");
-            if (string.IsNullOrWhiteSpace(roomId)) return RealtimeReliableSendResult.Failed(string.Empty, 0, "Room id is empty.");
-
-            string targetRoomId = roomId.Trim();
-            string payloadJson = "{\"roomId\":\"" + EscapeJson(targetRoomId) + "\"}";
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("join_room"), RealtimeChannels.Game, RealtimeMessageTypes.JoinRoom, payloadJson, targetRoomId, true);
-            RealtimeReliableSendResult result = await realtimeClient.SendEnvelopeReliableWithPolicyAsync(envelope, RealtimeDeliveryPolicy.ReliableNoQueue, true, options, cancellationToken);
-
-            if (result != null && result.isSuccess)
-            {
-                currentRoomId = targetRoomId;
-                lastKnownRoomId = currentRoomId;
-                events.RaiseLog("Join room reliable acked: " + currentRoomId + " | attempts=" + result.attempts);
-            }
-            else
-            {
-                events.RaiseLog("Join room reliable failed: " + targetRoomId + " | error=" + (result == null ? "null" : result.errorMessage));
-            }
-
-            return result ?? RealtimeReliableSendResult.Failed(envelope.id, 0, "Join reliable result is null.");
+            bool sent = await LeaveRoomAsync(roomId, cancellationToken);
+            return CreateReliableResult(sent, 1, sent ? string.Empty : "leave_room_send_failed");
         }
 
-        //* درخواست خروج از روم فعلی یا روم داده‌شده را به سرور می‌فرستد.
-        public async Task<bool> LeaveRoomAsync(string roomId = null, CancellationToken cancellationToken = default)
+        //* این تابع اکشن گیم را با مسیر reliable ارسال می‌کند.
+        public async Task<RealtimeReliableSendResult> SendPlayerActionReliableAsync(
+            string actionType,
+            string payloadJson,
+            RealtimeReliableSendOptions options,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return false;
-
-            string targetRoomId = string.IsNullOrWhiteSpace(roomId) ? currentRoomId : roomId.Trim();
-            if (string.IsNullOrWhiteSpace(targetRoomId)) return FailSend("Room id is empty.");
-
-            string payloadJson = "{\"roomId\":\"" + EscapeJson(targetRoomId) + "\"}";
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("leave_room"), RealtimeChannels.Game, RealtimeMessageTypes.LeaveRoom, payloadJson, targetRoomId, true);
-            bool sent = await realtimeClient.SendEnvelopeWithPolicyAsync(envelope, RealtimeDeliveryPolicy.ReliableNoQueue, true, cancellationToken);
-
-            if (sent)
+            if (!HasRoom || string.IsNullOrWhiteSpace(CurrentRoomId))
             {
-                events.RaiseLog("Leave room message sent: " + targetRoomId);
-
-                if (string.Equals(currentRoomId, targetRoomId, StringComparison.OrdinalIgnoreCase)) currentRoomId = string.Empty;
-                if (string.Equals(lastKnownRoomId, targetRoomId, StringComparison.OrdinalIgnoreCase)) lastKnownRoomId = string.Empty;
-            }
-            else
-            {
-                events.RaiseLog("Leave room message was not sent: " + targetRoomId);
+                return CreateReliableResult(false, 0, "client_has_no_room");
             }
 
-            return sent;
+            string safeActionType = SafeTrim(actionType);
+            string safePayloadJson = BuildPlayerActionPayload(safeActionType, payloadJson);
+
+            string messageId = "player_action_" + Guid.NewGuid().ToString("N");
+            RealtimeEnvelope envelope = BuildEnvelope("game", "player_action", CurrentRoomId, safePayloadJson, true, messageId);
+
+            return await SendReliableEnvelopeAsync(envelope, options, cancellationToken);
         }
 
-        #endregion
-
-        #region <Gameplay Send>
-
-        //* وضعیت پلیر را به کانال presence می‌فرستد تا بقیه کلاینت‌ها بتوانند آن را دریافت کنند.
-        public async Task<bool> SendPlayerStateAsync(Vector3 position, Quaternion rotation, CancellationToken cancellationToken = default)
+        //* این تابع اکشن گیم را با مسیر ساده ارسال می‌کند.
+        public async Task<bool> SendPlayerActionAsync(
+            string actionType,
+            string payloadJson,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return false;
-
-            string targetRoomId = ResolveRoomIdForSend(true);
-            if (string.IsNullOrWhiteSpace(targetRoomId)) return FailSend("Player state needs an active room or last known room.");
-
-            string payloadJson = BuildPlayerStatePayloadJson(targetRoomId, position, rotation);
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("player_state"), RealtimeChannels.Presence, RealtimeMessageTypes.PlayerState, payloadJson, targetRoomId, false);
-            return await SendGameEnvelopeAsync(envelope, "Player state", cancellationToken);
+            RealtimeReliableSendResult result = await SendPlayerActionReliableAsync(actionType, payloadJson, null, cancellationToken);
+            return IsReliableSuccess(result);
         }
 
-        //* وضعیت حرکتی پلیر را با آیدی پلیر، سرعت و شماره ترتیب می‌فرستد تا برای سینک واقعی حرکت استفاده شود.
-        public async Task<bool> SendPlayerStateAsync(string playerId, Vector3 position, Quaternion rotation, Vector3 velocity, long sequence, CancellationToken cancellationToken = default)
+        //* این تابع وضعیت حرکت پلیر را با امضای قدیمی بدون پلیر آی دی می‌فرستد.
+        public async Task<bool> SendPlayerStateAsync(
+            Vector3 position,
+            Quaternion rotation,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return false;
-
-            string targetRoomId = ResolveRoomIdForSend(true);
-            if (string.IsNullOrWhiteSpace(targetRoomId)) return FailSend("Player state needs an active room or last known room.");
-
-            string payloadJson = BuildPlayerStatePayloadJson(targetRoomId, playerId, position, rotation, velocity, sequence);
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("player_state"), RealtimeChannels.Presence, RealtimeMessageTypes.PlayerState, payloadJson, targetRoomId, false);
-            return await SendGameEnvelopeAsync(envelope, "Player movement state", cancellationToken);
+            return await SendPlayerStateAsync(string.Empty, position, rotation, Vector3.zero, 0L, cancellationToken);
         }
 
-        //* اکشن پلیر را به کانال game می‌فرستد و برای آن اَک درخواست می‌کند.
-        public async Task<bool> SendPlayerActionAsync(string actionType, string actionPayloadJson = "{}", CancellationToken cancellationToken = default)
+        //* این تابع وضعیت حرکت پلیر را با امضای قدیمی بدون وِلوسیتی می‌فرستد.
+        public async Task<bool> SendPlayerStateAsync(
+            string playerId,
+            Vector3 position,
+            Quaternion rotation,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return false;
-
-            string targetRoomId = ResolveRoomIdForSend(true);
-            if (string.IsNullOrWhiteSpace(targetRoomId)) return FailSend("Player action needs an active room.");
-            if (string.IsNullOrWhiteSpace(actionType)) return FailSend("Action type is empty.");
-
-            string payloadJson = BuildPlayerActionPayloadJson(targetRoomId, actionType, actionPayloadJson);
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("player_action"), RealtimeChannels.Game, RealtimeMessageTypes.PlayerAction, payloadJson, targetRoomId, true);
-            return await SendGameEnvelopeAsync(envelope, "Player action", cancellationToken);
+            return await SendPlayerStateAsync(playerId, position, rotation, Vector3.zero, 0L, cancellationToken);
         }
 
-
-        //* اکشن مهم پلیر را می‌فرستد و خود تابع تا رسیدن اَک یا تایم اوت نتیجه نهایی را برمی‌گرداند.
-        public async Task<RealtimeReliableSendResult> SendPlayerActionReliableAsync(string actionType, string actionPayloadJson = "{}", RealtimeReliableSendOptions options = null, CancellationToken cancellationToken = default)
+        //* این تابع وضعیت حرکت پلیر را روی کانال presence ارسال می‌کند.
+        public async Task<bool> SendPlayerStateAsync(
+            string playerId,
+            Vector3 position,
+            Quaternion rotation,
+            Vector3 velocity,
+            long sequence,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return RealtimeReliableSendResult.Failed(string.Empty, 0, "GameServerClient is disposed.");
+            string roomId = string.IsNullOrWhiteSpace(CurrentRoomId) ? LastKnownRoomId : CurrentRoomId;
+            if (string.IsNullOrWhiteSpace(roomId))
+            {
+                return false;
+            }
 
-            string targetRoomId = ResolveRoomIdForSend(true);
-            if (string.IsNullOrWhiteSpace(targetRoomId)) return RealtimeReliableSendResult.Failed(string.Empty, 0, "Player action needs an active room.");
-            if (string.IsNullOrWhiteSpace(actionType)) return RealtimeReliableSendResult.Failed(string.Empty, 0, "Action type is empty.");
+            string safePlayerId = SafeTrim(playerId);
+            string payloadJson =
+                "{" +
+                "\"playerId\":\"" + EscapeJson(safePlayerId) + "\"," +
+                "\"networkPlayerId\":\"" + EscapeJson(safePlayerId) + "\"," +
+                "\"roomId\":\"" + EscapeJson(roomId) + "\"," +
+                "\"sequence\":" + sequence + "," +
+                "\"px\":" + FloatToJson(position.x) + "," +
+                "\"py\":" + FloatToJson(position.y) + "," +
+                "\"pz\":" + FloatToJson(position.z) + "," +
+                "\"rx\":" + FloatToJson(rotation.x) + "," +
+                "\"ry\":" + FloatToJson(rotation.y) + "," +
+                "\"rz\":" + FloatToJson(rotation.z) + "," +
+                "\"rw\":" + FloatToJson(rotation.w) + "," +
+                "\"vx\":" + FloatToJson(velocity.x) + "," +
+                "\"vy\":" + FloatToJson(velocity.y) + "," +
+                "\"vz\":" + FloatToJson(velocity.z) +
+                "}";
 
-            string payloadJson = BuildPlayerActionPayloadJson(targetRoomId, actionType, actionPayloadJson);
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("player_action"), RealtimeChannels.Game, RealtimeMessageTypes.PlayerAction, payloadJson, targetRoomId, true);
-            return await SendGameEnvelopeReliableAsync(envelope, "Player action reliable", RealtimeDeliveryPolicy.ReliableQueued, options, cancellationToken);
+            string messageId = "player_state_" + Guid.NewGuid().ToString("N");
+            RealtimeEnvelope envelope = BuildEnvelope("presence", "player_state", roomId, payloadJson, false, messageId);
+
+            return await SendEnvelopeWithPolicyAsync(envelope, "Unreliable", false, cancellationToken);
         }
 
-        //* یک رویداد جهان را به کانال game می‌فرستد تا سرور بتواند آن را پردازش یا پخش کند.
-        public async Task<bool> SendWorldEventAsync(string eventType, string eventPayloadJson = "{}", CancellationToken cancellationToken = default)
+        //* این تابع رویداد دنیا را با مسیر reliable ارسال می‌کند.
+        public async Task<RealtimeReliableSendResult> SendWorldEventReliableAsync(
+            string eventType,
+            string payloadJson,
+            RealtimeReliableSendOptions options,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return false;
+            string safePayloadJson = BuildWorldEventPayload(eventType, payloadJson);
+            string messageId = "world_event_" + Guid.NewGuid().ToString("N");
+            RealtimeEnvelope envelope = BuildEnvelope("world", "world_event", CurrentRoomId, safePayloadJson, true, messageId);
 
-            string targetRoomId = ResolveRoomIdForSend(true);
-            if (string.IsNullOrWhiteSpace(targetRoomId)) return FailSend("World event needs an active room.");
-            if (string.IsNullOrWhiteSpace(eventType)) return FailSend("World event type is empty.");
-
-            string payloadJson = BuildWorldEventPayloadJson(targetRoomId, eventType, eventPayloadJson);
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("world_event"), RealtimeChannels.Game, RealtimeMessageTypes.WorldEvent, payloadJson, targetRoomId, true);
-            return await SendGameEnvelopeAsync(envelope, "World event", cancellationToken);
+            return await SendReliableEnvelopeAsync(envelope, options, cancellationToken);
         }
 
-
-        //* رویداد مهم جهان را می‌فرستد و تا دریافت اَک یا تایم اوت نتیجه نهایی را برمی‌گرداند.
-        public async Task<RealtimeReliableSendResult> SendWorldEventReliableAsync(string eventType, string eventPayloadJson = "{}", RealtimeReliableSendOptions options = null, CancellationToken cancellationToken = default)
+        //* این تابع رویداد دنیا را با مسیر ساده ارسال می‌کند.
+        public async Task<bool> SendWorldEventAsync(
+            string eventType,
+            string payloadJson,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return RealtimeReliableSendResult.Failed(string.Empty, 0, "GameServerClient is disposed.");
-
-            string targetRoomId = ResolveRoomIdForSend(true);
-            if (string.IsNullOrWhiteSpace(targetRoomId)) return RealtimeReliableSendResult.Failed(string.Empty, 0, "World event needs an active room.");
-            if (string.IsNullOrWhiteSpace(eventType)) return RealtimeReliableSendResult.Failed(string.Empty, 0, "World event type is empty.");
-
-            string payloadJson = BuildWorldEventPayloadJson(targetRoomId, eventType, eventPayloadJson);
-            RealtimeEnvelope envelope = RealtimeEnvelope.CreateWithId(RealtimeEnvelope.CreateMessageId("world_event"), RealtimeChannels.Game, RealtimeMessageTypes.WorldEvent, payloadJson, targetRoomId, true);
-            return await SendGameEnvelopeReliableAsync(envelope, "World event reliable", RealtimeDeliveryPolicy.ReliableQueued, options, cancellationToken);
+            RealtimeReliableSendResult result = await SendWorldEventReliableAsync(eventType, payloadJson, null, cancellationToken);
+            return IsReliableSuccess(result);
         }
 
-        //* تغییر state یک آبجکت جهان را به صورت رویداد قابل اطمینان می‌فرستد تا کلاینت‌های دیگر همان تغییر را اعمال کنند.
-        public async Task<RealtimeReliableSendResult> SendWorldObjectStateReliableAsync(string senderPlayerId, string objectId, string stateKey, bool boolValue, long sequence = 0, string stringValue = "", float numberValue = 0f, RealtimeReliableSendOptions options = null, CancellationToken cancellationToken = default)
+        //* این تابع وضعیت یک آبجکت دنیا را با مسیر reliable ارسال می‌کند.
+        public async Task<RealtimeReliableSendResult> SendWorldObjectStateReliableAsync(
+            string networkPlayerId,
+            string worldObjectId,
+            string stateKey,
+            bool boolValue,
+            long sequence,
+            string action,
+            float numericValue,
+            RealtimeReliableSendOptions options,
+            CancellationToken cancellationToken = default)
         {
-            if (isDisposed) return RealtimeReliableSendResult.Failed(string.Empty, 0, "GameServerClient is disposed.");
-            if (string.IsNullOrWhiteSpace(objectId)) return RealtimeReliableSendResult.Failed(string.Empty, 0, "World object id is empty.");
-            if (string.IsNullOrWhiteSpace(stateKey)) return RealtimeReliableSendResult.Failed(string.Empty, 0, "World state key is empty.");
+            string payloadJson =
+                "{" +
+                "\"networkPlayerId\":\"" + EscapeJson(networkPlayerId) + "\"," +
+                "\"worldObjectId\":\"" + EscapeJson(worldObjectId) + "\"," +
+                "\"stateKey\":\"" + EscapeJson(stateKey) + "\"," +
+                "\"boolValue\":" + (boolValue ? "true" : "false") + "," +
+                "\"sequence\":" + sequence + "," +
+                "\"action\":\"" + EscapeJson(action) + "\"," +
+                "\"numericValue\":" + FloatToJson(numericValue) +
+                "}";
 
-            string eventPayloadJson = BuildWorldObjectStatePayloadJson(senderPlayerId, objectId, stateKey, boolValue, sequence, stringValue, numberValue);
-            return await SendWorldEventReliableAsync("set_object_state", eventPayloadJson, options, cancellationToken);
+            string messageId = "world_object_state_" + Guid.NewGuid().ToString("N");
+            RealtimeEnvelope envelope = BuildEnvelope("world", "world_object_state", CurrentRoomId, payloadJson, true, messageId);
+
+            return await SendReliableEnvelopeAsync(envelope, options, cancellationToken);
         }
 
-        #endregion
-
-        #region <Router Binding>
-
-        //* هَندلِرهای مورد نیاز گیم‌سرور را روی رُتِر ریل‌تایم ثبت می‌کند.
-        private void RegisterGameHandlers()
-        {
-            realtimeClient.Router.RegisterHandler(RealtimeChannels.System, RealtimeMessageTypes.Ack, HandleAckEnvelope);
-            realtimeClient.Router.RegisterHandler(RealtimeChannels.Game, RealtimeMessageTypes.WorldEvent, HandleWorldEventEnvelope);
-            realtimeClient.Router.RegisterHandler(RealtimeChannels.Presence, RealtimeMessageTypes.PlayerState, HandlePlayerStateEnvelope);
-            realtimeClient.Router.RegisterHandler(RealtimeChannels.Presence, RealtimeMessageTypes.PlayerJoined, HandlePlayerJoinedEnvelope);
-            realtimeClient.Router.RegisterHandler(RealtimeChannels.Presence, RealtimeMessageTypes.PlayerLeft, HandlePlayerLeftEnvelope);
-            realtimeClient.ErrorEnvelopeReceived += HandleRealtimeError;
-            realtimeClient.Disconnected += HandleRealtimeDisconnected;
-        }
-
-        //* هَندلِرهای گیم‌سرور را از رُتِر جدا می‌کند تا نشتی رویداد نداشته باشیم.
-        private void UnregisterGameHandlers()
-        {
-            realtimeClient.Router.UnregisterHandler(RealtimeChannels.System, RealtimeMessageTypes.Ack);
-            realtimeClient.Router.UnregisterHandler(RealtimeChannels.Game, RealtimeMessageTypes.WorldEvent);
-            realtimeClient.Router.UnregisterHandler(RealtimeChannels.Presence, RealtimeMessageTypes.PlayerState);
-            realtimeClient.Router.UnregisterHandler(RealtimeChannels.Presence, RealtimeMessageTypes.PlayerJoined);
-            realtimeClient.Router.UnregisterHandler(RealtimeChannels.Presence, RealtimeMessageTypes.PlayerLeft);
-            realtimeClient.ErrorEnvelopeReceived -= HandleRealtimeError;
-            realtimeClient.Disconnected -= HandleRealtimeDisconnected;
-        }
-
-        #endregion
-
-        #region <Envelope Handlers>
-
-        //* اَک دریافتی از سرور را به رویداد سطح گیم‌سرور تبدیل می‌کند.
-        private void HandleAckEnvelope(RealtimeEnvelope envelope)
-        {
-            GameServerAckResult ack = GameServerAckResult.FromEnvelope(envelope);
-            if (ack == null) return;
-
-            events.RaiseAck(ack);
-            events.RaiseLog("Ack received: " + ack.originalMessageId + " | " + ack.status);
-        }
-
-        //* رویداد جهان دریافتی را به لایه گیم‌پلی اعلام می‌کند.
-        private void HandleWorldEventEnvelope(RealtimeEnvelope envelope)
-        {
-            events.RaiseWorldEvent(envelope);
-        }
-
-        //* وضعیت پلیر دریافتی را به لایه گیم‌پلی اعلام می‌کند.
-        private void HandlePlayerStateEnvelope(RealtimeEnvelope envelope)
-        {
-            events.RaisePlayerState(envelope);
-        }
-
-
-        //* ورود پلیر دیگر به روم را به رویداد سطح گیم‌سرور تبدیل می‌کند.
-        private void HandlePlayerJoinedEnvelope(RealtimeEnvelope envelope)
-        {
-            GameServerPresenceEvent presenceEvent = GameServerPresenceEvent.FromEnvelope(envelope);
-            if (presenceEvent == null || !presenceEvent.IsValid()) return;
-
-            events.RaisePlayerJoined(presenceEvent);
-            events.RaiseLog("Player joined received: " + presenceEvent.ResolveNetworkPlayerId() + " | room=" + presenceEvent.roomId);
-        }
-
-        //* خروج پلیر دیگر از روم را به رویداد سطح گیم‌سرور تبدیل می‌کند.
-        private void HandlePlayerLeftEnvelope(RealtimeEnvelope envelope)
-        {
-            GameServerPresenceEvent presenceEvent = GameServerPresenceEvent.FromEnvelope(envelope);
-            if (presenceEvent == null || !presenceEvent.IsValid()) return;
-
-            events.RaisePlayerLeft(presenceEvent);
-            events.RaiseLog("Player left received: " + presenceEvent.ResolveNetworkPlayerId() + " | room=" + presenceEvent.roomId);
-        }
-
-        //* خطای ریل‌تایم را به رویداد خطای گیم‌سرور تبدیل می‌کند.
-        private void HandleRealtimeError(RealtimeError error)
-        {
-            events.RaiseError(error);
-        }
-
-        //* بعد از قطع اتصال، وضعیت روم فعال را پاک می‌کند ولی روم قبلی را برای ریکانکت و صف نگه می‌دارد.
-        private void HandleRealtimeDisconnected(string reason)
-        {
-            currentRoomId = string.Empty;
-            events.RaiseLog("Game server active room state reset after disconnect: " + reason + " | lastKnownRoom=" + lastKnownRoomId);
-        }
-
-        #endregion
-
-        #region <Payload Builders>
-
-        //* پِیلود وضعیت پلیر را با روم فعال فعلی و مقدارهای position و rotation می‌سازد.
-        private string BuildPlayerStatePayloadJson(Vector3 position, Quaternion rotation)
-        {
-            return BuildPlayerStatePayloadJson(currentRoomId, position, rotation);
-        }
-
-        //* پِیلود وضعیت پلیر را با روم داده‌شده و مقدارهای position و rotation می‌سازد.
-        private string BuildPlayerStatePayloadJson(string roomId, Vector3 position, Quaternion rotation)
-        {
-            return "{"
-                + "\"roomId\":\"" + EscapeJson(roomId) + "\","
-                + "\"position\":{\"x\":" + FormatFloat(position.x) + ",\"y\":" + FormatFloat(position.y) + ",\"z\":" + FormatFloat(position.z) + "},"
-                + "\"rotation\":{\"x\":" + FormatFloat(rotation.x) + ",\"y\":" + FormatFloat(rotation.y) + ",\"z\":" + FormatFloat(rotation.z) + ",\"w\":" + FormatFloat(rotation.w) + "}"
-                + "}";
-        }
-
-        //* پِیلود وضعیت حرکتی پلیر را برای سینک واقعی position و rotation می‌سازد.
-        private string BuildPlayerStatePayloadJson(string roomId, string playerId, Vector3 position, Quaternion rotation, Vector3 velocity, long sequence)
-        {
-            return "{"
-                + "\"roomId\":\"" + EscapeJson(roomId) + "\","
-                + "\"playerId\":\"" + EscapeJson(playerId) + "\","
-                + "\"sequence\":" + sequence + ","
-                + "\"sentAtMs\":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + ","
-                + "\"position\":{\"x\":" + FormatFloat(position.x) + ",\"y\":" + FormatFloat(position.y) + ",\"z\":" + FormatFloat(position.z) + "},"
-                + "\"rotation\":{\"x\":" + FormatFloat(rotation.x) + ",\"y\":" + FormatFloat(rotation.y) + ",\"z\":" + FormatFloat(rotation.z) + ",\"w\":" + FormatFloat(rotation.w) + "},"
-                + "\"velocity\":{\"x\":" + FormatFloat(velocity.x) + ",\"y\":" + FormatFloat(velocity.y) + ",\"z\":" + FormatFloat(velocity.z) + "}"
-                + "}";
-        }
-
-        //* پِیلود اکشن پلیر را با روم فعال فعلی، تایپ اکشن و دیتای خام می‌سازد.
-        private string BuildPlayerActionPayloadJson(string actionType, string actionPayloadJson)
-        {
-            return BuildPlayerActionPayloadJson(currentRoomId, actionType, actionPayloadJson);
-        }
-
-        //* پِیلود اکشن پلیر را با روم داده‌شده، تایپ اکشن و دیتای خام می‌سازد.
-        private string BuildPlayerActionPayloadJson(string roomId, string actionType, string actionPayloadJson)
-        {
-            return "{"
-                + "\"roomId\":\"" + EscapeJson(roomId) + "\","
-                + "\"actionType\":\"" + EscapeJson(actionType.Trim()) + "\","
-                + "\"action\":" + NormalizePayloadJson(actionPayloadJson)
-                + "}";
-        }
-
-        //* پِیلود رویداد جهان را با روم فعال فعلی، تایپ رویداد و دیتای خام می‌سازد.
-        private string BuildWorldEventPayloadJson(string eventType, string eventPayloadJson)
-        {
-            return BuildWorldEventPayloadJson(currentRoomId, eventType, eventPayloadJson);
-        }
-
-        //* پِیلود رویداد جهان را با روم داده‌شده، تایپ رویداد و دیتای خام می‌سازد.
-        private string BuildWorldEventPayloadJson(string roomId, string eventType, string eventPayloadJson)
-        {
-            return "{"
-                + "\"roomId\":\"" + EscapeJson(roomId) + "\","
-                + "\"eventType\":\"" + EscapeJson(eventType.Trim()) + "\","
-                + "\"event\":" + NormalizePayloadJson(eventPayloadJson)
-                + "}";
-        }
-
-        //* پِیلود تغییر state آبجکت جهان را برای world_event می‌سازد.
-        private string BuildWorldObjectStatePayloadJson(string senderPlayerId, string objectId, string stateKey, bool boolValue, long sequence, string stringValue, float numberValue)
-        {
-            return "{"
-                + "\"senderPlayerId\":\"" + EscapeJson(senderPlayerId) + "\","
-                + "\"objectId\":\"" + EscapeJson(objectId.Trim()) + "\","
-                + "\"stateKey\":\"" + EscapeJson(stateKey.Trim()) + "\","
-                + "\"boolValue\":" + (boolValue ? "true" : "false") + ","
-                + "\"numberValue\":" + FormatFloat(numberValue) + ","
-                + "\"stringValue\":\"" + EscapeJson(stringValue) + "\","
-                + "\"sequence\":" + sequence + ","
-                + "\"sentAtMs\":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                + "}";
-        }
-
-        #endregion
-
-        #region <Send Helpers>
-
-        //* روم مناسب ارسال را از روم فعال یا روم آخرین جوین موفق انتخاب می‌کند.
-        private string ResolveRoomIdForSend(bool allowLastKnownRoomWhenDisconnected)
-        {
-            if (!string.IsNullOrWhiteSpace(currentRoomId)) return currentRoomId;
-            if (allowLastKnownRoomWhenDisconnected && !realtimeClient.IsConnected && !string.IsNullOrWhiteSpace(lastKnownRoomId)) return lastKnownRoomId;
-            return string.Empty;
-        }
-
-        //* اِنولوپ گیم را از طریق کُر ریل‌تایم و بر اساس سیاست ارسال مشخص‌شده مدیریت می‌کند.
-        private async Task<bool> SendGameEnvelopeAsync(RealtimeEnvelope envelope, string label, CancellationToken cancellationToken)
-        {
-            RealtimeDeliveryPolicy deliveryPolicy = ResolveDeliveryPolicy(envelope);
-            bool sentOrQueued = await SendGameEnvelopeAsync(envelope, label, deliveryPolicy, cancellationToken);
-            return sentOrQueued;
-        }
-
-        //* اِنولوپ گیم را با سیاست ارسال داده‌شده ارسال، صف، یا حذف کنترل‌شده می‌کند.
-        private async Task<bool> SendGameEnvelopeAsync(RealtimeEnvelope envelope, string label, RealtimeDeliveryPolicy deliveryPolicy, CancellationToken cancellationToken)
-        {
-            bool wasConnectedBeforeSend = realtimeClient.IsConnected;
-            bool sentOrQueued = await realtimeClient.SendEnvelopeWithPolicyAsync(envelope, deliveryPolicy, deliveryPolicy == RealtimeDeliveryPolicy.ReliableQueued, cancellationToken);
-
-            if (sentOrQueued && wasConnectedBeforeSend) events.RaiseLog(label + " sent: " + envelope.id + " | policy=" + deliveryPolicy);
-            else if (sentOrQueued) events.RaiseLog(label + " queued: " + envelope.id + " | policy=" + deliveryPolicy);
-            else events.RaiseLog(label + " dropped or not sent: " + (envelope == null ? "null" : envelope.id) + " | policy=" + deliveryPolicy);
-
-            return sentOrQueued;
-        }
-
-
-        //* اِنولوپ گیم را با انتظار اَک ارسال می‌کند و نتیجه کامل قابل اطمینان را برمی‌گرداند.
-        private async Task<RealtimeReliableSendResult> SendGameEnvelopeReliableAsync(RealtimeEnvelope envelope, string label, RealtimeDeliveryPolicy deliveryPolicy, RealtimeReliableSendOptions options, CancellationToken cancellationToken)
-        {
-            bool wasConnectedBeforeSend = realtimeClient.IsConnected;
-            RealtimeReliableSendResult result = await realtimeClient.SendEnvelopeReliableWithPolicyAsync(envelope, deliveryPolicy, deliveryPolicy == RealtimeDeliveryPolicy.ReliableQueued, options, cancellationToken);
-
-            if (result != null && result.isSuccess && result.wasQueued) events.RaiseLog(label + " queued: " + envelope.id + " | policy=" + deliveryPolicy);
-            else if (result != null && result.isSuccess && wasConnectedBeforeSend) events.RaiseLog(label + " acked: " + envelope.id + " | attempts=" + result.attempts + " | status=" + result.ackStatus);
-            else events.RaiseLog(label + " failed: " + (envelope == null ? "null" : envelope.id) + " | error=" + (result == null ? "null" : result.errorMessage));
-
-            return result ?? RealtimeReliableSendResult.Failed(envelope == null ? string.Empty : envelope.id, 0, "Reliable result is null.");
-        }
-
-        //* بر اساس کانال و نوع پیام، سیاست ارسال مناسب را برای پیام گیم انتخاب می‌کند.
-        private RealtimeDeliveryPolicy ResolveDeliveryPolicy(RealtimeEnvelope envelope)
-        {
-            if (envelope == null) return RealtimeDeliveryPolicy.UnreliableDropWhenDisconnected;
-            if (string.Equals(envelope.ch, RealtimeChannels.Presence, StringComparison.OrdinalIgnoreCase)) return RealtimeDeliveryPolicy.UnreliableLatestOnly;
-            if (string.Equals(envelope.t, RealtimeMessageTypes.PlayerAction, StringComparison.OrdinalIgnoreCase)) return RealtimeDeliveryPolicy.ReliableQueued;
-            if (string.Equals(envelope.t, RealtimeMessageTypes.WorldEvent, StringComparison.OrdinalIgnoreCase)) return RealtimeDeliveryPolicy.ReliableQueued;
-            if (envelope.requiresAck) return RealtimeDeliveryPolicy.ReliableQueued;
-            return RealtimeDeliveryPolicy.UnreliableDropWhenDisconnected;
-        }
-
-        //* شکست ارسال را ثبت می‌کند و مقدار false برمی‌گرداند.
-        private bool FailSend(string message)
-        {
-            events.RaiseLog(message);
-            events.RaiseError(RealtimeError.Create(RealtimeErrorCodes.InvalidMessage, message));
-            return false;
-        }
-
-        #endregion
-
-        #region <Format Helpers>
-
-        //* مقدار عددی را با فرمت ثابت برای جیسون می‌سازد.
-        private static string FormatFloat(float value)
-        {
-            return value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
-        }
-
-        //* دیتای خام جیسون را برای قرار گرفتن داخل پِیلود آماده می‌کند.
-        private static string NormalizePayloadJson(string rawJson)
-        {
-            if (string.IsNullOrWhiteSpace(rawJson)) return "{}";
-            string trimmed = rawJson.Trim();
-            if (trimmed.StartsWith("{") || trimmed.StartsWith("[") || trimmed == "null") return trimmed;
-            return "\"" + EscapeJson(trimmed) + "\"";
-        }
-
-        //* متن را برای قرار گرفتن داخل جیسون escape می‌کند.
-        private static string EscapeJson(string value)
-        {
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-
-            return value
-                .Replace("\\", "\\\\")
-                .Replace("\"", "\\\"")
-                .Replace("\n", "\\n")
-                .Replace("\r", "\\r")
-                .Replace("\t", "\\t");
-        }
-
-        #endregion
-
-        #region <Dispose>
-
-        //* هَندلِرهای گیم‌سرور را جدا می‌کند و وضعیت داخلی را پاک می‌کند.
+        //* این تابع منابع و رویدادهای داخلی را آزاد می‌کند.
         public void Dispose()
         {
             if (isDisposed) return;
             isDisposed = true;
-            UnregisterGameHandlers();
-            currentRoomId = string.Empty;
-            lastKnownRoomId = string.Empty;
+
+            UnbindRealtimeEvents();
+            HasRoom = false;
+            CurrentRoomId = string.Empty;
+
+            Events.RaiseLog("GameServerClient disposed.");
         }
 
-        #endregion
+        //* این تابع رویدادهای RealtimeClient را وصل می‌کند.
+        private void BindRealtimeEvents()
+        {
+            if (realtimeClient == null) return;
+            realtimeClient.EnvelopeReceived += HandleRealtimeEnvelopeReceived;
+        }
+
+        //* این تابع رویدادهای RealtimeClient را جدا می‌کند.
+        private void UnbindRealtimeEvents()
+        {
+            if (realtimeClient == null) return;
+            realtimeClient.EnvelopeReceived -= HandleRealtimeEnvelopeReceived;
+        }
+
+        //* این تابع اِنولوپ‌های دریافتی را به رویدادهای گیم سرور تبدیل می‌کند.
+        private void HandleRealtimeEnvelopeReceived(RealtimeEnvelope envelope)
+        {
+            if (envelope == null) return;
+
+            string channel = ReadMemberString(envelope, "ch");
+            string type = ReadMemberString(envelope, "t");
+            string payloadJson = ReadMemberString(envelope, "payloadJson");
+            string roomId = ReadMemberString(envelope, "room");
+            string id = ReadMemberString(envelope, "id");
+            string replyTo = ReadMemberString(envelope, "replyTo");
+
+            if (string.IsNullOrWhiteSpace(roomId)) roomId = CurrentRoomId;
+            if (string.IsNullOrWhiteSpace(roomId)) roomId = LastKnownRoomId;
+
+            if (IsAckEnvelope(channel, type))
+            {
+                Events.RaiseAck(GameServerAckResult.FromEnvelope(id, replyTo, payloadJson, roomId));
+                return;
+            }
+
+            if (IsPresenceJoin(type))
+            {
+                Events.RaisePlayerJoined(GameServerPresenceEvent.FromEnvelope(type, roomId, payloadJson));
+                return;
+            }
+
+            if (IsPresenceLeft(type))
+            {
+                Events.RaisePlayerLeft(GameServerPresenceEvent.FromEnvelope(type, roomId, payloadJson));
+                return;
+            }
+
+            if (IsPresenceState(type))
+            {
+                Events.RaisePlayerState(envelope);
+                return;
+            }
+
+            if (IsWorldEvent(channel, type))
+            {
+                Events.RaiseWorld(envelope);
+            }
+        }
+
+        //* این تابع اِنولوپ را از مسیر reliable می‌فرستد و خروجی سازگار با RealtimeReliableSendResult می‌سازد.
+        private async Task<RealtimeReliableSendResult> SendReliableEnvelopeAsync(
+            RealtimeEnvelope envelope,
+            RealtimeReliableSendOptions options,
+            CancellationToken cancellationToken)
+        {
+            if (realtimeClient == null || envelope == null)
+            {
+                return CreateReliableResult(false, 0, "realtime_client_or_envelope_missing");
+            }
+
+            object result = await InvokeRealtimeSendAsync(envelope, options, "Reliable", true, cancellationToken);
+
+            if (result is RealtimeReliableSendResult reliableResult)
+            {
+                return reliableResult;
+            }
+
+            bool ok = result is bool boolResult && boolResult;
+            return CreateReliableResult(ok, 1, ok ? string.Empty : "reliable_send_failed");
+        }
+
+        //* این تابع اِنولوپ را با policy دلخواه ارسال می‌کند.
+        private async Task<bool> SendEnvelopeWithPolicyAsync(
+            RealtimeEnvelope envelope,
+            string policyName,
+            bool isPriority,
+            CancellationToken cancellationToken)
+        {
+            if (realtimeClient == null || envelope == null) return false;
+
+            object result = await InvokeRealtimeSendAsync(envelope, null, policyName, isPriority, cancellationToken);
+
+            if (result is bool boolResult) return boolResult;
+            if (result is RealtimeReliableSendResult reliableResult) return IsReliableSuccess(reliableResult);
+
+            return result != null;
+        }
+
+        //* این تابع با رفلکشن مسیر ارسال مناسب روی RealtimeClient را پیدا و اجرا می‌کند.
+        private async Task<object> InvokeRealtimeSendAsync(
+            RealtimeEnvelope envelope,
+            RealtimeReliableSendOptions options,
+            string policyName,
+            bool isPriority,
+            CancellationToken cancellationToken)
+        {
+            Type clientType = realtimeClient.GetType();
+
+            MethodInfo reliableMethod = FindMethod(clientType, "SendEnvelopeReliableAsync");
+            if (reliableMethod != null)
+            {
+                object[] args = BuildArguments(reliableMethod, envelope, options, policyName, isPriority, cancellationToken);
+                return await AwaitMethodResultAsync(reliableMethod.Invoke(realtimeClient, args));
+            }
+
+            MethodInfo policyMethod = FindMethod(clientType, "SendEnvelopeWithPolicyAsync");
+            if (policyMethod != null)
+            {
+                object[] args = BuildArguments(policyMethod, envelope, options, policyName, isPriority, cancellationToken);
+                return await AwaitMethodResultAsync(policyMethod.Invoke(realtimeClient, args));
+            }
+
+            MethodInfo simpleMethod = FindMethod(clientType, "SendEnvelopeAsync");
+            if (simpleMethod != null)
+            {
+                object[] args = BuildArguments(simpleMethod, envelope, options, policyName, isPriority, cancellationToken);
+                return await AwaitMethodResultAsync(simpleMethod.Invoke(realtimeClient, args));
+            }
+
+            Events.RaiseLog("No compatible send method found on RealtimeClient.");
+            return false;
+        }
+
+        //* این تابع متد را با نام مشخص پیدا می‌کند.
+        private MethodInfo FindMethod(Type type, string methodName)
+        {
+            MethodInfo[] methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            for (int i = 0; i < methods.Length; i++)
+            {
+                if (methods[i].Name == methodName) return methods[i];
+            }
+
+            return null;
+        }
+
+        //* این تابع آرگومان‌های لازم متدهای مختلف ارسال را می‌سازد.
+        private object[] BuildArguments(
+            MethodInfo method,
+            RealtimeEnvelope envelope,
+            RealtimeReliableSendOptions options,
+            string policyName,
+            bool isPriority,
+            CancellationToken cancellationToken)
+        {
+            ParameterInfo[] parameters = method.GetParameters();
+            object[] args = new object[parameters.Length];
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                Type parameterType = parameters[i].ParameterType;
+
+                if (parameterType == typeof(RealtimeEnvelope))
+                {
+                    args[i] = envelope;
+                    continue;
+                }
+
+                if (parameterType == typeof(RealtimeReliableSendOptions))
+                {
+                    args[i] = options;
+                    continue;
+                }
+
+                if (parameterType == typeof(CancellationToken))
+                {
+                    args[i] = cancellationToken;
+                    continue;
+                }
+
+                if (parameterType == typeof(bool))
+                {
+                    args[i] = isPriority;
+                    continue;
+                }
+
+                if (parameterType.IsEnum)
+                {
+                    args[i] = CreateEnumValue(parameterType, policyName);
+                    continue;
+                }
+
+                args[i] = GetDefaultValue(parameterType);
+            }
+
+            return args;
+        }
+
+        //* این تابع خروجی تسک‌های مختلف را می‌خواند.
+        private async Task<object> AwaitMethodResultAsync(object invokeResult)
+        {
+            if (invokeResult == null) return null;
+
+            if (invokeResult is Task task)
+            {
+                await task;
+
+                Type taskType = task.GetType();
+                if (taskType.IsGenericType)
+                {
+                    PropertyInfo resultProperty = taskType.GetProperty("Result");
+                    return resultProperty == null ? null : resultProperty.GetValue(task, null);
+                }
+
+                return true;
+            }
+
+            return invokeResult;
+        }
+
+        //* این تابع اِنولوپ ریل تایم را با فیلدهای شناخته‌شده پروژه می‌سازد.
+        private RealtimeEnvelope BuildEnvelope(
+            string channel,
+            string type,
+            string roomId,
+            string payloadJson,
+            bool requiresAck,
+            string messageId)
+        {
+            object envelope = Activator.CreateInstance(typeof(RealtimeEnvelope));
+
+            SetMember(envelope, "v", 1);
+            SetMember(envelope, "ch", channel);
+            SetMember(envelope, "channel", channel);
+            SetMember(envelope, "t", type);
+            SetMember(envelope, "type", type);
+            SetMember(envelope, "id", messageId);
+            SetMember(envelope, "messageId", messageId);
+            SetMember(envelope, "ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            SetMember(envelope, "room", roomId);
+            SetMember(envelope, "roomId", roomId);
+            SetMember(envelope, "payloadJson", payloadJson ?? "{}");
+            SetMember(envelope, "payload", payloadJson ?? "{}");
+            SetMember(envelope, "requiresAck", requiresAck);
+
+            return (RealtimeEnvelope)envelope;
+        }
+
+        //* این تابع نتیجه reliable را بدون وابستگی به سازنده خاص می‌سازد.
+        private RealtimeReliableSendResult CreateReliableResult(bool success, int attempts, string errorMessage)
+        {
+            object result = Activator.CreateInstance(typeof(RealtimeReliableSendResult));
+
+            SetMember(result, "isSuccess", success);
+            SetMember(result, "success", success);
+            SetMember(result, "attempts", attempts);
+            SetMember(result, "errorMessage", errorMessage ?? string.Empty);
+
+            return (RealtimeReliableSendResult)result;
+        }
+
+        //* این تابع مشخص می‌کند نتیجه reliable موفق بوده یا نه.
+        private bool IsReliableSuccess(RealtimeReliableSendResult result)
+        {
+            object value = ReadMemberObject(result, "isSuccess");
+            if (value is bool isSuccess) return isSuccess;
+
+            value = ReadMemberObject(result, "success");
+            return value is bool success && success;
+        }
+
+        //* این تابع مقدار enum را با نام امن می‌سازد.
+        private object CreateEnumValue(Type enumType, string preferredName)
+        {
+            if (!enumType.IsEnum) return GetDefaultValue(enumType);
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(preferredName) && Enum.IsDefined(enumType, preferredName))
+                {
+                    return Enum.Parse(enumType, preferredName);
+                }
+
+                string[] names = Enum.GetNames(enumType);
+                if (names.Length > 0) return Enum.Parse(enumType, names[0]);
+            }
+            catch
+            {
+            }
+
+            return GetDefaultValue(enumType);
+        }
+
+        //* این تابع مقدار پیش‌فرض هر نوع را می‌سازد.
+        private object GetDefaultValue(Type type)
+        {
+            return type.IsValueType ? Activator.CreateInstance(type) : null;
+        }
+
+        //* این تابع فیلد یا پراپرتی را با رفلکشن ست می‌کند.
+        private void SetMember(object target, string name, object value)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(name)) return;
+
+            Type type = target.GetType();
+
+            FieldInfo field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null)
+            {
+                try { field.SetValue(target, value); } catch { }
+                return;
+            }
+
+            PropertyInfo property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null && property.CanWrite)
+            {
+                try { property.SetValue(target, value, null); } catch { }
+            }
+        }
+
+        //* این تابع مقدار رشته‌ای فیلد یا پراپرتی را می‌خواند.
+        private string ReadMemberString(object target, string name)
+        {
+            object value = ReadMemberObject(target, name);
+            return value == null ? string.Empty : value.ToString();
+        }
+
+        //* این تابع مقدار خام فیلد یا پراپرتی را می‌خواند.
+        private object ReadMemberObject(object target, string name)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(name)) return null;
+
+            Type type = target.GetType();
+
+            FieldInfo field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null) return field.GetValue(target);
+
+            PropertyInfo property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property != null && property.CanRead) return property.GetValue(target, null);
+
+            return null;
+        }
+
+        //* این تابع payload اکشن پلیر را آماده می‌کند.
+        private string BuildPlayerActionPayload(string actionType, string payloadJson)
+        {
+            if (!string.IsNullOrWhiteSpace(payloadJson) &&
+                payloadJson.TrimStart().StartsWith("{", StringComparison.Ordinal) &&
+                payloadJson.Contains("\"actionType\""))
+            {
+                return payloadJson;
+            }
+
+            string safePayload = string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson.Trim();
+
+            return "{" +
+                   "\"actionType\":\"" + EscapeJson(actionType) + "\"," +
+                   "\"payload\":" + safePayload +
+                   "}";
+        }
+
+        //* این تابع payload رویداد دنیا را آماده می‌کند.
+        private string BuildWorldEventPayload(string eventType, string payloadJson)
+        {
+            string safePayload = string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson.Trim();
+
+            if (safePayload.StartsWith("{", StringComparison.Ordinal) && safePayload.Contains("\"eventType\""))
+            {
+                return safePayload;
+            }
+
+            return "{" +
+                   "\"eventType\":\"" + EscapeJson(eventType) + "\"," +
+                   "\"payload\":" + safePayload +
+                   "}";
+        }
+
+        private bool IsAckEnvelope(string channel, string type)
+        {
+            return IsSame(type, "ack") || IsSame(type, "system/ack") ||
+                   (IsSame(channel, "system") && IsSame(type, "ack"));
+        }
+
+        private bool IsPresenceJoin(string type)
+        {
+            return IsSame(type, "player_joined") || IsSame(type, "presence/player_joined");
+        }
+
+        private bool IsPresenceLeft(string type)
+        {
+            return IsSame(type, "player_left") || IsSame(type, "presence/player_left");
+        }
+
+        private bool IsPresenceState(string type)
+        {
+            return IsSame(type, "player_state") || IsSame(type, "presence/player_state");
+        }
+
+        private bool IsWorldEvent(string channel, string type)
+        {
+            return IsSame(channel, "world") || (type != null && type.StartsWith("world", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool IsSame(string a, string b)
+        {
+            return string.Equals(SafeTrim(a), SafeTrim(b), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string SafeTrim(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        }
+
+        private string EscapeJson(string value)
+        {
+            return (value ?? string.Empty)
+                .Replace("\\", "\\\\")
+                .Replace("\"", "\\\"");
+        }
+
+        private string FloatToJson(float value)
+        {
+            return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
+    //* این کلاس رویدادهای گیم سرور کلاینت را نگه می‌دارد و با اسکریپت‌های قدیمی سازگار است.
+    public class GameServerClientEvents
+    {
+        public event Action<string> LogReceived;
+        public event Action<RealtimeError> ErrorReceived;
+        public event Action<GameServerAckResult> AckReceived;
+
+        public event Action<GameServerPresenceEvent> PlayerJoinedReceived;
+        public event Action<GameServerPresenceEvent> PlayerLeftReceived;
+
+        public event Action<RealtimeEnvelope> PlayerStateReceived;
+        public event Action<RealtimeEnvelope> WorldEventReceived;
+
+        internal void RaiseLog(string message) { LogReceived?.Invoke(message); }
+        internal void RaiseError(RealtimeError error) { ErrorReceived?.Invoke(error); }
+        internal void RaiseAck(GameServerAckResult ack) { AckReceived?.Invoke(ack); }
+
+        internal void RaisePlayerJoined(GameServerPresenceEvent presence) { PlayerJoinedReceived?.Invoke(presence); }
+        internal void RaisePlayerLeft(GameServerPresenceEvent presence) { PlayerLeftReceived?.Invoke(presence); }
+
+        internal void RaisePlayerState(RealtimeEnvelope envelope) { PlayerStateReceived?.Invoke(envelope); }
+        internal void RaiseWorld(RealtimeEnvelope envelope) { WorldEventReceived?.Invoke(envelope); }
+    }
+
+    //* این مدل نتیجه اَک پیام‌های گیم سرور را برای تست‌های قدیمی نگه می‌دارد.
+    [Serializable]
+    public class GameServerAckResult
+    {
+        public bool success;
+        public bool isSuccess;
+        public bool processed;
+        public bool isProcessed;
+        public string status;
+        public string reason;
+        public string message;
+        public string errorMessage;
+        public string originalMessageId;
+        public string messageId;
+        public string replyTo;
+        public string roomId;
+        public string detailsJson;
+        public string rawJson;
+
+        public bool IsProcessed()
+        {
+            if (processed || isProcessed) return true;
+            return string.Equals(status, "processed", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase) ||
+                   success ||
+                   isSuccess;
+        }
+
+        public static GameServerAckResult Processed(string originalMessageId, string reason, string roomId)
+        {
+            string details = "{\"status\":\"processed\",\"reason\":\"" + JsonEscape(reason) + "\"}";
+
+            return new GameServerAckResult
+            {
+                success = true,
+                isSuccess = true,
+                processed = true,
+                isProcessed = true,
+                status = "processed",
+                reason = reason,
+                message = reason,
+                originalMessageId = originalMessageId,
+                replyTo = originalMessageId,
+                roomId = roomId,
+                detailsJson = details
+            };
+        }
+
+        public static GameServerAckResult FromEnvelope(string id, string replyTo, string payloadJson, string roomId)
+        {
+            GameServerAckResult ack = null;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(payloadJson))
+                {
+                    ack = JsonUtility.FromJson<GameServerAckResult>(payloadJson);
+                }
+            }
+            catch
+            {
+            }
+
+            if (ack == null) ack = new GameServerAckResult();
+
+            ack.rawJson = payloadJson ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(ack.detailsJson)) ack.detailsJson = payloadJson ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(ack.messageId)) ack.messageId = id;
+            if (string.IsNullOrWhiteSpace(ack.replyTo)) ack.replyTo = replyTo;
+            if (string.IsNullOrWhiteSpace(ack.originalMessageId)) ack.originalMessageId = !string.IsNullOrWhiteSpace(replyTo) ? replyTo : ack.replyTo;
+            if (string.IsNullOrWhiteSpace(ack.roomId)) ack.roomId = roomId;
+
+            if (string.IsNullOrWhiteSpace(ack.status)) ack.status = "processed";
+            ack.success = true;
+            ack.isSuccess = true;
+            ack.processed = true;
+            ack.isProcessed = true;
+
+            return ack;
+        }
+
+        private static string JsonEscape(string value)
+        {
+            return (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
+        }
+    }
+
+    //* این مدل ایونت حضور پلیر را برای مسیر گیم اینتگریشن و تست‌های قدیمی نگه می‌دارد.
+    [Serializable]
+    public class GameServerPresenceEvent
+    {
+        public string type;
+        public string userId;
+        public string playerId;
+        public string networkPlayerId;
+        public string id;
+        public string userName;
+        public string username;
+        public string playerName;
+        public string displayName;
+        public string connectionId;
+        public string roomId;
+        public string serverId;
+        public string sessionId;
+        public string reason;
+        public string rawJson;
+
+        public long sequence;
+        public long timestampUnixMs;
+
+        public float px;
+        public float py;
+        public float pz;
+
+        public float rx;
+        public float ry;
+        public float rz;
+        public float rw;
+
+        public float vx;
+        public float vy;
+        public float vz;
+
+        public Vector3 Position => new Vector3(px, py, pz);
+        public Quaternion Rotation => new Quaternion(rx, ry, rz, rw == 0f ? 1f : rw);
+        public Vector3 Velocity => new Vector3(vx, vy, vz);
+
+        public bool IsValid()
+        {
+            return !string.IsNullOrWhiteSpace(ResolveNetworkPlayerId());
+        }
+
+        public string ResolveNetworkPlayerId()
+        {
+            if (!string.IsNullOrWhiteSpace(userId)) return userId.Trim();
+            if (!string.IsNullOrWhiteSpace(playerId)) return playerId.Trim();
+            if (!string.IsNullOrWhiteSpace(networkPlayerId)) return networkPlayerId.Trim();
+            if (!string.IsNullOrWhiteSpace(id)) return id.Trim();
+            if (!string.IsNullOrWhiteSpace(connectionId)) return connectionId.Trim();
+            return string.Empty;
+        }
+
+        public static GameServerPresenceEvent FromEnvelope(string type, string roomId, string payloadJson)
+        {
+            GameServerPresenceEvent evt = null;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(payloadJson))
+                {
+                    evt = JsonUtility.FromJson<GameServerPresenceEvent>(payloadJson);
+                }
+            }
+            catch
+            {
+            }
+
+            if (evt == null) evt = new GameServerPresenceEvent();
+
+            evt.type = string.IsNullOrWhiteSpace(evt.type) ? type : evt.type;
+            evt.roomId = string.IsNullOrWhiteSpace(evt.roomId) ? roomId : evt.roomId;
+            evt.rawJson = payloadJson ?? string.Empty;
+
+            return evt;
+        }
     }
 }
-
-//* این فایل کلاینت سطح گیم‌سرور را برای یونیتی می‌سازد.
-//* گیم‌سرورکلاینت فقط RealtimeClient را صدا می‌زند و به وب‌سوکت یا جی‌آرپی‌سی وابسته نیست.
