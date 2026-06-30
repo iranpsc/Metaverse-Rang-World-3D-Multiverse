@@ -166,6 +166,98 @@ namespace Network_A.Auth
             return dto;
         }
 
+
+        public static GetMicroserviceUserDataResponseDto DecodeGetMicroserviceUserDataResponse(byte[] bytes)
+        {
+            var dto = new GetMicroserviceUserDataResponseDto
+            {
+                success = false,
+                message = string.Empty,
+                profile = null
+            };
+
+            if (bytes == null || bytes.Length == 0) return dto;
+
+            var r = new ProtoReader(bytes);
+            while (r.TryReadTag(out int field, out int wire))
+            {
+                switch (field)
+                {
+                    case 1:
+                        dto.success = r.ReadBool();
+                        break;
+
+                    case 2:
+                        dto.message = r.ReadString();
+                        break;
+
+                    case 3:
+                        dto.profile = DecodeMicroserviceUserData(r.ReadBytes());
+                        break;
+
+                    default:
+                        r.Skip(wire);
+                        break;
+                }
+            }
+
+            return dto;
+        }
+
+        static MicroserviceUserDataDto DecodeMicroserviceUserData(byte[] bytes)
+        {
+            var dto = new MicroserviceUserDataDto
+            {
+                microserviceId = string.Empty,
+                name = string.Empty,
+                code = string.Empty,
+                avatar = string.Empty,
+                microserviceUserName = string.Empty,
+                lastSyncAtUnix = 0
+            };
+
+            if (bytes == null || bytes.Length == 0) return dto;
+
+            var r = new ProtoReader(bytes);
+            while (r.TryReadTag(out int field, out int wire))
+            {
+                switch (field)
+                {
+                    case 1:
+                        dto.microserviceId = r.ReadString();
+                        break;
+
+                    case 2:
+                        dto.name = r.ReadString();
+                        break;
+
+                    case 3:
+                        dto.code = r.ReadString();
+                        break;
+
+                    case 4:
+                        dto.avatar = r.ReadString();
+                        break;
+
+                    case 5:
+                        dto.microserviceUserName = r.ReadString();
+                        break;
+
+                    case 6:
+                        if (wire == 0) dto.lastSyncAtUnix = r.ReadInt64();
+                        else r.Skip(wire);
+                        break;
+
+                    default:
+                        r.Skip(wire);
+                        break;
+                }
+            }
+
+            return dto;
+        }
+
+
         //* Decodes User protobuf bytes.
         static AuthUserDto DecodeUser(byte[] bytes)
         {

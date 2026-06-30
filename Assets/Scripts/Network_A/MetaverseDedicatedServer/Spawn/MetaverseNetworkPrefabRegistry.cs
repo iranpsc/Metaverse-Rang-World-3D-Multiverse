@@ -45,14 +45,8 @@ public class MetaverseNetworkPrefabRegistry : ScriptableObject
         if (string.IsNullOrWhiteSpace(prefabId) || prefab == null) return;
 
         Entry existing = prefabs.Find(x => string.Equals(SafeTrim(x.prefabId), prefabId, StringComparison.Ordinal));
-        if (existing != null)
-        {
-            existing.prefab = prefab;
-        }
-        else
-        {
-            prefabs.Add(new Entry { prefabId = prefabId, prefab = prefab });
-        }
+        if (existing != null) existing.prefab = prefab;
+        else prefabs.Add(new Entry { prefabId = prefabId, prefab = prefab });
 
         RebuildCache();
     }
@@ -140,9 +134,6 @@ public class MetaverseNetworkPrefabRegistry : ScriptableObject
 
             dictPrefabById.Add(entry.prefabId, entry.prefab);
             if (!dictIdByPrefab.ContainsKey(entry.prefab)) dictIdByPrefab.Add(entry.prefab, entry.prefabId);
-
-            MetaverseNetworkIdentity identity = entry.prefab.GetComponent<MetaverseNetworkIdentity>();
-            if (identity != null && string.IsNullOrWhiteSpace(identity.PrefabId)) identity.AssignPrefabId(entry.prefabId);
         }
 
         cacheBuilt = true;

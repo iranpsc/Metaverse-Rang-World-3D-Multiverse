@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Network_A.Realtime.Protocol;
 using UnityEngine;
 
 namespace Network_A.DedicatedGameServer.Client
@@ -15,6 +16,7 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private bool logPlayerLeft = true;
         [SerializeField] private bool logRemotePlayerState = true;
         [SerializeField] private bool logStateAccepted = false;
+        [SerializeField] private bool logMessageFormat = true;
 
         private readonly Dictionary<string, DedicatedRemotePlayerState> dict_remoteStatesByPlayerId =
             new Dictionary<string, DedicatedRemotePlayerState>();
@@ -35,25 +37,21 @@ namespace Network_A.DedicatedGameServer.Client
         public event Action<DedicatedRemotePresenceEvent> RemotePlayerLeft;
         public event Action<DedicatedPlayerStateAcceptedEvent> PlayerStateAccepted;
 
-        //* این تابع رفرنس کلاینت ددیکیتد را هنگام شروع آبجکت پیدا می کند.
         private void Awake()
         {
             EnsureReferences();
         }
 
-        //* این تابع هنگام فعال شدن آبجکت، پیام های خام کلاینت ددیکیتد را گوش می دهد.
         private void OnEnable()
         {
             BindWsEvents();
         }
 
-        //* این تابع هنگام غیرفعال شدن آبجکت، رویدادها را پاک می کند.
         private void OnDisable()
         {
             UnbindWsEvents();
         }
 
-        //* این تابع رفرنس کلاینت ددیکیتد را از همین آبجکت یا سینگلتون پیدا می کند.
         private void EnsureReferences()
         {
             if (wsClient != null) return;
@@ -105,13 +103,11 @@ namespace Network_A.DedicatedGameServer.Client
             wsEventsBound = false;
         }
 
-        //* این تابع یک اسنپ شات از وضعیت ریموت پلیرها برمی گرداند.
         public List<DedicatedRemotePlayerState> CreateSnapshot()
         {
             return new List<DedicatedRemotePlayerState>(dict_remoteStatesByPlayerId.Values);
         }
 
-        //* این تابع وضعیت یک ریموت پلیر را با پلیر آی دی برمی گرداند.
         public DedicatedRemotePlayerState GetRemoteState(string playerId)
         {
             if (string.IsNullOrWhiteSpace(playerId)) return null;
@@ -121,46 +117,45 @@ namespace Network_A.DedicatedGameServer.Client
                 : null;
         }
 
-        //* این تابع پیام خام دریافتی از ددیکیتد سرور را دسته بندی می کند.
         private void HandleRawMessageReceived(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return;
 
-            DedicatedRemoteMessageTypeDto typeDto = ParseType(raw);
-            if (typeDto == null || string.IsNullOrWhiteSpace(typeDto.type)) return;
+            string messageType = ReadMessageType(raw);
+            if (string.IsNullOrWhiteSpace(messageType)) return;
 
-            if (typeDto.type == "player_state")
+            if (messageType == RealtimeMessageTypes.PlayerState || messageType == "player_state")
             {
                 HandlePlayerState(raw);
                 return;
             }
 
-            if (typeDto.type == "player_joined")
+            if (messageType == RealtimeMessageTypes.PlayerJoined || messageType == "player_joined")
             {
                 HandlePlayerJoined(raw);
                 return;
             }
 
-            if (typeDto.type == "player_left")
+            if (messageType == RealtimeMessageTypes.PlayerLeft || messageType == "player_left")
             {
                 HandlePlayerLeft(raw);
                 return;
             }
 
-            if (typeDto.type == "player_state_accepted")
+            if (messageType == RealtimeMessageTypes.PlayerStateAccepted || messageType == "player_state_accepted")
             {
                 HandlePlayerStateAccepted(raw);
             }
         }
 
-        //* این تابع پیام player_state پلیر دیگر را دریافت و ذخیره می کند.
         private void HandlePlayerState(string raw)
         {
             DedicatedRemotePlayerState state = null;
+            string payloadJson = ReadPayloadOrRawJson(raw);
 
             try
             {
-                state = JsonUtility.FromJson<DedicatedRemotePlayerState>(raw);
+                state = JsonUtility.FromJson<DedicatedRemotePlayerState>(payloadJson);
             }
             catch (Exception ex)
             {
@@ -193,9 +188,7 @@ namespace Network_A.DedicatedGameServer.Client
             }
 
             set_leftNotifiedPlayerIds.Remove(playerId);
-
             dict_remoteStatesByPlayerId[playerId] = state;
-
             RemotePlayerStateReceived?.Invoke(state);
 
             if (logRemotePlayerState)
@@ -203,18 +196,19 @@ namespace Network_A.DedicatedGameServer.Client
                 Debug.Log("[DedicatedRemotePlayerStateReceiver] Remote player_state received | playerId=" +
                           playerId + " | sequence=" + state.sequence +
                           " | pos=" + state.Position +
-                          " | remoteCount=" + RemotePlayerCount);
+                          " | remoteCount=" + RemotePlayerCount +
+                          BuildFormatLog(raw));
             }
         }
 
-        //* این تابع پیام ورود پلیر دیگر را دریافت می کند.
         private void HandlePlayerJoined(string raw)
         {
             DedicatedRemotePresenceEvent evt = null;
+            string payloadJson = ReadPayloadOrRawJson(raw);
 
             try
             {
-                evt = JsonUtility.FromJson<DedicatedRemotePresenceEvent>(raw);
+                evt = JsonUtility.FromJson<DedicatedRemotePresenceEvent>(payloadJson);
             }
             catch (Exception ex)
             {
@@ -239,18 +233,19 @@ namespace Network_A.DedicatedGameServer.Client
             if (logPlayerJoined)
             {
                 Debug.Log("[DedicatedRemotePlayerStateReceiver] Remote player joined | playerId=" +
-                          evt.ResolvePlayerId() + " | userId=" + evt.userId + " | roomId=" + evt.roomId);
+                          evt.ResolvePlayerId() + " | userId=" + evt.userId + " | roomId=" + evt.roomId +
+                          BuildFormatLog(raw));
             }
         }
 
-        //* این تابع پیام خروج پلیر دیگر را دریافت می کند و وضعیت ذخیره شده آن را پاک می کند.
         private void HandlePlayerLeft(string raw)
         {
             DedicatedRemotePresenceEvent evt = null;
+            string payloadJson = ReadPayloadOrRawJson(raw);
 
             try
             {
-                evt = JsonUtility.FromJson<DedicatedRemotePresenceEvent>(raw);
+                evt = JsonUtility.FromJson<DedicatedRemotePresenceEvent>(payloadJson);
             }
             catch (Exception ex)
             {
@@ -283,18 +278,19 @@ namespace Network_A.DedicatedGameServer.Client
             if (logPlayerLeft)
             {
                 Debug.Log("[DedicatedRemotePlayerStateReceiver] Remote player left | playerId=" +
-                          playerId + " | reason=" + evt.reason + " | remoteCount=" + RemotePlayerCount);
+                          playerId + " | reason=" + evt.reason + " | remoteCount=" + RemotePlayerCount +
+                          BuildFormatLog(raw));
             }
         }
 
-        //* این تابع پاسخ player_state_accepted را برای تست تک کلاینت دریافت می کند.
         private void HandlePlayerStateAccepted(string raw)
         {
             DedicatedPlayerStateAcceptedEvent evt = null;
+            string payloadJson = ReadPayloadOrRawJson(raw);
 
             try
             {
-                evt = JsonUtility.FromJson<DedicatedPlayerStateAcceptedEvent>(raw);
+                evt = JsonUtility.FromJson<DedicatedPlayerStateAcceptedEvent>(payloadJson);
             }
             catch (Exception ex)
             {
@@ -305,17 +301,16 @@ namespace Network_A.DedicatedGameServer.Client
             if (evt == null) return;
 
             evt.rawJson = raw;
-
             PlayerStateAccepted?.Invoke(evt);
 
             if (logStateAccepted)
             {
                 Debug.Log("[DedicatedRemotePlayerStateReceiver] player_state_accepted | sequence=" +
-                          evt.sequence + " | broadcastCount=" + evt.broadcastCount);
+                          evt.sequence + " | broadcastCount=" + evt.broadcastCount +
+                          BuildFormatLog(raw));
             }
         }
 
-        //* این تابع بعد از قطع اتصال، وضعیت ریموت ها را پاک می کند.
         private void HandleDisconnected(string reason)
         {
             int previousCount = dict_remoteStatesByPlayerId.Count;
@@ -347,9 +342,41 @@ namespace Network_A.DedicatedGameServer.Client
             return false;
         }
 
-        //* این تابع تایپ پیام را از جیسون خام می خواند.
-        private DedicatedRemoteMessageTypeDto ParseType(string raw)
+        private string BuildFormatLog(string raw)
         {
+            if (!logMessageFormat) return string.Empty;
+            return " | messageFormat=" + ReadMessageFormat(raw) + " | route=" + ReadRouteForLog(raw);
+        }
+
+        private string ReadMessageFormat(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return "empty";
+            if (TryParseEnvelope(raw, out RealtimeEnvelope _)) return "envelope";
+
+            DedicatedRemoteMessageTypeDto typeDto = TryParseLegacyType(raw);
+            if (typeDto != null && !string.IsNullOrWhiteSpace(typeDto.type)) return "legacy";
+
+            return "invalid";
+        }
+
+        private string ReadRouteForLog(string raw)
+        {
+            if (TryParseEnvelope(raw, out RealtimeEnvelope envelope))
+            {
+                string channel = string.IsNullOrWhiteSpace(envelope.ch) ? "unknown" : envelope.ch.Trim();
+                string type = string.IsNullOrWhiteSpace(envelope.t) ? "unknown" : envelope.t.Trim();
+                return channel + "/" + type;
+            }
+
+            DedicatedRemoteMessageTypeDto typeDto = TryParseLegacyType(raw);
+            string legacyType = typeDto == null || string.IsNullOrWhiteSpace(typeDto.type) ? "unknown" : typeDto.type.Trim();
+            return "legacy/" + legacyType;
+        }
+
+        private DedicatedRemoteMessageTypeDto TryParseLegacyType(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+
             try
             {
                 return JsonUtility.FromJson<DedicatedRemoteMessageTypeDto>(raw);
@@ -360,14 +387,37 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
-        /*
-        توضیح مکتوب فایل:
-        این اسکریپت سمت کلاینت ددیکیتد پیام های دریافتی از یونیتی ددیکیتد سرور را گوش می دهد.
-        برای تست DS-8B، پیام های player_state پلیرهای دیگر را دریافت و ذخیره می کند.
-        همچنین player_joined، player_left و player_state_accepted را تشخیص می دهد.
-        این فایل هنوز Remote Player را در صحنه نمی سازد؛ فقط داده را دریافت، ذخیره و لاگ می کند.
-        فاز بعدی از همین داده برای ساخت و حرکت دادن Remote Player View استفاده می کند.
-        */
+        private DedicatedRemoteMessageTypeDto ParseType(string raw)
+        {
+            string messageType = ReadMessageType(raw);
+            return string.IsNullOrWhiteSpace(messageType) ? null : new DedicatedRemoteMessageTypeDto { type = messageType };
+        }
+
+        private string ReadMessageType(string raw)
+        {
+            if (TryParseEnvelope(raw, out RealtimeEnvelope envelope)) return envelope.t;
+
+            DedicatedRemoteMessageTypeDto typeDto = TryParseLegacyType(raw);
+            return typeDto == null ? string.Empty : typeDto.type;
+        }
+
+        private string ReadPayloadOrRawJson(string raw)
+        {
+            if (TryParseEnvelope(raw, out RealtimeEnvelope envelope)) return envelope.payloadJson;
+            return string.IsNullOrWhiteSpace(raw) ? "{}" : raw;
+        }
+
+        private bool TryParseEnvelope(string raw, out RealtimeEnvelope envelope)
+        {
+            envelope = null;
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+
+            RealtimeEnvelope parsed = RealtimeEnvelope.FromJson(raw);
+            if (parsed == null || !parsed.IsValidBasic()) return false;
+
+            envelope = parsed;
+            return true;
+        }
 
         [Serializable]
         private class DedicatedRemoteMessageTypeDto
@@ -422,7 +472,6 @@ namespace Network_A.DedicatedGameServer.Client
             get { return new Vector3(vx, vy, vz); }
         }
 
-        //* این تابع شناسه پلیر را به شکل امن برمی گرداند.
         public string ResolvePlayerId()
         {
             if (!string.IsNullOrWhiteSpace(playerId)) return playerId.Trim();
@@ -447,7 +496,6 @@ namespace Network_A.DedicatedGameServer.Client
         public long serverTimeUnixMs;
         public string rawJson;
 
-        //* این تابع شناسه پلیر را به شکل امن برمی گرداند.
         public string ResolvePlayerId()
         {
             if (!string.IsNullOrWhiteSpace(playerId)) return playerId.Trim();

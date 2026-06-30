@@ -14,6 +14,7 @@ public class MetaverseSpawnManagerSmokeTest : MonoBehaviour
 
     public void TestSpawn()
     {
+        if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
         if (spawnManager == null) spawnManager = FindObjectOfType<MetaverseSpawnManager>();
         if (spawnManager == null || testPrefab == null)
         {
@@ -30,6 +31,7 @@ public class MetaverseSpawnManagerSmokeTest : MonoBehaviour
 
     public void TestDespawn()
     {
+        if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
         if (spawnManager == null) spawnManager = FindObjectOfType<MetaverseSpawnManager>();
         if (spawnManager == null || lastSpawned == null)
         {

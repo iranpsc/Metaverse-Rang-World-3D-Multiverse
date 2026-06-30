@@ -135,6 +135,7 @@ namespace Network_A.Tests.Realtime
         private const string PresenceRoomMembersSnapshotTypeName = RealtimeMessageTypes.RoomMembersSnapshot;
 
         public string CurrentRoomId => activeRoomId;
+        public string CurrentRoomName => activeRoomName;
         public string CurrentUserId => currentRealtimeUserId;
         public string CurrentUserName => currentRealtimeUserName;
         public bool IsJoinedRoom => isJoined;
@@ -802,6 +803,7 @@ namespace Network_A.Tests.Realtime
                 {
                     joinedRoom.Normalize();
                     joinedRoom.onlineCount = Mathf.Clamp(joinedRoom.onlineCount + 1, 1, joinedRoom.maxPlayers);
+                    if (!string.IsNullOrWhiteSpace(joinedRoom.roomName)) activeRoomName = joinedRoom.roomName.Trim();
 
                     UpdateRoomDisplay(joinedRoom, true);
                     ShowRealtimeSuccessMessage("You joined to " + joinedRoom.roomName + ". Start chat.");
@@ -816,6 +818,7 @@ namespace Network_A.Tests.Realtime
                 SetListRoomsButtonInteractable(false);
                 UpdateConnectionButtons();
                 UpdateSendMessageButton();
+                if (string.IsNullOrWhiteSpace(activeRoomName) && joinedRoom != null) activeRoomName = joinedRoom.roomName;
                 OnRoomJoinedFor3D?.Invoke(activeRoomId);
                 return true;
             }

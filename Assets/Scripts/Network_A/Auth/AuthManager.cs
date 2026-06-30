@@ -102,7 +102,8 @@ namespace Network_A.Auth
         private bool netWarning_Disabled;
         [SerializeField] private bool isCheckingNet;
         #endregion
-
+        [Header("Microservice User Data UI")]
+        [SerializeField] private Button btn_MicroserviceUserData;
         #region <_____________________________________________MONO_____________________________________________>
         //* Initializes singleton, server config and refresh pipeline.
 
@@ -148,6 +149,8 @@ namespace Network_A.Auth
             }
 
             if (checkNetOnStart) CheckNet();
+
+            SetupMicroserviceUserDataButton();
         }
 
         //* Optional repeated network check timer.
@@ -370,7 +373,11 @@ namespace Network_A.Auth
             byte[] message = AuthProtoMapper.EncodeEmptyRequest();
             return SendGetUserDataUnaryAsync(ServerConfig.GetUserDataUrl, message, true, "GET_USER_DATA", ct);
         }
-
+        public Task<ApiResult<GetMicroserviceUserDataResponseDto>> GetMicroserviceUserDataAsync(CancellationToken ct = default(CancellationToken))
+        {
+            byte[] message = AuthProtoMapper.EncodeEmptyRequest();
+            return SendGetMicroserviceUserDataUnaryAsync(ServerConfig.GetMicroserviceUserDataUrl, message, true, "GET_MICROSERVICE_USER_DATA", ct);
+        }
         //* Refreshes tokens using AuthRefreshManager-compatible internal flow.
         public async Task<ApiResult<AuthResponseDto>> RefreshAsync(CancellationToken ct = default(CancellationToken))
         {
@@ -775,6 +782,43 @@ namespace Network_A.Auth
             GetUserDataResponseDto webDto = AuthProtoMapper.DecodeGetUserDataResponse(webMessage);
             return ApiResult<GetUserDataResponseDto>.Success(webDto, webRaw.StatusCode, webRaw.RawBody, webRaw.RawBytes);
         }
+
+
+        private async Task<ApiResult<GetMicroserviceUserDataResponseDto>> SendGetMicroserviceUserDataUnaryAsync(string url, byte[] protoMessage, bool auth, string logTag, CancellationToken ct)
+        {
+            if (ServerConfig.IsGrpcNative())
+            {
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
+                ApiResult<byte[]> raw = await GrpcNativeUnaryClient.SendAsync(ServerConfig.ServiceName, "GetMicroserviceUserData", protoMessage, auth, null, ct, logTag + "_NATIVE");
+
+                if (!raw.IsSuccess) return ApiResult<GetMicroserviceUserDataResponseDto>.Failure(raw.ErrorMessage, raw.StatusCode, raw.IsNetworkError, raw.RawBody, raw.RawBytes);
+
+                byte[] message = ReadNativeBytes(raw);
+                GetMicroserviceUserDataResponseDto dto = AuthProtoMapper.DecodeGetMicroserviceUserDataResponse(message);
+
+                return ApiResult<GetMicroserviceUserDataResponseDto>.Success(dto, raw.StatusCode, raw.RawBody, raw.RawBytes);
+#else
+                return ApiResult<GetMicroserviceUserDataResponseDto>.Failure("Native gRPC is enabled in ServerConfig, but this platform is not enabled for Native GetMicroserviceUserData.", 0, true);
+#endif
+            }
+
+            byte[] frame = AuthProtoMapper.EncodeGrpcWebUnaryRequest(protoMessage);
+            ApiResult<byte[]> webRaw = await RequestManager.Send<byte[]>(url, UnityWebRequest.kHttpVerbPOST, frame, auth, BuildGrpcWebHeaders(), ct, logTag);
+
+            if (!webRaw.IsSuccess) return ApiResult<GetMicroserviceUserDataResponseDto>.Failure(webRaw.ErrorMessage, webRaw.StatusCode, webRaw.IsNetworkError, webRaw.RawBody, webRaw.RawBytes);
+
+            byte[] webMessage;
+            Dictionary<string, string> trailers;
+
+            if (!AuthProtoMapper.TryDecodeGrpcWebUnaryResponse(webRaw.RawBytes, out webMessage, out trailers)) return ApiResult<GetMicroserviceUserDataResponseDto>.Failure("Invalid gRPC-Web response", webRaw.StatusCode, false, webRaw.RawBody, webRaw.RawBytes);
+
+            string grpcStatus = ReadTrailer(trailers, "grpc-status");
+            if (!string.IsNullOrEmpty(grpcStatus) && grpcStatus != "0") return ApiResult<GetMicroserviceUserDataResponseDto>.Failure(ReadTrailer(trailers, "grpc-message"), webRaw.StatusCode, false, webRaw.RawBody, webRaw.RawBytes);
+
+            GetMicroserviceUserDataResponseDto webDto = AuthProtoMapper.DecodeGetMicroserviceUserDataResponse(webMessage);
+            return ApiResult<GetMicroserviceUserDataResponseDto>.Success(webDto, webRaw.StatusCode, webRaw.RawBody, webRaw.RawBytes);
+        }
+
 
         //* Refreshes token without entering the main RequestManager queue.
         async Task<bool> RefreshInternalAsync()
@@ -1386,5 +1430,91 @@ namespace Network_A.Auth
         #endregion
 
         #endregion
+
+
+        private void SetupMicroserviceUserDataButton()
+        {
+            if (btn_MicroserviceUserData == null) return;
+
+            btn_MicroserviceUserData.onClick.RemoveListener(OnMicroserviceUserDataButtonClicked);
+            btn_MicroserviceUserData.onClick.AddListener(OnMicroserviceUserDataButtonClicked);
+        }
+
+        public void OnMicroserviceUserDataButtonClicked()
+        {
+            SetButton(btn_MicroserviceUserData, false);
+            RunSafely(GetMicroserviceUserData_Button_Cor, "GET_MICROSERVICE_USER_DATA_BUTTON");
+        }
+
+        public async Task GetMicroserviceUserData_Button_Cor()
+        {
+            if (!HasAccessToken())
+            {
+                ShowWarningMessage("برای دریافت دیتای میکروسرویس ابتدا وارد حساب شوید.");
+                NetworkFileLogger.Auth("GET_MICROSERVICE_USER_DATA_NO_TOKEN", false, "Access token is empty.", string.Empty, HasAccessToken(), HasRefreshToken());
+                SetButton(btn_MicroserviceUserData, true);
+                return;
+            }
+
+            ShowInfoMessage("در حال دریافت دیتای کاربر از میکروسرویس...");
+            NetworkFileLogger.Auth("GET_MICROSERVICE_USER_DATA_START", true, "Button flow started.", CurrentUser != null ? CurrentUser.id : string.Empty, HasAccessToken(), HasRefreshToken());
+
+            ApiResult<GetMicroserviceUserDataResponseDto> res = await GetMicroserviceUserDataAsync();
+
+            if (res == null)
+            {
+                ShowErrorMessage("پاسخ دیتای میکروسرویس دریافت نشد.");
+                NetworkFileLogger.Auth("GET_MICROSERVICE_USER_DATA_NULL", false, "Result is null.", CurrentUser != null ? CurrentUser.id : string.Empty, HasAccessToken(), HasRefreshToken());
+                SetButton(btn_MicroserviceUserData, true);
+                return;
+            }
+
+            if (!res.IsSuccess)
+            {
+                string errorMessage = BuildUserMessage("GET_MICROSERVICE_USER_DATA", res.ErrorMessage, res.StatusCode);
+                ShowErrorMessage(errorMessage);
+                NetworkFileLogger.Auth("GET_MICROSERVICE_USER_DATA_FAILED", false, res.ErrorMessage, CurrentUser != null ? CurrentUser.id : string.Empty, HasAccessToken(), HasRefreshToken());
+                SetButton(btn_MicroserviceUserData, true);
+                return;
+            }
+
+            if (res.Data == null || !res.Data.success || res.Data.profile == null)
+            {
+                string message = res.Data != null ? res.Data.message : "Profile data is empty.";
+                ShowErrorMessage("دیتای میکروسرویس برای این کاربر پیدا نشد.");
+                NetworkFileLogger.Auth("GET_MICROSERVICE_USER_DATA_EMPTY", false, message, CurrentUser != null ? CurrentUser.id : string.Empty, HasAccessToken(), HasRefreshToken());
+                SetButton(btn_MicroserviceUserData, true);
+                return;
+            }
+
+            MicroserviceUserDataDto profile = res.Data.profile;
+            string uiMessage = BuildMicroserviceUserDataMessage(profile);
+
+            ShowSuccessMessage(uiMessage);
+
+            NetworkFileLogger.Auth("GET_MICROSERVICE_USER_DATA_SUCCESS", true, res.Data.message, CurrentUser != null ? CurrentUser.id : string.Empty, HasAccessToken(), HasRefreshToken());
+            NetworkFileLogger.Data("MICROSERVICE_USER_DATA", "microserviceId", profile.microserviceId);
+            NetworkFileLogger.Data("MICROSERVICE_USER_DATA", "name", profile.name);
+            NetworkFileLogger.Data("MICROSERVICE_USER_DATA", "code", profile.code);
+            NetworkFileLogger.Data("MICROSERVICE_USER_DATA", "avatar", profile.avatar);
+            NetworkFileLogger.Data("MICROSERVICE_USER_DATA", "microserviceUserName", profile.microserviceUserName);
+            NetworkFileLogger.Data("MICROSERVICE_USER_DATA", "lastSyncAtUnix", profile.lastSyncAtUnix.ToString());
+
+            SetButton(btn_MicroserviceUserData, true);
+        }
+
+        private string BuildMicroserviceUserDataMessage(MicroserviceUserDataDto profile)
+        {
+            if (profile == null) return "دیتای میکروسرویس خالی است.";
+
+            return
+                "دیتای کاربر میکروسرویس دریافت شد" +
+                "\nنام: " + SafeText(profile.name) +
+                "\nکد: " + SafeText(profile.code) +
+                "\nشناسه: " + SafeText(profile.microserviceId);
+        }
+
+
+
     }
 }

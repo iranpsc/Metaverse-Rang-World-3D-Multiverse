@@ -25,6 +25,7 @@ namespace Network_A.Tests.Realtime
         [SerializeField] private bool forceDedicatedServerConfig = true;
         [SerializeField] private RealtimeTransportKind transportKind = RealtimeTransportKind.WebSocket;
         [SerializeField] private bool disableCoreConnectTimeoutAfterConnect = true;
+        [SerializeField] private bool preventAutoRealtimeConnectBeforeStartButton = true;
 
         [Header("Room")]
         [SerializeField] private string roomNamePrefix = "WebGL G7 Lobby Room";
@@ -135,6 +136,7 @@ namespace Network_A.Tests.Realtime
         private const string PresenceRoomMembersSnapshotTypeName = RealtimeMessageTypes.RoomMembersSnapshot;
 
         public string CurrentRoomId => activeRoomId;
+        public string CurrentRoomName => activeRoomName;
         public string CurrentUserId => currentRealtimeUserId;
         public string CurrentUserName => currentRealtimeUserName;
         public bool IsJoinedRoom => isJoined;
@@ -365,6 +367,17 @@ namespace Network_A.Tests.Realtime
 
         public async Task<bool> LoginCheckConnectAndAuthAsync()
         {
+            string storedToken = SecureTokenStorage.GetAccessToken();
+            return await LoginCheckConnectAndAuthInternalAsync(storedToken, "stored_token");
+        }
+
+        public async Task<bool> LoginCheckConnectAndAuthWithAccessTokenAsync(string accessToken)
+        {
+            return await LoginCheckConnectAndAuthInternalAsync(accessToken, "explicit_token");
+        }
+
+        private async Task<bool> LoginCheckConnectAndAuthInternalAsync(string accessToken, string tokenSource)
+        {
             EnsureLifecycleToken();
 
             if (IsRealtimeReady())
@@ -386,28 +399,27 @@ namespace Network_A.Tests.Realtime
                 isLeaveRoomRunning = false;
             }
 
-            string storedToken = SecureTokenStorage.GetAccessToken();
-            if (string.IsNullOrWhiteSpace(storedToken))
+            if (string.IsNullOrWhiteSpace(accessToken))
             {
-                return Fail("Stored access token is empty. First login with normal Auth UI.");
+                return Fail("Realtime access token is empty. tokenSource=" + SafeTokenSource(tokenSource));
             }
 
-            UpdateCurrentUserIdentityFromStoredToken();
+            UpdateCurrentUserIdentityFromAccessToken(accessToken);
 
             if (realtimeClient == null) CreateClientObjects();
 
             bool connected = await ConnectAsync();
             if (!connected) return Fail("Realtime connect failed.");
 
-            bool authenticated = await AuthenticateWithStoredTokenAsync();
-            if (!authenticated) return Fail("Realtime auth failed.");
+            bool authenticated = await AuthenticateWithAccessTokenAsync(accessToken);
+            if (!authenticated) return Fail("Realtime auth failed. tokenSource=" + SafeTokenSource(tokenSource));
 
             await RefreshCurrentUserCreatedRoomStateAsync();
 
             StartKeepAliveLoop();
 
             ShowRealtimeSuccessMessage("Realtime connected and authenticated.");
-            Log("Realtime connection and auth completed.");
+            Log("Realtime connection and auth completed. tokenSource=" + SafeTokenSource(tokenSource));
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
@@ -452,12 +464,20 @@ namespace Network_A.Tests.Realtime
 
         private async Task<bool> AuthenticateWithStoredTokenAsync()
         {
+            string storedToken = SecureTokenStorage.GetAccessToken();
+            return await AuthenticateWithAccessTokenAsync(storedToken);
+        }
+
+        private async Task<bool> AuthenticateWithAccessTokenAsync(string accessToken)
+        {
             EnsureLifecycleToken();
             authWaiter = CreateBoolWaiter();
 
+            if (string.IsNullOrWhiteSpace(accessToken)) return Fail("Realtime auth token is empty before send.");
+
             using (CancellationTokenSource authCts = CreateLinkedTimeoutToken(waitTimeoutMs))
             {
-                bool sent = await realtimeAuthClient.AuthenticateWithStoredTokenAsync(authCts.Token);
+                bool sent = await realtimeAuthClient.AuthenticateWithAccessTokenAsync(accessToken.Trim(), authCts.Token);
                 if (!sent) return Fail("Realtime auth message was not sent.");
 
                 bool ok = await WaitForBoolAsync(authWaiter, waitTimeoutMs, authCts.Token);
@@ -532,7 +552,7 @@ namespace Network_A.Tests.Realtime
                 return true;
             }
 
-            if (!await LoginCheckConnectAndAuthAsync()) return false;
+            if (!await EnsureRealtimeReadyForUtilityMethodAsync("List rooms")) return false;
 
             RealtimeLobbyListRoomsResult result = await realtimeLobbyClient.ListRoomsAsync(
                 CreateReliableOptions(),
@@ -771,7 +791,7 @@ namespace Network_A.Tests.Realtime
 
             try
             {
-                if (!await LoginCheckConnectAndAuthAsync()) return false;
+                if (!await EnsureRealtimeReadyForUtilityMethodAsync("Join room")) return false;
                 if (string.IsNullOrWhiteSpace(activeRoomId)) return Fail("Room id is empty. Create room first or join a listed room.");
                 if (isJoined && gameServerClient != null && gameServerClient.HasRoom) return true;
 
@@ -799,6 +819,7 @@ namespace Network_A.Tests.Realtime
                 {
                     joinedRoom.Normalize();
                     joinedRoom.onlineCount = Mathf.Clamp(joinedRoom.onlineCount + 1, 1, joinedRoom.maxPlayers);
+                    if (!string.IsNullOrWhiteSpace(joinedRoom.roomName)) activeRoomName = joinedRoom.roomName.Trim();
 
                     UpdateRoomDisplay(joinedRoom, true);
                     ShowRealtimeSuccessMessage("You joined to " + joinedRoom.roomName + ". Start chat.");
@@ -813,6 +834,7 @@ namespace Network_A.Tests.Realtime
                 SetListRoomsButtonInteractable(false);
                 UpdateConnectionButtons();
                 UpdateSendMessageButton();
+                if (string.IsNullOrWhiteSpace(activeRoomName) && joinedRoom != null) activeRoomName = joinedRoom.roomName;
                 OnRoomJoinedFor3D?.Invoke(activeRoomId);
                 return true;
             }
@@ -826,7 +848,7 @@ namespace Network_A.Tests.Realtime
 
         public async Task<bool> JoinFirstListedRoomAsync()
         {
-            if (!await LoginCheckConnectAndAuthAsync()) return false;
+            if (!await EnsureRealtimeReadyForUtilityMethodAsync("Join first listed room")) return false;
 
             if (lastListedRooms == null || lastListedRooms.Length == 0)
             {
@@ -1433,6 +1455,11 @@ namespace Network_A.Tests.Realtime
         private void UpdateCurrentUserIdentityFromStoredToken()
         {
             string token = SecureTokenStorage.GetAccessToken();
+            UpdateCurrentUserIdentityFromAccessToken(token);
+        }
+
+        private void UpdateCurrentUserIdentityFromAccessToken(string token)
+        {
             if (string.IsNullOrWhiteSpace(token)) return;
 
             string payloadJson = ReadJwtPayloadJson(token);
@@ -1446,6 +1473,11 @@ namespace Network_A.Tests.Realtime
 
             if (!string.IsNullOrWhiteSpace(tokenUserId)) currentRealtimeUserId = tokenUserId.Trim();
             if (!string.IsNullOrWhiteSpace(tokenUserName)) currentRealtimeUserName = tokenUserName.Trim();
+        }
+
+        private static string SafeTokenSource(string tokenSource)
+        {
+            return string.IsNullOrWhiteSpace(tokenSource) ? "unknown" : tokenSource.Trim();
         }
 
         private static string ReadJwtPayloadJson(string token)
@@ -1523,6 +1555,20 @@ namespace Network_A.Tests.Realtime
                    && realtimeClient.IsConnected
                    && realtimeAuthClient != null
                    && realtimeAuthClient.IsAuthenticated;
+        }
+
+        //* این تابع اجازه نمی دهد متدهای کمکی مثل لیست یا جوین، قبل از کلیک دکمه شروع اتصال، خودشان کانکشن بسازند.
+        private async Task<bool> EnsureRealtimeReadyForUtilityMethodAsync(string actionName)
+        {
+            if (IsRealtimeReady()) return true;
+
+            if (!preventAutoRealtimeConnectBeforeStartButton)
+            {
+                return await LoginCheckConnectAndAuthAsync();
+            }
+
+            string safeActionName = string.IsNullOrWhiteSpace(actionName) ? "Realtime action" : actionName.Trim();
+            return Fail(safeActionName + " blocked. Click Connect/Auth or Server Start button first. Auto connection is disabled.");
         }
 
         private void BindMessageInputEvents()

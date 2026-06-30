@@ -1,8 +1,9 @@
 using System;
-using System.Net.WebSockets;
-using System.Text;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Network_A.Realtime.Protocol;
+using Network_A.Realtime.Transport;
 using UnityEngine;
 
 namespace Network_A.DedicatedGameServer.Client
@@ -18,13 +19,17 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private int connectTimeoutSeconds = 10;
         [SerializeField] private int authTimeoutSeconds = 10;
 
+        [Header("Realtime Transport")]
+        [SerializeField] private RealtimeTransportKind transportKind = RealtimeTransportKind.WebSocket;
+
         [Header("Debug")]
         [SerializeField] private bool verboseLogs = true;
         [SerializeField] private bool logRawMessages = true;
 
-        private ClientWebSocket webSocket;
+        private IRealtimeTransport transport;
         private CancellationTokenSource connectionCts;
         private TaskCompletionSource<bool> authCompletionSource;
+        private bool transportEventsBound;
 
         public bool IsConnected { get; private set; }
         public bool IsAuthenticated { get; private set; }
@@ -45,7 +50,6 @@ namespace Network_A.DedicatedGameServer.Client
         public event Action Authenticated;
         public event Action<string> AuthFailed;
 
-        //* این تابع سینگلتون سبک کلاینت ددیکیتد را آماده می کند.
         private void Awake()
         {
             if (Instance == null)
@@ -61,7 +65,6 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
-        //* این تابع هنگام حذف آبجکت، اتصال وب سوکت را تمیز می بندد.
         private void OnDestroy()
         {
             if (Instance == this)
@@ -71,21 +74,18 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
-        //* این تابع از اینسپکتور برای اتصال سریع به آدرس پیش فرض استفاده می شود.
         [ContextMenu("Connect Default Dedicated Server")]
         public async void Btn_ConnectDefault()
         {
             await ConnectToDedicatedServerAsync(defaultHost, defaultPort, useSecureWebSocket);
         }
 
-        //* این تابع از اینسپکتور برای قطع اتصال استفاده می شود.
         [ContextMenu("Disconnect Dedicated Server")]
         public void Btn_Disconnect()
         {
             Disconnect("manual_disconnect");
         }
 
-        //* این تابع به ددیکیتد سرور با هاست و پورت مشخص وصل می شود.
         public async Task<bool> ConnectToDedicatedServerAsync(
             string host,
             int port,
@@ -100,15 +100,9 @@ namespace Network_A.DedicatedGameServer.Client
             return await ConnectAsync(url, cancellationToken);
         }
 
-        //* این تابع اتصال خام وب سوکت به یونیتی ددیکیتد سرور را برقرار می کند.
         public async Task<bool> ConnectAsync(string url, CancellationToken cancellationToken = default)
         {
-#if UNITY_WEBGL && !UNITY_EDITOR
-            LastError = "DedicatedGameServerWsClient currently uses ClientWebSocket and is not enabled for WebGL build yet.";
-            Debug.LogError("[DedicatedGameServerWsClient] " + LastError);
-            return false;
-#else
-            if (IsConnected && webSocket != null && webSocket.State == WebSocketState.Open)
+            if (IsConnected && transport != null && transport.IsConnected)
             {
                 Log("Already connected.");
                 return true;
@@ -121,34 +115,39 @@ namespace Network_A.DedicatedGameServer.Client
 
             try
             {
-                CleanupSocketOnly();
+                await CleanupTransportOnlyAsync("reconnect_cleanup");
 
-                webSocket = new ClientWebSocket();
+                transport = RealtimeTransportFactory.Create(transportKind == RealtimeTransportKind.Auto ? RealtimeTransportKind.WebSocket : transportKind);
+                if (transport == null)
+                {
+                    return Fail("realtime_transport_not_registered | kind=" + transportKind);
+                }
 
-                using (CancellationTokenSource connectTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                BindTransportEvents(transport);
+                connectionCts = new CancellationTokenSource();
+
+                using (CancellationTokenSource connectTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connectionCts.Token))
                 {
                     connectTimeoutCts.CancelAfter(Mathf.Max(1, connectTimeoutSeconds) * 1000);
 
-                    Log("Connecting | url=" + url);
-                    await webSocket.ConnectAsync(new Uri(url), connectTimeoutCts.Token);
-                }
+                    Log("Connecting | url=" + url + " | transport=" + transport.Kind);
+                    bool connected = await transport.ConnectAsync(url, new Dictionary<string, string>(), connectTimeoutCts.Token);
 
-                IsConnected = webSocket.State == WebSocketState.Open;
-                IsAuthenticated = false;
-                LastError = string.Empty;
+                    if (!connected || !transport.IsConnected)
+                    {
+                        return Fail("websocket_connect_failed");
+                    }
+                }
 
                 if (!IsConnected)
                 {
-                    return Fail("websocket_connect_failed");
+                    HandleTransportConnected();
                 }
 
-                connectionCts = new CancellationTokenSource();
-
-                Connected?.Invoke();
+                IsAuthenticated = false;
+                LastError = string.Empty;
 
                 Log("Connected.");
-                _ = ReceiveLoopAsync(connectionCts.Token);
-
                 return true;
             }
             catch (OperationCanceledException)
@@ -159,10 +158,8 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 return Fail("connect_exception | " + ex.Message);
             }
-#endif
         }
 
-        //* این تابع بعد از اتصال، تیکت دریافتی از نود جی اس را برای ددیکیتد سرور ارسال می کند.
         public async Task<bool> AuthenticateWithTicketAsync(
             string ticketId,
             string signature,
@@ -174,12 +171,7 @@ namespace Network_A.DedicatedGameServer.Client
             string userName = "",
             CancellationToken cancellationToken = default)
         {
-#if UNITY_WEBGL && !UNITY_EDITOR
-            LastError = "DedicatedGameServerWsClient ticket auth is not enabled for WebGL build yet.";
-            Debug.LogError("[DedicatedGameServerWsClient] " + LastError);
-            return false;
-#else
-            if (!IsConnected || webSocket == null || webSocket.State != WebSocketState.Open)
+            if (!IsConnected || transport == null || !transport.IsConnected)
             {
                 return Fail("websocket_not_connected");
             }
@@ -193,7 +185,7 @@ namespace Network_A.DedicatedGameServer.Client
 
             DedicatedAuthTicketDto authTicket = new DedicatedAuthTicketDto
             {
-                type = "auth_ticket",
+                type = RealtimeMessageTypes.AuthTicket,
                 ticketId = ticketId.Trim(),
                 signature = signature.Trim(),
                 userId = userId.Trim(),
@@ -206,8 +198,14 @@ namespace Network_A.DedicatedGameServer.Client
 
             authCompletionSource = new TaskCompletionSource<bool>();
 
-            string json = JsonUtility.ToJson(authTicket);
-            bool sent = await SendRawAsync(json, cancellationToken);
+            string payloadJson = JsonUtility.ToJson(authTicket);
+            bool sent = await SendEnvelopeAsync(
+                RealtimeChannels.System,
+                RealtimeMessageTypes.AuthTicket,
+                payloadJson,
+                authTicket.roomId,
+                false,
+                cancellationToken);
 
             if (!sent)
             {
@@ -231,10 +229,8 @@ namespace Network_A.DedicatedGameServer.Client
                     return Fail("auth_timeout");
                 }
             }
-#endif
         }
 
-        //* این تابع پیام وضعیت پلیر را بعد از احراز برای ددیکیتد سرور می فرستد.
         public async Task<bool> SendPlayerStateAsync(
             Vector3 position,
             Quaternion rotation,
@@ -249,7 +245,7 @@ namespace Network_A.DedicatedGameServer.Client
 
             DedicatedPlayerStateDto message = new DedicatedPlayerStateDto
             {
-                type = "player_state",
+                type = RealtimeMessageTypes.PlayerState,
                 userId = UserId,
                 playerId = PlayerId,
                 roomId = RoomId,
@@ -272,16 +268,18 @@ namespace Network_A.DedicatedGameServer.Client
                 vz = velocity.z
             };
 
-            return await SendRawAsync(JsonUtility.ToJson(message), cancellationToken);
+            return await SendEnvelopeAsync(
+                RealtimeChannels.Presence,
+                RealtimeMessageTypes.PlayerState,
+                JsonUtility.ToJson(message),
+                RoomId,
+                false,
+                cancellationToken);
         }
 
-        //* این تابع پیام خام جیسون را روی وب سوکت ارسال می کند.
         public async Task<bool> SendRawAsync(string text, CancellationToken cancellationToken = default)
         {
-#if UNITY_WEBGL && !UNITY_EDITOR
-            return false;
-#else
-            if (!IsConnected || webSocket == null || webSocket.State != WebSocketState.Open)
+            if (!IsConnected || transport == null || !transport.IsConnected)
             {
                 return false;
             }
@@ -289,17 +287,25 @@ namespace Network_A.DedicatedGameServer.Client
             try
             {
                 string safeText = text ?? string.Empty;
-                byte[] bytes = Encoding.UTF8.GetBytes(safeText);
-                ArraySegment<byte> segment = new ArraySegment<byte>(bytes);
+                bool sent = await transport.SendAsync(safeText, cancellationToken);
 
-                await webSocket.SendAsync(segment, WebSocketMessageType.Text, true, cancellationToken);
-
-                if (logRawMessages)
+                if (sent)
                 {
-                    Log("Sent | " + safeText);
+                    Log("Sent message | messageFormat=" + ReadMessageFormatForLog(safeText) +
+                        " | route=" + ReadRouteForLog(safeText));
+
+                    if (logRawMessages)
+                    {
+                        Log("Sent raw | " + safeText);
+                    }
                 }
 
-                return true;
+                if (!sent)
+                {
+                    LastError = "realtime_transport_send_failed";
+                }
+
+                return sent;
             }
             catch (Exception ex)
             {
@@ -307,38 +313,33 @@ namespace Network_A.DedicatedGameServer.Client
                 Debug.LogWarning("[DedicatedGameServerWsClient] Send failed | " + ex.Message);
                 return false;
             }
-#endif
         }
 
-        //* این تابع اتصال وب سوکت را قطع می کند و وضعیت داخلی را پاک می کند.
         public void Disconnect(string reason = "client_disconnect")
         {
-#if UNITY_WEBGL && !UNITY_EDITOR
-            IsConnected = false;
-            IsAuthenticated = false;
-#else
             bool wasConnected = IsConnected;
+            IRealtimeTransport transportToDisconnect = transport;
 
             try
             {
-                if (connectionCts != null)
-                {
-                    connectionCts.Cancel();
-                }
-
-                if (webSocket != null && webSocket.State == WebSocketState.Open)
-                {
-                    webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, CancellationToken.None).Wait(250);
-                }
+                connectionCts?.Cancel();
             }
             catch
             {
             }
 
-            CleanupSocketOnly();
-
+            UnbindTransportEvents();
+            transport = null;
             IsConnected = false;
             IsAuthenticated = false;
+            authCompletionSource?.TrySetResult(false);
+
+            if (transportToDisconnect != null)
+            {
+                _ = DisconnectTransportAsync(transportToDisconnect, reason);
+            }
+
+            CleanupSocketOnly();
 
             if (wasConnected)
             {
@@ -346,65 +347,43 @@ namespace Network_A.DedicatedGameServer.Client
             }
 
             Log("Disconnected | reason=" + reason);
-#endif
         }
 
-#if !UNITY_WEBGL || UNITY_EDITOR
-        //* این تابع حلقه دریافت پیام از ددیکیتد سرور را اجرا می کند.
         private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
         {
-            byte[] buffer = new byte[8192];
-
-            try
-            {
-                while (!cancellationToken.IsCancellationRequested &&
-                       webSocket != null &&
-                       webSocket.State == WebSocketState.Open)
-                {
-                    WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-
-                    if (result.MessageType == WebSocketMessageType.Close)
-                    {
-                        HandleDisconnected("server_closed");
-                        return;
-                    }
-
-                    string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-
-                    while (!result.EndOfMessage)
-                    {
-                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-                        message += Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    }
-
-                    HandleRawMessage(message);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                if (IsConnected)
-                {
-                    HandleDisconnected("receive_cancelled");
-                }
-            }
-            catch (Exception ex)
-            {
-                HandleDisconnected("receive_error | " + ex.Message);
-            }
+            await Task.CompletedTask;
         }
-#endif
 
-        //* این تابع پیام خام دریافتی را لاگ می کند و پیام های احراز را پردازش می کند.
         private void HandleRawMessage(string message)
         {
             LastRawMessage = message ?? string.Empty;
 
+            Log("Received message | messageFormat=" + ReadMessageFormatForLog(LastRawMessage) +
+                " | route=" + ReadRouteForLog(LastRawMessage));
+
             if (logRawMessages)
             {
-                Log("Received | " + LastRawMessage);
+                Log("Received raw | " + LastRawMessage);
             }
 
             RawMessageReceived?.Invoke(LastRawMessage);
+
+            if (TryParseEnvelope(LastRawMessage, out RealtimeEnvelope envelope))
+            {
+                if (envelope.ch == RealtimeChannels.System && envelope.t == RealtimeMessageTypes.AuthOk)
+                {
+                    HandleAuthOk(envelope.payloadJson);
+                    return;
+                }
+
+                if (envelope.ch == RealtimeChannels.System && envelope.t == RealtimeMessageTypes.AuthFailed)
+                {
+                    HandleAuthFailed(envelope.payloadJson);
+                    return;
+                }
+
+                return;
+            }
 
             DedicatedMessageTypeDto typeDto = ParseMessageType(LastRawMessage);
             if (typeDto == null || string.IsNullOrWhiteSpace(typeDto.type)) return;
@@ -427,7 +406,6 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
-        //* این تابع پیام auth_ok را پردازش و وضعیت کلاینت را احراز شده می کند.
         private void HandleAuthOk(string message)
         {
             DedicatedAuthOkDto authOk = null;
@@ -456,7 +434,8 @@ namespace Network_A.DedicatedGameServer.Client
                 authCompletionSource?.TrySetResult(true);
                 Authenticated?.Invoke();
 
-                Log("Authenticated | userId=" + UserId + " | playerId=" + PlayerId);
+                Log("Authenticated | userId=" + UserId + " | playerId=" + PlayerId +
+                    " | messageFormat=envelope_expected");
             }
             else
             {
@@ -464,7 +443,6 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
-        //* این تابع پیام auth_failed را پردازش و وضعیت احراز را ناموفق می کند.
         private void HandleAuthFailed(string message)
         {
             DedicatedAuthFailedDto failed = null;
@@ -487,10 +465,14 @@ namespace Network_A.DedicatedGameServer.Client
             Debug.LogWarning("[DedicatedGameServerWsClient] Auth failed | reason=" + LastAuthReason + " | message=" + LastError);
         }
 
-        //* این تابع تایپ پیام دریافتی را از جیسون می خواند.
         private DedicatedMessageTypeDto ParseMessageType(string message)
         {
             if (string.IsNullOrWhiteSpace(message)) return null;
+
+            if (TryParseEnvelope(message, out RealtimeEnvelope envelope))
+            {
+                return new DedicatedMessageTypeDto { type = envelope.t };
+            }
 
             try
             {
@@ -502,15 +484,17 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
-        //* این تابع قطع اتصال از سمت سرور یا خطای دریافت را پردازش می کند.
         private void HandleDisconnected(string reason)
         {
             bool wasConnected = IsConnected;
 
             CleanupSocketOnly();
+            UnbindTransportEvents();
+            transport = null;
 
             IsConnected = false;
             IsAuthenticated = false;
+            authCompletionSource?.TrySetResult(false);
 
             if (wasConnected)
             {
@@ -520,7 +504,6 @@ namespace Network_A.DedicatedGameServer.Client
             Log("Disconnected | reason=" + reason);
         }
 
-        //* این تابع فقط منابع وب سوکت و توکن لغو را پاک می کند.
         private void CleanupSocketOnly()
         {
             try
@@ -535,23 +518,149 @@ namespace Network_A.DedicatedGameServer.Client
             catch
             {
             }
+        }
 
-#if !UNITY_WEBGL || UNITY_EDITOR
+        private async Task CleanupTransportOnlyAsync(string reason)
+        {
+            IRealtimeTransport oldTransport = transport;
+            UnbindTransportEvents();
+            transport = null;
+            CleanupSocketOnly();
+
+            if (oldTransport != null)
+            {
+                await DisconnectTransportAsync(oldTransport, reason);
+            }
+
+            IsConnected = false;
+            IsAuthenticated = false;
+        }
+
+        private async Task DisconnectTransportAsync(IRealtimeTransport targetTransport, string reason)
+        {
+            if (targetTransport == null) return;
+
             try
             {
-                if (webSocket != null)
-                {
-                    webSocket.Dispose();
-                    webSocket = null;
-                }
+                await targetTransport.DisconnectAsync(reason ?? "client_disconnect", CancellationToken.None);
             }
             catch
             {
             }
-#endif
         }
 
-        //* این تابع خطا را ثبت می کند و خروجی false می دهد.
+        private void BindTransportEvents(IRealtimeTransport targetTransport)
+        {
+            if (targetTransport == null || transportEventsBound) return;
+
+            targetTransport.Connected += HandleTransportConnected;
+            targetTransport.MessageReceived += HandleTransportMessageReceived;
+            targetTransport.ErrorReceived += HandleTransportErrorReceived;
+            targetTransport.Disconnected += HandleTransportDisconnected;
+            transportEventsBound = true;
+        }
+
+        private void UnbindTransportEvents()
+        {
+            if (transport == null || !transportEventsBound)
+            {
+                transportEventsBound = false;
+                return;
+            }
+
+            transport.Connected -= HandleTransportConnected;
+            transport.MessageReceived -= HandleTransportMessageReceived;
+            transport.ErrorReceived -= HandleTransportErrorReceived;
+            transport.Disconnected -= HandleTransportDisconnected;
+            transportEventsBound = false;
+        }
+
+        private void HandleTransportConnected()
+        {
+            IsConnected = true;
+            LastError = string.Empty;
+            Connected?.Invoke();
+        }
+
+        private void HandleTransportMessageReceived(string message)
+        {
+            HandleRawMessage(message);
+        }
+
+        private void HandleTransportErrorReceived(string error)
+        {
+            LastError = string.IsNullOrWhiteSpace(error) ? "realtime_transport_error" : error;
+            Debug.LogWarning("[DedicatedGameServerWsClient] Transport error | " + LastError);
+        }
+
+        private void HandleTransportDisconnected(string reason)
+        {
+            HandleDisconnected(string.IsNullOrWhiteSpace(reason) ? "transport_disconnected" : reason);
+        }
+
+        private async Task<bool> SendEnvelopeAsync(
+            string channel,
+            string messageType,
+            string payloadJson,
+            string roomId,
+            bool requiresAck,
+            CancellationToken cancellationToken)
+        {
+            RealtimeEnvelope envelope = RealtimeEnvelope.Create(channel, messageType, payloadJson, roomId, requiresAck);
+            return await SendRawAsync(envelope.ToJson(), cancellationToken);
+        }
+
+        private string ReadMessageFormatForLog(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return "empty";
+            if (TryParseEnvelope(message, out RealtimeEnvelope _)) return "envelope";
+
+            DedicatedMessageTypeDto typeDto = TryParseLegacyType(message);
+            if (typeDto != null && !string.IsNullOrWhiteSpace(typeDto.type)) return "legacy";
+
+            return "invalid";
+        }
+
+        private string ReadRouteForLog(string message)
+        {
+            if (TryParseEnvelope(message, out RealtimeEnvelope envelope))
+            {
+                string channel = string.IsNullOrWhiteSpace(envelope.ch) ? "unknown" : envelope.ch.Trim();
+                string type = string.IsNullOrWhiteSpace(envelope.t) ? "unknown" : envelope.t.Trim();
+                return channel + "/" + type;
+            }
+
+            DedicatedMessageTypeDto typeDto = TryParseLegacyType(message);
+            string legacyType = typeDto == null || string.IsNullOrWhiteSpace(typeDto.type) ? "unknown" : typeDto.type.Trim();
+            return "legacy/" + legacyType;
+        }
+
+        private DedicatedMessageTypeDto TryParseLegacyType(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return null;
+
+            try
+            {
+                return JsonUtility.FromJson<DedicatedMessageTypeDto>(message);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private bool TryParseEnvelope(string message, out RealtimeEnvelope envelope)
+        {
+            envelope = null;
+            if (string.IsNullOrWhiteSpace(message)) return false;
+
+            RealtimeEnvelope parsed = RealtimeEnvelope.FromJson(message);
+            if (parsed == null || !parsed.IsValidBasic()) return false;
+
+            envelope = parsed;
+            return true;
+        }
+
         private bool Fail(string error)
         {
             LastError = error;
@@ -559,21 +668,11 @@ namespace Network_A.DedicatedGameServer.Client
             return false;
         }
 
-        //* این تابع لاگ معمولی کلاینت ددیکیتد را چاپ می کند.
         private void Log(string message)
         {
             if (!verboseLogs) return;
             Debug.Log("[DedicatedGameServerWsClient] " + message);
         }
-
-        /*
-        توضیح مکتوب فایل:
-        این نسخه اصلاحی باعث می شود اتصال بعد از connectTimeoutSeconds قطع نشود.
-        قبلاً توکن کنسل اتصال برای حلقه دریافت هم استفاده می شد و بعد از حدود ۱۰ ثانیه receive_cancelled می گرفتیم.
-        حالا timeout فقط برای عملیات ConnectAsync است.
-        بعد از اتصال، یک connectionCts جدا و بدون تایم اوت برای نگهداری اتصال ساخته می شود.
-        قطع اتصال فقط با Disconnect، بستن سرور، خروج از پلی مود یا خطای واقعی انجام می شود.
-        */
 
         [Serializable]
         private class DedicatedMessageTypeDto

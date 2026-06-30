@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Network_A.GameServer.Protocol;
+using Network_A.Realtime.Protocol;
 
 namespace Network_A.GameServer.WebSocket
 {
@@ -47,7 +49,7 @@ namespace Network_A.GameServer.WebSocket
                 IsOpen = true;
                 Opened?.Invoke(this);
 
-                await SendTextAsync("{\"type\":\"server_hello\",\"message\":\"unity_dedicated_websocket_ready\"}", serverCancellationToken);
+                await SendServerHelloAsync(serverCancellationToken);
 
                 await ReceiveLoopAsync(serverCancellationToken);
             }
@@ -59,6 +61,15 @@ namespace Network_A.GameServer.WebSocket
             {
                 await CloseInternalAsync(ex.Message);
             }
+        }
+
+        //* این تابع پیام آماده بودن سرور را با اِنولوپ استاندارد برای کلاینت می فرستد.
+        private async Task SendServerHelloAsync(CancellationToken cancellationToken)
+        {
+            string payloadJson = "{\"message\":\"unity_dedicated_websocket_ready\"}";
+            string envelopeJson = DedicatedRealtimeEnvelopeCodec.WrapSystemPayload(RealtimeMessageTypes.ServerHello, payloadJson);
+
+            await SendTextAsync(envelopeJson, cancellationToken);
         }
 
         //* این تابع یک پیام متنی را برای کلاینت ارسال می کند.

@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Network_A.GameServer;
 using Network_A.GameServer.Players;
 using Network_A.GameServer.Protocol;
+using Network_A.Realtime.Protocol;
 using Network_A.GameServer.WebSocket;
 using UnityEngine;
 
@@ -20,6 +21,9 @@ namespace Network_A.GameServer.Auth
         [SerializeField] private bool closeConnectionOnAuthFailed = true;
         [SerializeField] private bool ignoreNonAuthMessagesBeforeAuth = true;
         [SerializeField] private bool rejectSecondAuthTicket = true;
+
+        [Header("Debug")]
+        [SerializeField] private bool logMessageFormat = true;
 
         private bool eventsSubscribed;
 
@@ -112,9 +116,12 @@ namespace Network_A.GameServer.Auth
             bool isAuthenticated = playerRegistry != null &&
                                    playerRegistry.IsConnectionAuthenticated(connection.ConnectionId);
 
-            DedicatedMessageTypeDto typeDto = ParseMessageType(text);
+            string messageType = DedicatedRealtimeEnvelopeCodec.ReadMessageType(text);
+            string messageChannel = DedicatedRealtimeEnvelopeCodec.ReadChannel(text);
+            string messageFormat = DedicatedRealtimeEnvelopeCodec.ReadMessageFormat(text);
+            string messageRoute = DedicatedRealtimeEnvelopeCodec.ReadRouteForLog(text);
 
-            if (typeDto == null || string.IsNullOrWhiteSpace(typeDto.type))
+            if (string.IsNullOrWhiteSpace(messageType))
             {
                 if (!isAuthenticated && ignoreNonAuthMessagesBeforeAuth)
                 {
@@ -124,7 +131,19 @@ namespace Network_A.GameServer.Auth
                 return;
             }
 
-            if (typeDto.type == "auth_ticket")
+            if (!string.IsNullOrWhiteSpace(messageChannel) &&
+                messageChannel != RealtimeChannels.System &&
+                !isAuthenticated)
+            {
+                if (ignoreNonAuthMessagesBeforeAuth)
+                {
+                    await SendAuthFailedAsync(connection, "auth_ticket_required", "First valid message must be system/auth_ticket.");
+                }
+
+                return;
+            }
+
+            if (messageType == RealtimeMessageTypes.AuthTicket)
             {
                 if (isAuthenticated && rejectSecondAuthTicket)
                 {
@@ -149,7 +168,8 @@ namespace Network_A.GameServer.Auth
             playerRegistry.TouchConnection(connection.ConnectionId);
 
             Debug.Log("[DedicatedTicketHandshakeHandler] Authenticated message allowed | connectionId=" +
-                      connection.ConnectionId + " | type=" + typeDto.type);
+                      connection.ConnectionId + " | type=" + messageType +
+                      " | messageFormat=" + messageFormat + " | route=" + messageRoute);
         }
 
         //* این تابع پیام auth_ticket را پارس می کند و نتیجه وریفای را به رجیستری پلیر وصل می کند.
@@ -167,7 +187,7 @@ namespace Network_A.GameServer.Auth
                 return;
             }
 
-            DedicatedAuthTicketMessageDto authMessage = ParseAuthTicketMessage(text);
+            DedicatedAuthTicketMessageDto authMessage = ParseAuthTicketMessage(DedicatedRealtimeEnvelopeCodec.ReadPayloadOrRawJson(text));
 
             if (authMessage == null)
             {
@@ -175,8 +195,18 @@ namespace Network_A.GameServer.Auth
                 return;
             }
 
-            Debug.Log("[DedicatedTicketHandshakeHandler] Auth ticket received | connectionId=" +
-                      connection.ConnectionId + " | userId=" + authMessage.userId);
+            if (logMessageFormat)
+            {
+                Debug.Log("[DedicatedTicketHandshakeHandler] Auth ticket received | connectionId=" +
+                          connection.ConnectionId + " | userId=" + authMessage.userId +
+                          " | messageFormat=" + DedicatedRealtimeEnvelopeCodec.ReadMessageFormat(text) +
+                          " | route=" + DedicatedRealtimeEnvelopeCodec.ReadRouteForLog(text));
+            }
+            else
+            {
+                Debug.Log("[DedicatedTicketHandshakeHandler] Auth ticket received | connectionId=" +
+                          connection.ConnectionId + " | userId=" + authMessage.userId);
+            }
 
             DedicatedVerifyTicketResult result = await ticketVerifier.VerifyTicketAsync(authMessage, connection.ConnectionId);
 
@@ -257,11 +287,16 @@ namespace Network_A.GameServer.Auth
             };
 
             string json = JsonUtility.ToJson(message);
+            string envelopeJson = DedicatedRealtimeEnvelopeCodec.WrapSystemPayload(
+                RealtimeMessageTypes.AuthOk,
+                json,
+                message.roomId);
 
-            await connection.SendTextAsync(json);
+            await connection.SendTextAsync(envelopeJson);
 
             Debug.Log("[DedicatedTicketHandshakeHandler] Auth ok sent | connectionId=" +
-                      connection.ConnectionId + " | userId=" + message.userId);
+                      connection.ConnectionId + " | userId=" + message.userId +
+                      " | messageFormat=envelope | route=" + RealtimeChannels.System + "/" + RealtimeMessageTypes.AuthOk);
         }
 
         //* این تابع پیام auth_failed را می فرستد و اگر قانون فعال باشد کانکشن را می بندد.
@@ -287,11 +322,15 @@ namespace Network_A.GameServer.Auth
             };
 
             string json = JsonUtility.ToJson(message);
+            string envelopeJson = DedicatedRealtimeEnvelopeCodec.WrapSystemPayload(
+                RealtimeMessageTypes.AuthFailed,
+                json);
 
-            await connection.SendTextAsync(json);
+            await connection.SendTextAsync(envelopeJson);
 
             Debug.LogWarning("[DedicatedTicketHandshakeHandler] Auth failed sent | connectionId=" +
-                             connection.ConnectionId + " | reason=" + message.reason);
+                             connection.ConnectionId + " | reason=" + message.reason +
+                             " | messageFormat=envelope | route=" + RealtimeChannels.System + "/" + RealtimeMessageTypes.AuthFailed);
         }
 
         //* این تابع تایپ پیام ورودی را از جیسون می خواند.

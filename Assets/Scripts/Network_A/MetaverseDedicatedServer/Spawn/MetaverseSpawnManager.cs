@@ -4,19 +4,6 @@ using UnityEngine;
 
 public class MetaverseSpawnManager : MonoBehaviour
 {
-    [Serializable]
-    public class MetaverseSpawnPayload
-    {
-        public int netId;
-        public string prefabId;
-        public int ownerConnectionId;
-        public bool serverOwned;
-        public bool localPlayer;
-        public Vector3 position;
-        public Quaternion rotation;
-        public Vector3 scale;
-    }
-
     [Header("Registry")]
     [SerializeField] private MetaverseNetworkPrefabRegistry prefabRegistry;
     [SerializeField] private Transform spawnedRoot;
@@ -187,6 +174,18 @@ public class MetaverseSpawnManager : MonoBehaviour
     public List<MetaverseNetworkIdentity> GetSpawnedObjects()
     {
         return new List<MetaverseNetworkIdentity>(dictSpawnedByNetId.Values);
+    }
+
+    public MetaverseSpawnPayload[] BuildSnapshotPayloads()
+    {
+        List<MetaverseNetworkIdentity> identities = GetSpawnedObjects();
+        List<MetaverseSpawnPayload> payloads = new List<MetaverseSpawnPayload>();
+        for (int i = 0; i < identities.Count; i++)
+        {
+            MetaverseSpawnPayload payload = BuildPayload(identities[i]);
+            if (payload != null) payloads.Add(payload);
+        }
+        return payloads.ToArray();
     }
 
     public void ClearAllSpawned(string reason)

@@ -41,6 +41,7 @@ namespace Network_A.Auth
         public static string LoginUrl { get { return BuildGrpcWebUrl(ServiceName, "Login"); } }
         public static string RefreshUrl { get { return BuildGrpcWebUrl(ServiceName, "Refresh"); } }
         public static string GetUserDataUrl { get { return BuildGrpcWebUrl(ServiceName, "GetUserData"); } }
+        public static string GetMicroserviceUserDataUrl { get { return BuildGrpcWebUrl(ServiceName, "GetMicroserviceUserData"); } }
         public static string LogoutUrl { get { return BuildGrpcWebUrl(ServiceName, "Logout"); } }
         public static string HealthUrl { get { return BuildGrpcWebUrl(HealthServiceName, "Check"); } }
         public static string LogoutAllDevicesUrl { get { return BuildGrpcWebUrl(ServiceName, "LogoutAllDevices"); } }
@@ -50,6 +51,7 @@ namespace Network_A.Auth
         public static string NativeLoginMethod { get { return BuildGrpcNativeMethod(ServiceName, "Login"); } }
         public static string NativeRefreshMethod { get { return BuildGrpcNativeMethod(ServiceName, "Refresh"); } }
         public static string NativeGetUserDataMethod { get { return BuildGrpcNativeMethod(ServiceName, "GetUserData"); } }
+        public static string NativeGetMicroserviceUserDataMethod { get { return BuildGrpcNativeMethod(ServiceName, "GetMicroserviceUserData"); } }
         public static string NativeLogoutMethod { get { return BuildGrpcNativeMethod(ServiceName, "Logout"); } }
         public static string NativeHealthMethod { get { return BuildGrpcNativeMethod(HealthServiceName, "Check"); } }
         public static string NativeLogoutAllDevicesMethod { get { return BuildGrpcNativeMethod(ServiceName, "LogoutAllDevices"); } }

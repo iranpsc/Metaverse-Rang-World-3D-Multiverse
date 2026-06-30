@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Network_A.GameServer.Players;
 using Network_A.GameServer.Protocol;
 using Network_A.GameServer.WebSocket;
+using Network_A.Realtime.Protocol;
 using UnityEngine;
 
 namespace Network_A.GameServer.Gameplay
@@ -15,6 +16,8 @@ namespace Network_A.GameServer.Gameplay
         [SerializeField] private DedicatedWebSocketServer webSocketServer;
         [SerializeField] private DedicatedPlayerRegistry playerRegistry;
         [SerializeField] private DedicatedPlayerStateStore playerStateStore;
+        [SerializeField] private MetaverseSpawnNetworkBridge spawnNetworkBridge;
+        [SerializeField] private MetaverseNetworkRpcBridge rpcNetworkBridge;
 
         [Header("Rules")]
         [SerializeField] private bool sendStateAckToSender = true;
@@ -24,8 +27,15 @@ namespace Network_A.GameServer.Gameplay
         [SerializeField] private bool logDuplicatePlayerStateMessages = false;
         [SerializeField] private bool logPlayerStateMessages = true;
 
+        [Header("Debug")]
+        [SerializeField] private bool logMessageFormat = true;
+
         private FieldInfo connectionsField;
         private bool eventsSubscribed;
+        private MetaverseSpawnNetworkBridge subscribedSpawnNetworkBridge;
+        private MetaverseNetworkRpcBridge subscribedRpcNetworkBridge;
+        private bool attemptedSpawnBridgeAutoInstall;
+        private bool loggedSpawnBridgeSubscription;
         private readonly ConcurrentDictionary<string, long> dict_lastStateSequenceByConnectionId =
             new ConcurrentDictionary<string, long>();
 
@@ -40,6 +50,19 @@ namespace Network_A.GameServer.Gameplay
         {
             EnsureReferences();
             Subscribe();
+        }
+
+        //* این تابع اگر بریج اسپاون بعداً ساخته شد، اتصال رویداد آن را کامل می کند.
+        private void Update()
+        {
+            if (!eventsSubscribed) return;
+            if (spawnNetworkBridge == null || subscribedSpawnNetworkBridge != spawnNetworkBridge ||
+                rpcNetworkBridge == null || subscribedRpcNetworkBridge != rpcNetworkBridge)
+            {
+                EnsureReferences();
+                EnsureSpawnBridgeSubscription();
+                EnsureRpcBridgeSubscription();
+            }
         }
 
         //* این تابع هنگام غیرفعال شدن آبجکت، رویدادها را پاک می کند.
@@ -58,7 +81,9 @@ namespace Network_A.GameServer.Gameplay
 
             Debug.Log("[DedicatedGameMessageRouter] Rebound | webSocketServer=" + BoolText(webSocketServer != null) +
                       " | playerRegistry=" + BoolText(playerRegistry != null) +
-                      " | playerStateStore=" + BoolText(playerStateStore != null));
+                      " | playerStateStore=" + BoolText(playerStateStore != null) +
+                      " | spawnNetworkBridge=" + SpawnBridgeStatusText() +
+                      " | rpcNetworkBridge=" + RpcBridgeStatusText());
         }
 
         //* این تابع رفرنس های وب سوکت سرور، رجیستری و استور وضعیت را پیدا می کند.
@@ -80,6 +105,16 @@ namespace Network_A.GameServer.Gameplay
             {
                 playerStateStore = GetComponent<DedicatedPlayerStateStore>();
                 if (playerStateStore == null) playerStateStore = GetComponentInChildren<DedicatedPlayerStateStore>(true);
+            }
+
+            FindSpawnNetworkBridge();
+            FindRpcNetworkBridge();
+
+            if (spawnNetworkBridge == null || rpcNetworkBridge == null)
+            {
+                TryAutoInstallSpawnBridgeFromRuntimeConfig();
+                FindSpawnNetworkBridge();
+                FindRpcNetworkBridge();
             }
 
             if (connectionsField == null)
@@ -112,6 +147,103 @@ namespace Network_A.GameServer.Gameplay
             }
 
             eventsSubscribed = true;
+            EnsureSpawnBridgeSubscription();
+            EnsureRpcBridgeSubscription();
+        }
+
+
+        //* این تابع رویداد بریج اسپاون را فقط یک بار به رُتر وصل می کند.
+        private void EnsureSpawnBridgeSubscription()
+        {
+            if (!eventsSubscribed || spawnNetworkBridge == null) return;
+            if (subscribedSpawnNetworkBridge == spawnNetworkBridge) return;
+
+            if (subscribedSpawnNetworkBridge != null)
+            {
+                subscribedSpawnNetworkBridge.OutboundMessageReady -= HandleSpawnBridgeOutboundMessageReady;
+            }
+
+            spawnNetworkBridge.OutboundMessageReady -= HandleSpawnBridgeOutboundMessageReady;
+            spawnNetworkBridge.OutboundMessageReady += HandleSpawnBridgeOutboundMessageReady;
+            subscribedSpawnNetworkBridge = spawnNetworkBridge;
+
+            if (!loggedSpawnBridgeSubscription)
+            {
+                loggedSpawnBridgeSubscription = true;
+                Debug.Log("[DedicatedGameMessageRouter] Spawn bridge subscription ready | spawnNetworkBridge=OK");
+            }
+        }
+
+        //* این تابع رویداد بریج کامند و آر پی سی را فقط یک بار به رُتر وصل می کند.
+        private void EnsureRpcBridgeSubscription()
+        {
+            if (!eventsSubscribed || rpcNetworkBridge == null) return;
+            if (subscribedRpcNetworkBridge == rpcNetworkBridge) return;
+
+            if (subscribedRpcNetworkBridge != null)
+            {
+                subscribedRpcNetworkBridge.OutboundMessageReady -= HandleRpcBridgeOutboundMessageReady;
+            }
+
+            rpcNetworkBridge.OutboundMessageReady -= HandleRpcBridgeOutboundMessageReady;
+            rpcNetworkBridge.OutboundMessageReady += HandleRpcBridgeOutboundMessageReady;
+            subscribedRpcNetworkBridge = rpcNetworkBridge;
+
+            Debug.Log("[DedicatedGameMessageRouter] RPC bridge subscription ready | rpcNetworkBridge=OK");
+        }
+
+        //* این تابع بریج اسپاون را در صحنه پیدا می کند.
+        private void FindSpawnNetworkBridge()
+        {
+            if (spawnNetworkBridge != null) return;
+
+            spawnNetworkBridge = GetComponent<MetaverseSpawnNetworkBridge>();
+            if (spawnNetworkBridge == null) spawnNetworkBridge = GetComponentInChildren<MetaverseSpawnNetworkBridge>(true);
+#if UNITY_2023_1_OR_NEWER
+            if (spawnNetworkBridge == null) spawnNetworkBridge = FindFirstObjectByType<MetaverseSpawnNetworkBridge>();
+#else
+            if (spawnNetworkBridge == null) spawnNetworkBridge = FindObjectOfType<MetaverseSpawnNetworkBridge>();
+#endif
+        }
+
+        //* این تابع بریج کامند و آر پی سی را در صحنه پیدا می کند.
+        private void FindRpcNetworkBridge()
+        {
+            if (rpcNetworkBridge != null) return;
+
+            rpcNetworkBridge = GetComponent<MetaverseNetworkRpcBridge>();
+            if (rpcNetworkBridge == null) rpcNetworkBridge = GetComponentInChildren<MetaverseNetworkRpcBridge>(true);
+#if UNITY_2023_1_OR_NEWER
+            if (rpcNetworkBridge == null) rpcNetworkBridge = FindFirstObjectByType<MetaverseNetworkRpcBridge>();
+#else
+            if (rpcNetworkBridge == null) rpcNetworkBridge = FindObjectOfType<MetaverseNetworkRpcBridge>();
+#endif
+        }
+
+        //* این تابع اگر بریج اسپاون هنوز ساخته نشده باشد، نصب اسپاون سیستم را زودتر اجرا می کند.
+        private void TryAutoInstallSpawnBridgeFromRuntimeConfig()
+        {
+            if (attemptedSpawnBridgeAutoInstall) return;
+            attemptedSpawnBridgeAutoInstall = true;
+
+            MetaverseDedicatedServerRuntimeConfig config = MetaverseDedicatedServerRuntimeConfig.LoadDefault();
+            if (config == null || !config.AutoInstallSpawnSystem || !config.AutoInstallSpawnNetworkBridge) return;
+
+            MetaverseSpawnSystemInstaller.Install(config);
+        }
+
+        //* این تابع وضعیت بریج اسپاون را برای لاگ تمیز نشان می دهد.
+        private string SpawnBridgeStatusText()
+        {
+            if (spawnNetworkBridge != null) return "OK";
+            return attemptedSpawnBridgeAutoInstall ? "PENDING" : "NOT_READY";
+        }
+
+        //* این تابع وضعیت بریج کامند و آر پی سی را برای لاگ تمیز نشان می دهد.
+        private string RpcBridgeStatusText()
+        {
+            if (rpcNetworkBridge != null) return "OK";
+            return attemptedSpawnBridgeAutoInstall ? "PENDING" : "NOT_READY";
         }
 
         //* این تابع رویدادهای قبلی را جدا می کند.
@@ -127,6 +259,18 @@ namespace Network_A.GameServer.Gameplay
             {
                 playerRegistry.PlayerRegistered -= HandlePlayerRegistered;
                 playerRegistry.PlayerRemoved -= HandlePlayerRemoved;
+            }
+
+            if (subscribedSpawnNetworkBridge != null)
+            {
+                subscribedSpawnNetworkBridge.OutboundMessageReady -= HandleSpawnBridgeOutboundMessageReady;
+                subscribedSpawnNetworkBridge = null;
+            }
+
+            if (subscribedRpcNetworkBridge != null)
+            {
+                subscribedRpcNetworkBridge.OutboundMessageReady -= HandleRpcBridgeOutboundMessageReady;
+                subscribedRpcNetworkBridge = null;
             }
 
             eventsSubscribed = false;
@@ -145,14 +289,16 @@ namespace Network_A.GameServer.Gameplay
                 return;
             }
 
-            DedicatedMessageTypeDto typeDto = ParseMessageType(text);
+            string messageType = DedicatedRealtimeEnvelopeCodec.ReadMessageType(text);
+            string messageFormat = DedicatedRealtimeEnvelopeCodec.ReadMessageFormat(text);
+            string messageRoute = DedicatedRealtimeEnvelopeCodec.ReadRouteForLog(text);
 
-            if (typeDto == null || string.IsNullOrWhiteSpace(typeDto.type))
+            if (string.IsNullOrWhiteSpace(messageType))
             {
                 return;
             }
 
-            if (typeDto.type == "auth_ticket")
+            if (messageType == RealtimeMessageTypes.AuthTicket || messageType == "auth_ticket")
             {
                 return;
             }
@@ -164,15 +310,77 @@ namespace Network_A.GameServer.Gameplay
                 return;
             }
 
-            if (typeDto.type == "player_state")
+            if (IsPlayerStateMessage(text, messageType))
             {
-                await HandlePlayerStateAsync(connection, text);
+                await HandlePlayerStateAsync(connection, text, messageFormat, messageRoute);
+                return;
+            }
+
+            if (IsNetworkCommandRouteMessage(text, messageType))
+            {
+                await HandleNetworkCommandAsync(connection, text, messageFormat, messageRoute);
+                return;
+            }
+
+            if (IsNetworkRpcRouteMessage(text, messageType))
+            {
+                await SendErrorAsync(connection, "rpc_server_authoritative", "ClientRpc and TargetRpc are server-authoritative.");
+                return;
+            }
+
+            if (IsSpawnRouteMessage(text, messageType))
+            {
+                await SendErrorAsync(connection, "spawn_server_authoritative", "Spawn and despawn are server-authoritative in this phase.");
                 return;
             }
         }
 
+        //* این تابع کامند کلاینت را بعد از احراز به آبجکت شبکه ای روی سرور تحویل می دهد.
+        private async Task HandleNetworkCommandAsync(DedicatedWebSocketConnection connection, string text, string messageFormat, string messageRoute)
+        {
+            DedicatedPlayerSession session = playerRegistry.GetByConnectionId(connection.ConnectionId);
+            if (session == null)
+            {
+                await SendErrorAsync(connection, "session_missing", "Authenticated session was not found.");
+                return;
+            }
+
+            if (rpcNetworkBridge == null)
+            {
+                await SendErrorAsync(connection, "rpc_bridge_not_ready", "Network RPC bridge is not ready.");
+                return;
+            }
+
+            if (!MetaverseNetworkRpcMessageCodec.TryReadCommandPayload(text, out MetaverseNetworkRpcPayload payload) || payload == null)
+            {
+                await SendErrorAsync(connection, "command_parse_failed", "Network command payload could not be parsed.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(payload.roomId) &&
+                !string.Equals(payload.roomId.Trim(), session.roomId, StringComparison.Ordinal))
+            {
+                await SendErrorAsync(connection, "room_mismatch", "Network command room does not match authenticated session.");
+                return;
+            }
+
+            bool handled = rpcNetworkBridge.HandleServerCommand(session, payload);
+            if (!handled)
+            {
+                await SendErrorAsync(connection, "command_not_handled", "Network command could not be handled on server.");
+                return;
+            }
+
+            Debug.Log("[DedicatedGameMessageRouter] Network command handled | userId=" + session.userId +
+                      " | roomId=" + session.roomId +
+                      " | netId=" + payload.netId +
+                      " | command=" + SafeForLog(payload.methodName) +
+                      " | messageFormat=" + messageFormat +
+                      " | route=" + messageRoute);
+        }
+
         //* این تابع پیام player_state را پردازش، ذخیره و برای بقیه پلیرهای همان روم پخش می کند.
-        private async Task HandlePlayerStateAsync(DedicatedWebSocketConnection connection, string text)
+        private async Task HandlePlayerStateAsync(DedicatedWebSocketConnection connection, string text, string messageFormat, string messageRoute)
         {
             DedicatedPlayerSession session = playerRegistry.GetByConnectionId(connection.ConnectionId);
 
@@ -214,7 +422,7 @@ namespace Network_A.GameServer.Gameplay
             }
 
             DedicatedPlayerStateBroadcastDto broadcast = DedicatedPlayerStateBroadcastDto.FromRecord(record);
-            string broadcastJson = JsonUtility.ToJson(broadcast);
+            string broadcastJson = WrapPresenceEnvelope(RealtimeMessageTypes.PlayerState, JsonUtility.ToJson(broadcast), session.roomId);
 
             int sentCount = BroadcastToRoom(
                 session.roomId,
@@ -234,14 +442,17 @@ namespace Network_A.GameServer.Gameplay
                     broadcastCount = sentCount
                 };
 
-                await connection.SendTextAsync(JsonUtility.ToJson(accepted));
+                await connection.SendTextAsync(WrapPresenceEnvelope(RealtimeMessageTypes.PlayerStateAccepted, JsonUtility.ToJson(accepted), record.roomId));
             }
 
             if (logPlayerStateMessages)
             {
                 Debug.Log("[DedicatedGameMessageRouter] Player state handled | userId=" +
                           session.userId + " | roomId=" + session.roomId +
-                          " | sequence=" + record.sequence + " | broadcastCount=" + sentCount);
+                          " | sequence=" + record.sequence + " | broadcastCount=" + sentCount +
+                          " | messageFormat=" + messageFormat + " | route=" + messageRoute +
+                          " | outgoingMessageFormat=envelope | outgoingRoute=" +
+                          RealtimeChannels.Presence + "/" + RealtimeMessageTypes.PlayerState);
             }
         }
 
@@ -269,10 +480,14 @@ namespace Network_A.GameServer.Gameplay
                 serverTimeUnixMs = NowUnixMs()
             };
 
-            int sentCount = BroadcastToRoom(session.roomId, JsonUtility.ToJson(evt), session.connectionId);
+            int sentCount = BroadcastToRoom(session.roomId, WrapPresenceEnvelope(RealtimeMessageTypes.PlayerJoined, JsonUtility.ToJson(evt), session.roomId), session.connectionId);
+
+            SendSpawnSnapshotToSession(session);
 
             Debug.Log("[DedicatedGameMessageRouter] Player joined broadcast | userId=" +
-                      session.userId + " | sentCount=" + sentCount);
+                      session.userId + " | sentCount=" + sentCount +
+                      " | outgoingMessageFormat=envelope | outgoingRoute=" +
+                      RealtimeChannels.Presence + "/" + RealtimeMessageTypes.PlayerJoined);
         }
 
         //* این تابع خروج پلیر را برای بقیه پلیرهای همان روم پخش می کند.
@@ -306,10 +521,201 @@ namespace Network_A.GameServer.Gameplay
                 serverTimeUnixMs = NowUnixMs()
             };
 
-            int sentCount = BroadcastToRoom(session.roomId, JsonUtility.ToJson(evt), session.connectionId);
+            int sentCount = BroadcastToRoom(session.roomId, WrapPresenceEnvelope(RealtimeMessageTypes.PlayerLeft, JsonUtility.ToJson(evt), session.roomId), session.connectionId);
 
             Debug.Log("[DedicatedGameMessageRouter] Player left broadcast | userId=" +
-                      session.userId + " | reason=" + reason + " | sentCount=" + sentCount);
+                      session.userId + " | reason=" + reason + " | sentCount=" + sentCount +
+                      " | outgoingMessageFormat=envelope | outgoingRoute=" +
+                      RealtimeChannels.Presence + "/" + RealtimeMessageTypes.PlayerLeft);
+        }
+
+
+        //* این تابع پیام آماده اسپاون را از بریج می گیرد و برای کلاینت های همان روم پخش می کند.
+        private void HandleSpawnBridgeOutboundMessageReady(string rawJson)
+        {
+            if (string.IsNullOrWhiteSpace(rawJson)) return;
+
+            string roomId = ResolveBroadcastRoomId(rawJson);
+            if (string.IsNullOrWhiteSpace(roomId))
+            {
+                Debug.LogWarning("[DedicatedGameMessageRouter] Spawn message ignored. Room is empty.");
+                return;
+            }
+
+            string envelopeJson = EnsureGameEnvelopeRoom(rawJson, roomId);
+            if (string.IsNullOrWhiteSpace(envelopeJson)) return;
+
+            int sentCount = BroadcastToRoom(roomId, envelopeJson, string.Empty);
+
+            Debug.Log("[DedicatedGameMessageRouter] Spawn route broadcast | sentCount=" + sentCount +
+                      " | roomId=" + roomId +
+                      " | outgoingMessageFormat=" + MetaverseSpawnMessageCodec.ReadMessageFormat(envelopeJson) +
+                      " | outgoingRoute=" + MetaverseSpawnMessageCodec.ReadRouteForLog(envelopeJson));
+        }
+
+        //* این تابع پیام آماده آر پی سی را از بریج می گیرد و برای کلاینت های هدف ارسال می کند.
+        private void HandleRpcBridgeOutboundMessageReady(string rawJson)
+        {
+            if (string.IsNullOrWhiteSpace(rawJson)) return;
+
+            string roomId = ResolveBroadcastRoomId(rawJson);
+            if (string.IsNullOrWhiteSpace(roomId))
+            {
+                Debug.LogWarning("[DedicatedGameMessageRouter] RPC message ignored. Room is empty.");
+                return;
+            }
+
+            string envelopeJson = MetaverseNetworkRpcMessageCodec.EnsureGameEnvelopeRoom(rawJson, roomId);
+            if (string.IsNullOrWhiteSpace(envelopeJson)) return;
+
+            if (MetaverseNetworkRpcMessageCodec.TryReadTargetRpcPayload(envelopeJson, out MetaverseNetworkRpcPayload targetPayload))
+            {
+                int targetSent = SendTargetRpcToConnection(roomId, envelopeJson, targetPayload);
+                Debug.Log("[DedicatedGameMessageRouter] TargetRpc route sent | sentCount=" + targetSent +
+                          " | roomId=" + roomId +
+                          " | targetConnectionId=" + SafeForLog(targetPayload != null ? targetPayload.targetConnectionId : string.Empty) +
+                          " | outgoingMessageFormat=" + MetaverseNetworkRpcMessageCodec.ReadMessageFormat(envelopeJson) +
+                          " | outgoingRoute=" + MetaverseNetworkRpcMessageCodec.ReadRouteForLog(envelopeJson));
+                return;
+            }
+
+            int sentCount = BroadcastToRoom(roomId, envelopeJson, string.Empty);
+            Debug.Log("[DedicatedGameMessageRouter] ClientRpc route broadcast | sentCount=" + sentCount +
+                      " | roomId=" + roomId +
+                      " | outgoingMessageFormat=" + MetaverseNetworkRpcMessageCodec.ReadMessageFormat(envelopeJson) +
+                      " | outgoingRoute=" + MetaverseNetworkRpcMessageCodec.ReadRouteForLog(envelopeJson));
+        }
+
+        //* این تابع تارگت آر پی سی را فقط به کانکشن هدف همان روم می فرستد.
+        private int SendTargetRpcToConnection(string roomId, string envelopeJson, MetaverseNetworkRpcPayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(envelopeJson)) return 0;
+
+            string targetConnectionId = ResolveTargetConnectionId(payload);
+            if (string.IsNullOrWhiteSpace(targetConnectionId)) return 0;
+
+            ConcurrentDictionary<string, DedicatedWebSocketConnection> connections = GetConnections();
+            if (connections == null || !connections.TryGetValue(targetConnectionId, out DedicatedWebSocketConnection connection)) return 0;
+            if (connection == null || !connection.IsOpen) return 0;
+
+            DedicatedPlayerSession targetSession = playerRegistry != null ? playerRegistry.GetByConnectionId(targetConnectionId) : null;
+            if (targetSession == null) return 0;
+            if (!string.Equals(targetSession.roomId, roomId, StringComparison.Ordinal)) return 0;
+
+            _ = connection.SendTextAsync(envelopeJson);
+            return 1;
+        }
+
+        //* این تابع کانکشن هدف آر پی سی را از خود پِیلود یا رجیستری پیدا می کند.
+        private string ResolveTargetConnectionId(MetaverseNetworkRpcPayload payload)
+        {
+            if (payload == null) return string.Empty;
+            if (!string.IsNullOrWhiteSpace(payload.targetConnectionId)) return payload.targetConnectionId.Trim();
+
+            if (playerRegistry == null) return string.Empty;
+            System.Collections.Generic.List<DedicatedPlayerSession> sessions = playerRegistry.CreateSnapshot();
+            if (sessions == null) return string.Empty;
+
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                DedicatedPlayerSession session = sessions[i];
+                if (session == null) continue;
+
+                if (!string.IsNullOrWhiteSpace(payload.targetUserId) &&
+                    string.Equals(session.userId, payload.targetUserId.Trim(), StringComparison.Ordinal))
+                {
+                    return session.connectionId;
+                }
+
+                if (!string.IsNullOrWhiteSpace(payload.targetPlayerId) &&
+                    string.Equals(session.playerId, payload.targetPlayerId.Trim(), StringComparison.Ordinal))
+                {
+                    return session.connectionId;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        //* این تابع بعد از ورود پلیر، اسنپ شات آبجکت های اسپاون شده را فقط برای همان کلاینت می فرستد.
+        private void SendSpawnSnapshotToSession(DedicatedPlayerSession session)
+        {
+            if (session == null || string.IsNullOrWhiteSpace(session.connectionId)) return;
+            if (spawnNetworkBridge == null || MetaverseSpawnManager.Instance == null) return;
+
+            ConcurrentDictionary<string, DedicatedWebSocketConnection> connections = GetConnections();
+            if (connections == null) return;
+
+            if (!connections.TryGetValue(session.connectionId, out DedicatedWebSocketConnection connection)) return;
+            if (connection == null || !connection.IsOpen) return;
+
+            MetaverseSpawnPayload[] payloads = MetaverseSpawnManager.Instance.BuildSnapshotPayloads();
+            string json = MetaverseSpawnMessageCodec.CreateSpawnSnapshotEnvelopeJson(payloads, session.roomId);
+            if (string.IsNullOrWhiteSpace(json)) return;
+
+            _ = connection.SendTextAsync(json);
+
+            Debug.Log("[DedicatedGameMessageRouter] Spawn snapshot sent | connectionId=" + session.connectionId +
+                      " | roomId=" + session.roomId +
+                      " | count=" + (payloads != null ? payloads.Length : 0) +
+                      " | outgoingMessageFormat=envelope | outgoingRoute=" +
+                      RealtimeChannels.Game + "/" + RealtimeMessageTypes.Snapshot);
+        }
+
+        //* این تابع روم مناسب برای پخش پیام اسپاون را از اِنولوپ یا رجیستری پیدا می کند.
+        private string ResolveBroadcastRoomId(string rawJson)
+        {
+            if (!string.IsNullOrWhiteSpace(rawJson))
+            {
+                RealtimeEnvelope envelope = RealtimeEnvelope.FromJson(rawJson);
+                if (envelope != null && envelope.IsValidBasic() && !string.IsNullOrWhiteSpace(envelope.room))
+                {
+                    return envelope.room.Trim();
+                }
+            }
+
+            return playerRegistry != null ? playerRegistry.GetPrimaryRoomId() : string.Empty;
+        }
+
+        //* این تابع پیام اسپاون را مطمئن می کند که داخل اِنولوپ گیم و روم درست قرار گرفته باشد.
+        private string EnsureGameEnvelopeRoom(string rawJson, string roomId)
+        {
+            if (string.IsNullOrWhiteSpace(rawJson)) return string.Empty;
+
+            RealtimeEnvelope envelope = RealtimeEnvelope.FromJson(rawJson);
+            if (envelope != null && envelope.IsValidBasic())
+            {
+                envelope.room = string.IsNullOrWhiteSpace(roomId) ? envelope.room : roomId.Trim();
+                envelope.EnsureDefaults();
+                return envelope.ToJson();
+            }
+
+            if (!MetaverseSpawnMessageCodec.TryReadMessage(
+                    rawJson,
+                    out string messageType,
+                    out MetaverseSpawnPayload spawnPayload,
+                    out MetaverseDespawnPayload despawnPayload,
+                    out MetaverseSpawnPayload[] snapshotPayloads))
+            {
+                return string.Empty;
+            }
+
+            if (messageType == RealtimeMessageTypes.Spawn && spawnPayload != null)
+            {
+                return MetaverseSpawnMessageCodec.CreateSpawnEnvelopeJson(spawnPayload, roomId);
+            }
+
+            if (messageType == RealtimeMessageTypes.Despawn && despawnPayload != null)
+            {
+                return MetaverseSpawnMessageCodec.CreateDespawnEnvelopeJson(despawnPayload.netId, despawnPayload.reason, roomId);
+            }
+
+            if (messageType == RealtimeMessageTypes.Snapshot || messageType == MetaverseDedicatedMessageTypes.LegacySpawnSnapshot)
+            {
+                return MetaverseSpawnMessageCodec.CreateSpawnSnapshotEnvelopeJson(snapshotPayloads, roomId);
+            }
+
+            return string.Empty;
         }
 
         //* این تابع هنگام قطع کانکشن، وضعیت ذخیره شده آن را پاک می کند.
@@ -418,10 +824,12 @@ namespace Network_A.GameServer.Gameplay
                 message = string.IsNullOrWhiteSpace(messageText) ? "Game message failed." : messageText
             };
 
-            await connection.SendTextAsync(JsonUtility.ToJson(error));
+            await connection.SendTextAsync(DedicatedRealtimeEnvelopeCodec.WrapSystemPayload(RealtimeMessageTypes.Error, JsonUtility.ToJson(error)));
 
             Debug.LogWarning("[DedicatedGameMessageRouter] Game error sent | connectionId=" +
-                             connection.ConnectionId + " | reason=" + error.reason);
+                             connection.ConnectionId + " | reason=" + error.reason +
+                             " | outgoingMessageFormat=envelope | outgoingRoute=" +
+                             RealtimeChannels.System + "/" + RealtimeMessageTypes.Error);
         }
 
         //* این تابع متن امن برای لاگ می سازد.
@@ -430,35 +838,71 @@ namespace Network_A.GameServer.Gameplay
             return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
         }
 
-        //* این تابع تایپ پیام ورودی را از جیسون می خواند.
+        //* این تابع تایپ پیام ورودی را از اِنولوپ یا پیام قدیمی خام می خواند.
         private DedicatedMessageTypeDto ParseMessageType(string text)
         {
-            if (string.IsNullOrWhiteSpace(text)) return null;
-
-            try
-            {
-                return JsonUtility.FromJson<DedicatedMessageTypeDto>(text);
-            }
-            catch
-            {
-                return null;
-            }
+            string messageType = DedicatedRealtimeEnvelopeCodec.ReadMessageType(text);
+            return string.IsNullOrWhiteSpace(messageType) ? null : new DedicatedMessageTypeDto { type = messageType };
         }
 
-        //* این تابع پیام player_state را از جیسون می خواند.
+        //* این تابع بررسی می کند پیام ورودی، وضعیت پلیر از مسیر استاندارد یا قدیمی است یا نه.
+        private bool IsPlayerStateMessage(string text, string messageType)
+        {
+            if (string.Equals(messageType, RealtimeMessageTypes.PlayerState, StringComparison.Ordinal)) return true;
+            if (string.Equals(messageType, "player_state", StringComparison.Ordinal)) return true;
+            return DedicatedRealtimeEnvelopeCodec.Matches(text, RealtimeChannels.Presence, RealtimeMessageTypes.PlayerState);
+        }
+
+        //* این تابع بررسی می کند پیام ورودی یک کامند شبکه ای است یا نه.
+        private bool IsNetworkCommandRouteMessage(string text, string messageType)
+        {
+            if (string.Equals(messageType, RealtimeMessageTypes.Command, StringComparison.Ordinal)) return true;
+            return MetaverseNetworkRpcMessageCodec.IsCommandEnvelope(text);
+        }
+
+        //* این تابع بررسی می کند پیام ورودی از نوع آر پی سی سرور به کلاینت است یا نه.
+        private bool IsNetworkRpcRouteMessage(string text, string messageType)
+        {
+            if (string.Equals(messageType, RealtimeMessageTypes.ClientRpc, StringComparison.Ordinal)) return true;
+            if (string.Equals(messageType, RealtimeMessageTypes.TargetRpc, StringComparison.Ordinal)) return true;
+            return MetaverseNetworkRpcMessageCodec.IsClientRpcEnvelope(text) ||
+                   MetaverseNetworkRpcMessageCodec.IsTargetRpcEnvelope(text);
+        }
+
+        //* این تابع بررسی می کند پیام ورودی مربوط به اسپاون یا دیسپاون است یا نه.
+        private bool IsSpawnRouteMessage(string text, string messageType)
+        {
+            if (string.Equals(messageType, RealtimeMessageTypes.Spawn, StringComparison.Ordinal)) return true;
+            if (string.Equals(messageType, RealtimeMessageTypes.Despawn, StringComparison.Ordinal)) return true;
+            if (string.Equals(messageType, RealtimeMessageTypes.Snapshot, StringComparison.Ordinal)) return true;
+            if (string.Equals(messageType, MetaverseDedicatedMessageTypes.LegacySpawnSnapshot, StringComparison.Ordinal)) return true;
+            if (MetaverseSpawnMessageCodec.IsRealtimeSpawnEnvelope(text)) return true;
+            if (MetaverseSpawnMessageCodec.IsRealtimeDespawnEnvelope(text)) return true;
+            if (MetaverseSpawnMessageCodec.IsRealtimeSpawnSnapshotEnvelope(text)) return true;
+            return false;
+        }
+
+        //* این تابع پیام player_state را از پِیلود اِنولوپ یا پیام قدیمی خام می خواند.
         private DedicatedPlayerStateMessageDto ParsePlayerStateMessage(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return null;
 
             try
             {
-                return JsonUtility.FromJson<DedicatedPlayerStateMessageDto>(text);
+                string payloadJson = DedicatedRealtimeEnvelopeCodec.ReadPayloadOrRawJson(text);
+                return JsonUtility.FromJson<DedicatedPlayerStateMessageDto>(payloadJson);
             }
             catch (Exception ex)
             {
                 Debug.LogError("[DedicatedGameMessageRouter] Player state parse failed | " + ex.Message);
                 return null;
             }
+        }
+
+        //* این تابع پیام پرزنس خروجی را داخل اِنولوپ استاندارد قرار می دهد.
+        private string WrapPresenceEnvelope(string messageType, string payloadJson, string roomId)
+        {
+            return DedicatedRealtimeEnvelopeCodec.WrapPresencePayload(messageType, payloadJson, roomId);
         }
 
         //* این تابع زمان فعلی یونیکس میلی ثانیه را برمی گرداند.
