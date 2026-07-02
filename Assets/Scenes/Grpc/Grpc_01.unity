@@ -9694,87 +9694,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1627937764}
   m_CullTransparentMesh: 1
---- !u!1001 &1661342095
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 0}
-    m_Modifications:
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: 1051.3551
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 457.27838
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 973082219854609859, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1827823795033711562, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: statusText
-      value: 
-      objectReference: {fileID: 1414544931}
-    - target: {fileID: 1827823795033711562, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: connectGameServerButton
-      value: 
-      objectReference: {fileID: 812624797}
-    - target: {fileID: 1827823795033711562, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: disconnectGameServerButton
-      value: 
-      objectReference: {fileID: 950066713}
-    - target: {fileID: 1827823795033711562, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: grpcStreamingRealtimeLobbyController
-      value: 
-      objectReference: {fileID: 548850782}
-    - target: {fileID: 5223888555409328939, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: m_Name
-      value: Dedicated_Game_Server_Client
-      objectReference: {fileID: 0}
-    - target: {fileID: 7361000353336561747, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: threeDModeController
-      value: 
-      objectReference: {fileID: 548850783}
-    - target: {fileID: 7361000353336561747, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
-      propertyPath: grpcStreamingRealtimeRoomController
-      value: 
-      objectReference: {fileID: 548850782}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: ac4fc5f5df6ac3740a309fbf8a362461, type: 3}
 --- !u!1 &1676633631
 GameObject:
   m_ObjectHideFlags: 0
@@ -11910,6 +11829,137 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2068188574}
   m_CullTransparentMesh: 1
+--- !u!4 &973082221414493260
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 1051.3551, y: 457.27838, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1402823065222130427
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: be98d60709c9d324c880b9bf5cd144e5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.DedicatedGameServer.Client.DedicatedGameTicketClient
+  controlBaseUrl: https://dev-world-3d.metarang.com
+  roomId: room_vps_test_001
+  roomName: 
+  region: eu-central
+  zone: de-1
+  preferredServerId: ds_vps_test_001
+  minFreeSlots: 1
+  ticketTtlSeconds: 60
+  timeoutSeconds: 15
+  logRawResponse: 1
+  accessTokenRefreshSkewSeconds: 60
+--- !u!114 &1827823795553677893
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 348ad7203467b6b4d86b8e470866f371, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.DedicatedGameServer.Client.DedicatedGameServerRealtimeRoomBinder
+  realtimeLobbyController: {fileID: 0}
+  grpcStreamingRealtimeLobbyController: {fileID: 548850782}
+  ticketClient: {fileID: 1402823065222130427}
+  autoConnectController: {fileID: 2604828765721122203}
+  wsClient: {fileID: 3186380343314539706}
+  connectGameServerButton: {fileID: 812624797}
+  disconnectGameServerButton: {fileID: 950066713}
+  statusText: {fileID: 1414544931}
+  autoFindReferences: 1
+  requireAccessToken: 1
+  disconnectDedicatedOnRealtimeRoomLeft: 0
+  disconnectDedicatedOnRealtimeDisconnected: 1
+  refreshUiInUpdate: 1
+  uiRefreshIntervalSeconds: 0.25
+  verboseLogs: 1
+  logOnlyOnStateChange: 1
+--- !u!114 &2604828765721122203
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2660eef48a4d3a24a81ef4eb4530f473, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.DedicatedGameServer.Client.DedicatedGameServerAutoConnectController
+  ticketClient: {fileID: 0}
+  wsClient: {fileID: 0}
+  autoRunOnStart: 0
+  startDelaySeconds: 1
+  waitForAccessToken: 1
+  waitForAccessTokenSeconds: 20
+  accessTokenRefreshSkewSeconds: 60
+  useTicketConnectionAddress: 1
+  overrideAddressInEditor: 1
+  editorHost: 127.0.0.1
+  editorPort: 7777
+  editorSecureWebSocket: 0
+  fallbackUserName: unity_test_player
+  disconnectBeforeConnect: 1
+  verboseLogs: 1
+--- !u!114 &3186380343314539706
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cbe7de7d21e49804091fba1c457dcc9a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.DedicatedGameServer.Client.DedicatedGameServerWsClient
+  defaultHost: 127.0.0.1
+  defaultPort: 7777
+  useSecureWebSocket: 0
+  connectTimeoutSeconds: 10
+  authTimeoutSeconds: 10
+  transportKind: 1
+  verboseLogs: 1
+  logRawMessages: 0
+--- !u!114 &3221912470170231331
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19cf2c34cb865469ade72dea6c44b9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.DedicatedGameServer.Client.DedicatedPlayerStateAutoSender
+  wsClient: {fileID: 0}
+  targetTransform: {fileID: 0}
+  autoStartAfterAuth: 1
+  sendOnUpdate: 1
+  sendIntervalSeconds: 0.1
+  logSendResult: 0
 --- !u!4 &3975402168098681101 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 6640570308052845849, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
@@ -11972,6 +12022,48 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+--- !u!1 &5223888555895478948
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 973082221414493260}
+  - component: {fileID: 3186380343314539706}
+  - component: {fileID: 2604828765721122203}
+  - component: {fileID: 3221912470170231331}
+  - component: {fileID: 5764594895429646467}
+  - component: {fileID: 1402823065222130427}
+  - component: {fileID: 7361000353923367388}
+  - component: {fileID: 1827823795553677893}
+  m_Layer: 0
+  m_Name: Dedicated_Game_Server_Client
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &5764594895429646467
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 870a0ad064e46a0469f93787dcde6c7a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.DedicatedGameServer.Client.DedicatedRemotePlayerStateReceiver
+  wsClient: {fileID: 0}
+  ignoreOwnPlayerState: 1
+  logPlayerJoined: 1
+  logPlayerLeft: 1
+  logRemotePlayerState: 1
+  logStateAccepted: 0
+  logMessageFormat: 1
 --- !u!1001 &6615399662946522110
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -12029,6 +12121,48 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+--- !u!114 &7361000353923367388
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5223888555895478948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4ead7a59b3158db4c827cf6589baa8ca, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.DedicatedGameServer.Client.DedicatedRemotePlayerViewController
+  wsClient: {fileID: 3186380343314539706}
+  remoteStateReceiver: {fileID: 5764594895429646467}
+  threeDModeController: {fileID: 548850783}
+  realtimeRoomController: {fileID: 0}
+  grpcStreamingRealtimeRoomController: {fileID: 548850782}
+  legacyPlayerStateAutoSender: {fileID: 3221912470170231331}
+  autoEnter3DModeAfterDedicatedAuth: 1
+  ensureLocalPlayerAfterDedicatedAuth: 1
+  setLocalNameAfterDedicatedAuth: 1
+  autoStartLocalStateSenderAfterDedicatedAuth: 1
+  disableLegacyDedicatedPlayerStateAutoSender: 1
+  applyReceiverSnapshotAfterAuth: 1
+  sendRatePerSecond: 12
+  sendOnlyWhenChanged: 1
+  minPositionDelta: 0.015
+  minRotationDelta: 0.75
+  unchangedStateHeartbeatSeconds: 2
+  clearRemotePlayersOnDedicatedDisconnect: 1
+  removeRemotePlayersWhenStateTimeout: 1
+  remotePlayerStateTimeoutSeconds: 8
+  remoteTimeoutCheckIntervalSeconds: 1
+  disconnectDedicatedOnRealtimeRoomLeft: 1
+  stopLocalStateOnRealtimeRoomLeft: 1
+  clearRemotePlayersOnRealtimeRoomLeft: 1
+  suppressRealtimeRespawnAfterDedicatedLeft: 1
+  suppressRealtimeRespawnSeconds: 300
+  suppressRealtimeRespawnCheckIntervalSeconds: 0.25
+  verboseLogs: 1
+  logLocalSend: 0
+  logRemoteApply: 1
 --- !u!1 &8389605279450885986 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 2354765065720099879, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
@@ -12047,6 +12181,6 @@ SceneRoots:
   - {fileID: 6615399662946522110}
   - {fileID: 1113099716}
   - {fileID: 1139186770}
-  - {fileID: 1661342095}
+  - {fileID: 973082221414493260}
   - {fileID: 1998692718}
   - {fileID: 1142397065}
