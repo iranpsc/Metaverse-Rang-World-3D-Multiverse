@@ -3696,9 +3696,9 @@ MonoBehaviour:
   button3D: {fileID: 666658907}
   objectsToDisableWhen3DStarts: []
   objectsToEnableWhen3DStarts: []
-  world3DRoot: {fileID: 0}
-  playersRoot: {fileID: 0}
-  localPlayerSpawnPoint: {fileID: 0}
+  world3DRoot: {fileID: 1491476256}
+  playersRoot: {fileID: 1652905657}
+  localPlayerSpawnPoint: {fileID: 975924492}
   localPlayerPrefab: {fileID: 1539947945379524784, guid: 3f0450f30e4a66a49adc8e5a824cac47, type: 3}
   remotePlayerPrefab: {fileID: 5732834497862297417, guid: 0fec470ee8e01be4aa7fe87af2801ba0, type: 3}
   thirdPersonCamera: {fileID: 330585545}
@@ -6063,6 +6063,50 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 900085389}
   m_CullTransparentMesh: 1
+--- !u!1 &941862668
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 941862670}
+  - component: {fileID: 941862669}
+  m_Layer: 0
+  m_Name: CoroutineRunner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &941862669
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 941862668}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4906d115435f4ce4bafeb4d99269894e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CoroutineRunner
+--- !u!4 &941862670
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 941862668}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &964856339
 GameObject:
   m_ObjectHideFlags: 0
@@ -6115,6 +6159,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.RectMask2D
   m_Padding: {x: -8, y: -5, z: -8, w: -5}
   m_Softness: {x: 0, y: 0}
+--- !u!4 &975924492 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 6640570308052845849, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+  m_PrefabInstance: {fileID: 1407128853}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &983304824
 GameObject:
   m_ObjectHideFlags: 0
@@ -8326,10 +8375,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b6fd3ca9d7c9fac408e02bfb2b006b10, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PanelsController
-  btn_Reg: {fileID: 652990940}
-  btn_Log: {fileID: 1449751230}
-  pnl_Reg: {fileID: 1248299304}
-  pnl_Log: {fileID: 810599241}
 --- !u!1 &1402571815
 GameObject:
   m_ObjectHideFlags: 0
@@ -9796,6 +9841,11 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1469604324}
   m_CullTransparentMesh: 1
+--- !u!1 &1491476256 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2354765065720099879, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+  m_PrefabInstance: {fileID: 1407128853}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1512335931
 GameObject:
   m_ObjectHideFlags: 0
@@ -10989,6 +11039,11 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1627937764}
   m_CullTransparentMesh: 1
+--- !u!4 &1652905657 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+  m_PrefabInstance: {fileID: 776452381}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1676633631
 GameObject:
   m_ObjectHideFlags: 0
@@ -13190,3 +13245,4 @@ SceneRoots:
   - {fileID: 2563125840553973031}
   - {fileID: 776452381}
   - {fileID: 1407128853}
+  - {fileID: 941862670}

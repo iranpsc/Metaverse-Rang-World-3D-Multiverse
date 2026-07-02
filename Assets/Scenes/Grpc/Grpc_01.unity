@@ -1972,6 +1972,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+--- !u!4 &366912216 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+  m_PrefabInstance: {fileID: 366912215}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &378765047
 GameObject:
   m_ObjectHideFlags: 0
@@ -2785,9 +2790,9 @@ MonoBehaviour:
   button3D: {fileID: 0}
   objectsToDisableWhen3DStarts: []
   objectsToEnableWhen3DStarts: []
-  world3DRoot: {fileID: 0}
-  playersRoot: {fileID: 0}
-  localPlayerSpawnPoint: {fileID: 0}
+  world3DRoot: {fileID: 1355924309}
+  playersRoot: {fileID: 366912216}
+  localPlayerSpawnPoint: {fileID: 1355924310}
   localPlayerPrefab: {fileID: 1539947945379524784, guid: 3f0450f30e4a66a49adc8e5a824cac47, type: 3}
   remotePlayerPrefab: {fileID: 5732834497862297417, guid: 0fec470ee8e01be4aa7fe87af2801ba0, type: 3}
   thirdPersonCamera: {fileID: 330585545}
@@ -7106,6 +7111,16 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+--- !u!1 &1355924309 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2354765065720099879, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+  m_PrefabInstance: {fileID: 1355924308}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &1355924310 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 6640570308052845849, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+  m_PrefabInstance: {fileID: 1355924308}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1382143796
 GameObject:
   m_ObjectHideFlags: 0
