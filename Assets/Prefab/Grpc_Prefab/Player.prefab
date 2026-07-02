@@ -71,7 +71,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 518f6ae91aae75c409a1bf8521463747, type: 2}
+  - {fileID: 2100000, guid: 05349f170f6cf8c4e906e8759a430787, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -176,10 +176,17 @@ MonoBehaviour:
   prefabId: 
   netId: 0
   ownerConnectionId: -1
+  ownerConnectionIdText: 
+  ownerUserId: 
+  ownerPlayerId: 
   serverOwned: 1
   localPlayer: 0
   spawned: 0
+  isServer: 0
+  isClient: 0
+  hasAuthority: 0
   logLifecycle: 0
+  logBehaviourCallbacks: 0
 --- !u!1 &8873071503698527192
 GameObject:
   m_ObjectHideFlags: 0
