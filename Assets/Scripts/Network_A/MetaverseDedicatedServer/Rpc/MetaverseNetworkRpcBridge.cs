@@ -16,14 +16,30 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
     [Header("Client Queue")]
     [SerializeField] private float queuedCommandLifetimeSeconds = 20f;
 
+    [Header("Server Command Validation")]
+    [SerializeField] private bool requireAuthorityForClientCommands = true;
+    [SerializeField] private bool allowServerOwnedCommandsWithoutOwner = true;
+    [SerializeField] private bool rejectPrefabMismatch = true;
+    [SerializeField] private int maxCommandNameLength = 96;
+    [SerializeField] private int maxRpcNameLength = 96;
+    [SerializeField] private int maxPayloadLength = 32768;
+
+    [Header("Server Rpc Rules")]
+    [SerializeField] private bool requireServerForOutboundRpc = true;
+
     [Header("Debug")]
     [SerializeField] private bool logMessages = true;
+    [SerializeField] private bool logRejectedCommands = true;
 
     private bool clientEventsBound;
     private long nextClientCommandSequence = 1;
     private readonly List<QueuedCommand> list_queuedCommands = new List<QueuedCommand>();
 
     public event Action<string> OutboundMessageReady;
+
+    public string LastServerCommandRejectReason { get; private set; } = string.Empty;
+    public bool RequireAuthorityForClientCommands => requireAuthorityForClientCommands;
+    public bool AllowServerOwnedCommandsWithoutOwner => allowServerOwnedCommandsWithoutOwner;
 
     public void Bind(MetaverseSpawnManager manager)
     {
@@ -75,10 +91,18 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
         return SendCommand(identity.NetId, identity.PrefabId, commandName, payloadJson);
     }
 
+    public bool SendCommand(GameObject obj, string commandName, string payloadJson = "")
+    {
+        MetaverseNetworkIdentity identity = obj != null ? obj.GetComponent<MetaverseNetworkIdentity>() : null;
+        return SendCommand(identity, commandName, payloadJson);
+    }
+
     public bool SendCommand(int netId, string prefabId, string commandName, string payloadJson = "")
     {
         string safeCommandName = SafeTrim(commandName);
-        if (netId <= 0 || string.IsNullOrWhiteSpace(safeCommandName)) return false;
+        if (!IsValidMethodName(safeCommandName, maxCommandNameLength)) return false;
+        if (netId <= 0) return false;
+        if (!IsValidPayloadLength(payloadJson)) return false;
 
         if (!CanClientSendNow())
         {
@@ -110,16 +134,38 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
         return true;
     }
 
+    public bool Cmd(MetaverseNetworkIdentity identity, string commandName, string payloadJson = "")
+    {
+        return SendCommand(identity, commandName, payloadJson);
+    }
+
+    public bool Cmd(GameObject obj, string commandName, string payloadJson = "")
+    {
+        return SendCommand(obj, commandName, payloadJson);
+    }
+
+    public bool Cmd(int netId, string prefabId, string commandName, string payloadJson = "")
+    {
+        return SendCommand(netId, prefabId, commandName, payloadJson);
+    }
+
     public bool SendClientRpc(MetaverseNetworkIdentity identity, string rpcName, string payloadJson = "")
     {
         if (identity == null) return false;
         return SendClientRpc(identity.NetId, identity.PrefabId, rpcName, payloadJson);
     }
 
+    public bool SendClientRpc(GameObject obj, string rpcName, string payloadJson = "")
+    {
+        MetaverseNetworkIdentity identity = obj != null ? obj.GetComponent<MetaverseNetworkIdentity>() : null;
+        return SendClientRpc(identity, rpcName, payloadJson);
+    }
+
     public bool SendClientRpc(int netId, string prefabId, string rpcName, string payloadJson = "")
     {
         string safeRpcName = SafeTrim(rpcName);
-        if (netId <= 0 || string.IsNullOrWhiteSpace(safeRpcName)) return false;
+        if (!CanServerSendRpc(netId, safeRpcName)) return false;
+        if (!IsValidPayloadLength(payloadJson)) return false;
 
         MetaverseNetworkRpcPayload payload = BuildBasePayload(RealtimeMessageTypes.ClientRpc, netId, prefabId, safeRpcName, payloadJson);
         payload.serverTimeUnixMs = NowUnixMs();
@@ -139,17 +185,52 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
         return true;
     }
 
+    public bool Rpc(MetaverseNetworkIdentity identity, string rpcName, string payloadJson = "")
+    {
+        return SendClientRpc(identity, rpcName, payloadJson);
+    }
+
+    public bool Rpc(GameObject obj, string rpcName, string payloadJson = "")
+    {
+        return SendClientRpc(obj, rpcName, payloadJson);
+    }
+
+    public bool Rpc(int netId, string prefabId, string rpcName, string payloadJson = "")
+    {
+        return SendClientRpc(netId, prefabId, rpcName, payloadJson);
+    }
+
     public bool SendTargetRpc(MetaverseNetworkIdentity identity, string targetConnectionId, string rpcName, string payloadJson = "")
     {
         if (identity == null) return false;
         return SendTargetRpc(identity.NetId, identity.PrefabId, targetConnectionId, rpcName, payloadJson);
     }
 
+    public bool SendTargetRpc(MetaverseNetworkIdentity identity, DedicatedPlayerSession targetSession, string rpcName, string payloadJson = "")
+    {
+        if (targetSession == null) return false;
+        return SendTargetRpc(identity, targetSession.connectionId, rpcName, payloadJson);
+    }
+
+    public bool SendTargetRpc(GameObject obj, string targetConnectionId, string rpcName, string payloadJson = "")
+    {
+        MetaverseNetworkIdentity identity = obj != null ? obj.GetComponent<MetaverseNetworkIdentity>() : null;
+        return SendTargetRpc(identity, targetConnectionId, rpcName, payloadJson);
+    }
+
+    public bool SendTargetRpc(GameObject obj, DedicatedPlayerSession targetSession, string rpcName, string payloadJson = "")
+    {
+        if (targetSession == null) return false;
+        return SendTargetRpc(obj, targetSession.connectionId, rpcName, payloadJson);
+    }
+
     public bool SendTargetRpc(int netId, string prefabId, string targetConnectionId, string rpcName, string payloadJson = "")
     {
         string safeRpcName = SafeTrim(rpcName);
         string safeTargetConnectionId = SafeTrim(targetConnectionId);
-        if (netId <= 0 || string.IsNullOrWhiteSpace(safeRpcName) || string.IsNullOrWhiteSpace(safeTargetConnectionId)) return false;
+        if (!CanServerSendRpc(netId, safeRpcName)) return false;
+        if (string.IsNullOrWhiteSpace(safeTargetConnectionId)) return false;
+        if (!IsValidPayloadLength(payloadJson)) return false;
 
         MetaverseNetworkRpcPayload payload = BuildBasePayload(RealtimeMessageTypes.TargetRpc, netId, prefabId, safeRpcName, payloadJson);
         payload.targetConnectionId = safeTargetConnectionId;
@@ -171,26 +252,94 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
         return true;
     }
 
+    public bool SendTargetRpcToUser(MetaverseNetworkIdentity identity, string targetUserId, string rpcName, string payloadJson = "")
+    {
+        if (identity == null) return false;
+        return SendTargetRpcToUser(identity.NetId, identity.PrefabId, targetUserId, rpcName, payloadJson);
+    }
+
+    public bool SendTargetRpcToUser(int netId, string prefabId, string targetUserId, string rpcName, string payloadJson = "")
+    {
+        string safeRpcName = SafeTrim(rpcName);
+        string safeTargetUserId = SafeTrim(targetUserId);
+        if (!CanServerSendRpc(netId, safeRpcName)) return false;
+        if (string.IsNullOrWhiteSpace(safeTargetUserId)) return false;
+        if (!IsValidPayloadLength(payloadJson)) return false;
+
+        MetaverseNetworkRpcPayload payload = BuildBasePayload(RealtimeMessageTypes.TargetRpc, netId, prefabId, safeRpcName, payloadJson);
+        payload.targetUserId = safeTargetUserId;
+        payload.serverTimeUnixMs = NowUnixMs();
+
+        string json = MetaverseNetworkRpcMessageCodec.CreateTargetRpcEnvelopeJson(payload);
+        if (string.IsNullOrWhiteSpace(json)) return false;
+
+        OutboundMessageReady?.Invoke(json);
+        return true;
+    }
+
+    public bool SendTargetRpcToPlayer(MetaverseNetworkIdentity identity, string targetPlayerId, string rpcName, string payloadJson = "")
+    {
+        if (identity == null) return false;
+        return SendTargetRpcToPlayer(identity.NetId, identity.PrefabId, targetPlayerId, rpcName, payloadJson);
+    }
+
+    public bool SendTargetRpcToPlayer(int netId, string prefabId, string targetPlayerId, string rpcName, string payloadJson = "")
+    {
+        string safeRpcName = SafeTrim(rpcName);
+        string safeTargetPlayerId = SafeTrim(targetPlayerId);
+        if (!CanServerSendRpc(netId, safeRpcName)) return false;
+        if (string.IsNullOrWhiteSpace(safeTargetPlayerId)) return false;
+        if (!IsValidPayloadLength(payloadJson)) return false;
+
+        MetaverseNetworkRpcPayload payload = BuildBasePayload(RealtimeMessageTypes.TargetRpc, netId, prefabId, safeRpcName, payloadJson);
+        payload.targetPlayerId = safeTargetPlayerId;
+        payload.serverTimeUnixMs = NowUnixMs();
+
+        string json = MetaverseNetworkRpcMessageCodec.CreateTargetRpcEnvelopeJson(payload);
+        if (string.IsNullOrWhiteSpace(json)) return false;
+
+        OutboundMessageReady?.Invoke(json);
+        return true;
+    }
+
+    public bool TargetRpc(MetaverseNetworkIdentity identity, string targetConnectionId, string rpcName, string payloadJson = "")
+    {
+        return SendTargetRpc(identity, targetConnectionId, rpcName, payloadJson);
+    }
+
+    public bool TargetRpc(MetaverseNetworkIdentity identity, DedicatedPlayerSession targetSession, string rpcName, string payloadJson = "")
+    {
+        return SendTargetRpc(identity, targetSession, rpcName, payloadJson);
+    }
+
+    public bool TargetRpc(GameObject obj, string targetConnectionId, string rpcName, string payloadJson = "")
+    {
+        return SendTargetRpc(obj, targetConnectionId, rpcName, payloadJson);
+    }
+
+    public bool TargetRpc(int netId, string prefabId, string targetConnectionId, string rpcName, string payloadJson = "")
+    {
+        return SendTargetRpc(netId, prefabId, targetConnectionId, rpcName, payloadJson);
+    }
+
     public bool HandleServerCommand(DedicatedPlayerSession senderSession, MetaverseNetworkRpcPayload payload)
     {
         EnsureReferences();
-        if (senderSession == null || payload == null) return false;
-        if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
-        if (spawnManager == null) return false;
 
-        payload.type = RealtimeMessageTypes.Command;
-        payload.senderConnectionId = senderSession.connectionId;
-        payload.senderUserId = senderSession.userId;
-        payload.senderPlayerId = senderSession.playerId;
-        payload.roomId = senderSession.roomId;
-        payload.serverTimeUnixMs = NowUnixMs();
-
-        if (!spawnManager.TryGetSpawnedObject(payload.netId, out MetaverseNetworkIdentity identity) || identity == null)
+        if (!ValidateServerCommand(senderSession, payload, out MetaverseNetworkIdentity identity))
         {
-            Debug.LogWarning("[MetaverseNetworkRpcBridge] Command ignored. NetId not found | netId=" + payload.netId +
-                             " | command=" + SafeTrim(payload.methodName));
             return false;
         }
+
+        payload.type = RealtimeMessageTypes.Command;
+        payload.senderConnectionId = SafeTrim(senderSession.connectionId);
+        payload.senderUserId = SafeTrim(senderSession.userId);
+        payload.senderPlayerId = SafeTrim(senderSession.playerId);
+        payload.roomId = SafeTrim(senderSession.roomId);
+        payload.prefabId = string.IsNullOrWhiteSpace(payload.prefabId) ? identity.PrefabId : SafeTrim(payload.prefabId);
+        payload.methodName = SafeTrim(payload.methodName);
+        payload.payloadJson = SafeJson(payload.payloadJson);
+        payload.serverTimeUnixMs = NowUnixMs();
 
         DispatchServerCommand(identity, payload, senderSession);
 
@@ -199,14 +348,130 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
             Debug.Log("[MetaverseNetworkRpcBridge] Command dispatched on server | netId=" + payload.netId +
                       " | command=" + SafeTrim(payload.methodName) +
                       " | senderUserId=" + SafeTrim(senderSession.userId) +
+                      " | authorityMode=" + ResolveAuthorityMode(identity, senderSession) +
                       " | incomingRoute=game/command");
         }
 
         return true;
     }
 
+    public bool CanHandleServerCommand(DedicatedPlayerSession senderSession, MetaverseNetworkRpcPayload payload)
+    {
+        return ValidateServerCommand(senderSession, payload, out MetaverseNetworkIdentity _);
+    }
+
+    private bool ValidateServerCommand(DedicatedPlayerSession senderSession, MetaverseNetworkRpcPayload payload, out MetaverseNetworkIdentity identity)
+    {
+        identity = null;
+        LastServerCommandRejectReason = string.Empty;
+
+        if (senderSession == null) return RejectServerCommand("session_missing", senderSession, payload);
+        if (!senderSession.isAuthenticated) return RejectServerCommand("session_not_authenticated", senderSession, payload);
+        if (payload == null) return RejectServerCommand("payload_missing", senderSession, payload);
+
+        payload.methodName = SafeTrim(payload.methodName);
+        payload.payloadJson = SafeJson(payload.payloadJson);
+
+        if (payload.netId <= 0) return RejectServerCommand("invalid_net_id", senderSession, payload);
+        if (!IsValidMethodName(payload.methodName, maxCommandNameLength)) return RejectServerCommand("invalid_command_name", senderSession, payload);
+        if (!IsValidPayloadLength(payload.payloadJson)) return RejectServerCommand("payload_too_large", senderSession, payload);
+
+        if (!string.IsNullOrWhiteSpace(payload.roomId) &&
+            !string.Equals(payload.roomId.Trim(), SafeTrim(senderSession.roomId), StringComparison.Ordinal))
+        {
+            return RejectServerCommand("room_mismatch", senderSession, payload);
+        }
+
+        if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
+        if (spawnManager == null) return RejectServerCommand("spawn_manager_missing", senderSession, payload);
+
+        if (!spawnManager.TryGetSpawnedObject(payload.netId, out identity) || identity == null)
+        {
+            return RejectServerCommand("net_id_not_found", senderSession, payload);
+        }
+
+        if (rejectPrefabMismatch &&
+            !string.IsNullOrWhiteSpace(payload.prefabId) &&
+            !string.IsNullOrWhiteSpace(identity.PrefabId) &&
+            !string.Equals(payload.prefabId.Trim(), identity.PrefabId, StringComparison.Ordinal))
+        {
+            return RejectServerCommand("prefab_mismatch", senderSession, payload, identity);
+        }
+
+        if (!IsCommandAuthorityAllowed(identity, senderSession))
+        {
+            return RejectServerCommand("authority_rejected", senderSession, payload, identity);
+        }
+
+        return true;
+    }
+
+    private bool IsCommandAuthorityAllowed(MetaverseNetworkIdentity identity, DedicatedPlayerSession senderSession)
+    {
+        if (identity == null || senderSession == null) return false;
+        if (!requireAuthorityForClientCommands) return true;
+        if (IsOwnedBySession(identity, senderSession)) return true;
+        if (identity.IsServerOwned && allowServerOwnedCommandsWithoutOwner) return true;
+        return false;
+    }
+
+    private bool IsOwnedBySession(MetaverseNetworkIdentity identity, DedicatedPlayerSession senderSession)
+    {
+        if (identity == null || senderSession == null) return false;
+
+        string connectionId = SafeTrim(senderSession.connectionId);
+        string userId = SafeTrim(senderSession.userId);
+        string playerId = SafeTrim(senderSession.playerId);
+
+        if (!string.IsNullOrWhiteSpace(connectionId))
+        {
+            if (identity.IsOwnedBy(connectionId)) return true;
+            if (int.TryParse(connectionId, out int numericConnectionId) && identity.IsOwnedBy(numericConnectionId)) return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(userId) && identity.IsOwnedByUser(userId)) return true;
+
+        if (!string.IsNullOrWhiteSpace(playerId) &&
+            string.Equals(SafeTrim(identity.OwnerPlayerId), playerId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private string ResolveAuthorityMode(MetaverseNetworkIdentity identity, DedicatedPlayerSession senderSession)
+    {
+        if (identity == null || senderSession == null) return "unknown";
+        if (IsOwnedBySession(identity, senderSession)) return "owner";
+        if (identity.IsServerOwned && allowServerOwnedCommandsWithoutOwner) return "server_owned_requires_authority_false";
+        if (!requireAuthorityForClientCommands) return "requires_authority_false";
+        return "rejected";
+    }
+
+    private bool RejectServerCommand(string reason, DedicatedPlayerSession senderSession, MetaverseNetworkRpcPayload payload, MetaverseNetworkIdentity identity = null)
+    {
+        LastServerCommandRejectReason = SafeTrim(reason);
+
+        if (logRejectedCommands)
+        {
+            Debug.LogWarning("[MetaverseNetworkRpcBridge] Command rejected | reason=" + LastServerCommandRejectReason +
+                             " | netId=" + (payload != null ? payload.netId : 0) +
+                             " | prefabId=" + SafeTrim(payload != null ? payload.prefabId : string.Empty) +
+                             " | identityPrefabId=" + SafeTrim(identity != null ? identity.PrefabId : string.Empty) +
+                             " | command=" + SafeTrim(payload != null ? payload.methodName : string.Empty) +
+                             " | senderConnectionId=" + SafeTrim(senderSession != null ? senderSession.connectionId : string.Empty) +
+                             " | senderUserId=" + SafeTrim(senderSession != null ? senderSession.userId : string.Empty) +
+                             " | senderPlayerId=" + SafeTrim(senderSession != null ? senderSession.playerId : string.Empty));
+        }
+
+        return false;
+    }
+
     private void DispatchServerCommand(MetaverseNetworkIdentity identity, MetaverseNetworkRpcPayload payload, DedicatedPlayerSession senderSession)
     {
+        if (identity == null || payload == null) return;
+
         MetaverseNetworkBehaviour[] behaviours = identity.GetNetworkBehaviours();
         if (behaviours == null) return;
 
@@ -228,6 +493,8 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
 
     private void DispatchClientRpc(MetaverseNetworkIdentity identity, MetaverseNetworkRpcPayload payload)
     {
+        if (identity == null || payload == null) return;
+
         MetaverseNetworkBehaviour[] behaviours = identity.GetNetworkBehaviours();
         if (behaviours == null) return;
 
@@ -249,6 +516,8 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
 
     private void DispatchTargetRpc(MetaverseNetworkIdentity identity, MetaverseNetworkRpcPayload payload)
     {
+        if (identity == null || payload == null) return;
+
         MetaverseNetworkBehaviour[] behaviours = identity.GetNetworkBehaviours();
         if (behaviours == null) return;
 
@@ -319,7 +588,7 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
             prefabId = SafeTrim(prefabId),
             behaviourName = string.Empty,
             methodName = SafeTrim(methodName),
-            payloadJson = string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson.Trim(),
+            payloadJson = SafeJson(payloadJson),
             roomId = string.Empty
         };
     }
@@ -327,6 +596,26 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
     private bool CanClientSendNow()
     {
         return dedicatedClient != null && dedicatedClient.IsConnected && dedicatedClient.IsAuthenticated;
+    }
+
+    private bool CanServerSendRpc(int netId, string methodName)
+    {
+        if (requireServerForOutboundRpc && !Application.isBatchMode) return false;
+        if (netId <= 0) return false;
+        return IsValidMethodName(methodName, maxRpcNameLength);
+    }
+
+    private bool IsValidMethodName(string methodName, int maxLength)
+    {
+        string safeMethodName = SafeTrim(methodName);
+        if (string.IsNullOrWhiteSpace(safeMethodName)) return false;
+        return safeMethodName.Length <= Mathf.Max(1, maxLength);
+    }
+
+    private bool IsValidPayloadLength(string payloadJson)
+    {
+        string safePayload = SafeJson(payloadJson);
+        return safePayload.Length <= Mathf.Max(256, maxPayloadLength);
     }
 
     private void QueueCommand(int netId, string prefabId, string commandName, string payloadJson)
@@ -337,7 +626,7 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
             netId = netId,
             prefabId = SafeTrim(prefabId),
             commandName = SafeTrim(commandName),
-            payloadJson = string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson.Trim(),
+            payloadJson = SafeJson(payloadJson),
             expiresAt = expiresAt
         });
 
@@ -417,6 +706,11 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
     private long NowUnixMs()
     {
         return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
+
+    private string SafeJson(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "{}" : value.Trim();
     }
 
     private string SafeTrim(string value)

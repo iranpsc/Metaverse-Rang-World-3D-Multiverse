@@ -43,10 +43,20 @@ namespace Network_A.DedicatedGameServer.Client
         public string LastAuthReason { get; private set; }
         public string LastError { get; private set; }
         public string LastRawMessage { get; private set; }
+        public string LastMessageFormat { get; private set; }
+        public string LastRoute { get; private set; }
+        public string LastMirrorLikeRoute { get; private set; }
+        public string LastPayloadJson { get; private set; }
+        public string LastEnvelopeChannel { get; private set; }
+        public string LastEnvelopeType { get; private set; }
+        public string LastEnvelopeRoom { get; private set; }
+        public bool IsReady => IsConnected && IsAuthenticated;
 
         public event Action Connected;
         public event Action<string> Disconnected;
         public event Action<string> RawMessageReceived;
+        public event Action<RealtimeEnvelope> EnvelopeReceived;
+        public event Action<string, string, string> RoutedMessageReceived;
         public event Action Authenticated;
         public event Action<string> AuthFailed;
 
@@ -92,12 +102,47 @@ namespace Network_A.DedicatedGameServer.Client
             bool secure,
             CancellationToken cancellationToken = default)
         {
+            return await ConnectToDedicatedServerAsync(host, port, secure, string.Empty, cancellationToken);
+        }
+
+        public async Task<bool> ConnectToDedicatedServerAsync(
+            string host,
+            int port,
+            bool secure,
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            string safeHost = string.IsNullOrWhiteSpace(host) ? defaultHost : host.Trim();
+            int safePort = Mathf.Max(1, port);
+            string url = BuildWebSocketUrl(safeHost, safePort, secure, path);
+
+            return await ConnectAsync(url, cancellationToken);
+        }
+
+        private string BuildWebSocketUrl(string host, int port, bool secure, string path)
+        {
             string safeHost = string.IsNullOrWhiteSpace(host) ? defaultHost : host.Trim();
             int safePort = Mathf.Max(1, port);
             string scheme = secure ? "wss" : "ws";
-            string url = scheme + "://" + safeHost + ":" + safePort;
+            string safePath = NormalizeWebSocketPath(path);
+            bool omitDefaultPort = (secure && safePort == 443) || (!secure && safePort == 80);
 
-            return await ConnectAsync(url, cancellationToken);
+            if (omitDefaultPort)
+            {
+                return scheme + "://" + safeHost + safePath;
+            }
+
+            return scheme + "://" + safeHost + ":" + safePort + safePath;
+        }
+
+        private string NormalizeWebSocketPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+
+            string safePath = path.Trim();
+            if (!safePath.StartsWith("/")) safePath = "/" + safePath;
+
+            return safePath;
         }
 
         public async Task<bool> ConnectAsync(string url, CancellationToken cancellationToken = default)
@@ -195,6 +240,12 @@ namespace Network_A.DedicatedGameServer.Client
                 playerId = string.IsNullOrWhiteSpace(playerId) ? userId.Trim() : playerId.Trim(),
                 userName = string.IsNullOrWhiteSpace(userName) ? userId.Trim() : userName.Trim()
             };
+
+            UserId = authTicket.userId;
+            PlayerId = authTicket.playerId;
+            RoomId = authTicket.roomId;
+            ServerId = authTicket.serverId;
+            SessionId = authTicket.sessionId;
 
             authCompletionSource = new TaskCompletionSource<bool>();
 
@@ -315,6 +366,134 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
+
+
+        public async Task<bool> SendGameEnvelopeAsync(
+            string messageType,
+            string payloadJson,
+            bool requiresAck = false,
+            CancellationToken cancellationToken = default)
+        {
+            if (!IsConnected || !IsAuthenticated) return false;
+            return await SendEnvelopeAsync(RealtimeChannels.Game, SafeTrim(messageType), string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson.Trim(), RoomId, requiresAck, cancellationToken);
+        }
+
+        public async Task<bool> SendNetworkRpcPayloadAsync(
+            global::MetaverseNetworkRpcPayload payload,
+            string messageType,
+            CancellationToken cancellationToken = default)
+        {
+            if (payload == null) return false;
+            payload.roomId = string.IsNullOrWhiteSpace(payload.roomId) ? RoomId : payload.roomId.Trim();
+            payload.senderConnectionId = string.IsNullOrWhiteSpace(payload.senderConnectionId) ? ConnectionId : payload.senderConnectionId.Trim();
+            payload.senderUserId = string.IsNullOrWhiteSpace(payload.senderUserId) ? UserId : payload.senderUserId.Trim();
+            payload.senderPlayerId = string.IsNullOrWhiteSpace(payload.senderPlayerId) ? PlayerId : payload.senderPlayerId.Trim();
+            payload.NormalizeDefaults();
+
+            string safeType = string.IsNullOrWhiteSpace(messageType) ? payload.type : messageType.Trim();
+            string rawJson = global::MetaverseNetworkRpcMessageCodec.CreateEnvelopeJson(safeType, payload, payload.roomId);
+            return await SendRawAsync(rawJson, cancellationToken);
+        }
+
+        public async Task<bool> SendMirrorLikeCommandAsync(
+            int netId,
+            string prefabId,
+            string commandName,
+            string payloadJson = "{}",
+            CancellationToken cancellationToken = default)
+        {
+            var payload = new global::MetaverseNetworkRpcPayload
+            {
+                type = global::MetaverseDedicatedMessageTypes.Command,
+                netId = netId,
+                prefabId = string.IsNullOrWhiteSpace(prefabId) ? string.Empty : prefabId.Trim(),
+                methodName = string.IsNullOrWhiteSpace(commandName) ? string.Empty : commandName.Trim(),
+                commandName = string.IsNullOrWhiteSpace(commandName) ? string.Empty : commandName.Trim(),
+                payloadJson = string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson.Trim(),
+                roomId = RoomId,
+                senderConnectionId = ConnectionId,
+                senderUserId = UserId,
+                senderPlayerId = PlayerId,
+                mirrorRoute = global::MetaverseDedicatedMessageTypes.MirrorRouteCmd,
+                clientTimeUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+
+            return await SendNetworkRpcPayloadAsync(payload, global::MetaverseDedicatedMessageTypes.Command, cancellationToken);
+        }
+
+        public async Task<bool> SendPlayerInputPayloadAsync(
+            global::MetaverseNetworkPlayerInputPayload payload,
+            CancellationToken cancellationToken = default)
+        {
+            if (payload == null) return false;
+            payload.roomId = string.IsNullOrWhiteSpace(payload.roomId) ? RoomId : payload.roomId.Trim();
+            payload.connectionId = string.IsNullOrWhiteSpace(payload.connectionId) ? ConnectionId : payload.connectionId.Trim();
+            payload.userId = string.IsNullOrWhiteSpace(payload.userId) ? UserId : payload.userId.Trim();
+            payload.playerId = string.IsNullOrWhiteSpace(payload.playerId) ? PlayerId : payload.playerId.Trim();
+            payload.NormalizeDefaults();
+
+            string rawJson = global::MetaverseNetworkPlayerInputMessageCodec.CreatePlayerInputEnvelopeJson(payload, payload.roomId);
+            return await SendRawAsync(rawJson, cancellationToken);
+        }
+
+        public async Task<bool> SendMirrorLikeOwnerInputAsync(
+            int netId,
+            string prefabId,
+            float moveX,
+            float moveZ,
+            float deltaTime,
+            long sequence,
+            CancellationToken cancellationToken = default)
+        {
+            var payload = new global::MetaverseNetworkPlayerInputPayload
+            {
+                type = global::MetaverseDedicatedMessageTypes.PlayerInput,
+                netId = netId,
+                prefabId = string.IsNullOrWhiteSpace(prefabId) ? string.Empty : prefabId.Trim(),
+                roomId = RoomId,
+                connectionId = ConnectionId,
+                userId = UserId,
+                playerId = PlayerId,
+                moveX = moveX,
+                moveZ = moveZ,
+                deltaTime = deltaTime,
+                sequence = sequence,
+                mirrorRoute = global::MetaverseDedicatedMessageTypes.MirrorRouteOwnerInput,
+                clientTimeUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+
+            return await SendPlayerInputPayloadAsync(payload, cancellationToken);
+        }
+
+        public string GetDebugSummary()
+        {
+            return "connected=" + IsConnected +
+                   " | authenticated=" + IsAuthenticated +
+                   " | ready=" + IsReady +
+                   " | connectionId=" + ConnectionId +
+                   " | userId=" + UserId +
+                   " | playerId=" + PlayerId +
+                   " | roomId=" + RoomId +
+                   " | serverId=" + ServerId +
+                   " | sessionId=" + SessionId +
+                   " | lastRoute=" + LastRoute +
+                   " | lastMirrorRoute=" + LastMirrorLikeRoute +
+                   " | lastError=" + LastError;
+        }
+
+        public void ClearLastMessageDiagnostics()
+        {
+            LastRawMessage = string.Empty;
+            LastMessageFormat = string.Empty;
+            LastRoute = string.Empty;
+            LastMirrorLikeRoute = string.Empty;
+            LastPayloadJson = string.Empty;
+            LastEnvelopeChannel = string.Empty;
+            LastEnvelopeType = string.Empty;
+            LastEnvelopeRoom = string.Empty;
+        }
+
+
         public void Disconnect(string reason = "client_disconnect")
         {
             bool wasConnected = IsConnected;
@@ -357,9 +536,14 @@ namespace Network_A.DedicatedGameServer.Client
         private void HandleRawMessage(string message)
         {
             LastRawMessage = message ?? string.Empty;
+            LastMessageFormat = ReadMessageFormatForLog(LastRawMessage);
+            LastRoute = ReadRouteForLog(LastRawMessage);
+            LastMirrorLikeRoute = ReadMirrorLikeRouteForLog(LastRawMessage);
+            LastPayloadJson = ReadPayloadJsonForLog(LastRawMessage);
 
-            Log("Received message | messageFormat=" + ReadMessageFormatForLog(LastRawMessage) +
-                " | route=" + ReadRouteForLog(LastRawMessage));
+            Log("Received message | messageFormat=" + LastMessageFormat +
+                " | route=" + LastRoute +
+                " | mirrorRoute=" + LastMirrorLikeRoute);
 
             if (logRawMessages)
             {
@@ -367,9 +551,16 @@ namespace Network_A.DedicatedGameServer.Client
             }
 
             RawMessageReceived?.Invoke(LastRawMessage);
+            RoutedMessageReceived?.Invoke(LastMessageFormat, LastRoute, LastRawMessage);
 
             if (TryParseEnvelope(LastRawMessage, out RealtimeEnvelope envelope))
             {
+                LastEnvelopeChannel = envelope.ch;
+                LastEnvelopeType = envelope.t;
+                LastEnvelopeRoom = envelope.room;
+                LastPayloadJson = envelope.payloadJson;
+                EnvelopeReceived?.Invoke(envelope);
+
                 if (envelope.ch == RealtimeChannels.System && envelope.t == RealtimeMessageTypes.AuthOk)
                 {
                     HandleAuthOk(envelope.payloadJson);
@@ -659,6 +850,31 @@ namespace Network_A.DedicatedGameServer.Client
 
             envelope = parsed;
             return true;
+        }
+
+
+
+        private string ReadMirrorLikeRouteForLog(string message)
+        {
+            if (TryParseEnvelope(message, out RealtimeEnvelope envelope))
+            {
+                return global::MetaverseDedicatedMessageTypes.ReadMirrorLikeRoute(envelope.t);
+            }
+
+            DedicatedMessageTypeDto typeDto = TryParseLegacyType(message);
+            string legacyType = typeDto == null || string.IsNullOrWhiteSpace(typeDto.type) ? string.Empty : typeDto.type.Trim();
+            return global::MetaverseDedicatedMessageTypes.ReadMirrorLikeRoute(legacyType);
+        }
+
+        private string ReadPayloadJsonForLog(string message)
+        {
+            if (TryParseEnvelope(message, out RealtimeEnvelope envelope)) return envelope.payloadJson;
+            return message ?? string.Empty;
+        }
+
+        private string SafeTrim(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
         }
 
         private bool Fail(string error)

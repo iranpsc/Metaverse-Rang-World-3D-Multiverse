@@ -9,6 +9,7 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
 
     [Header("Smoke Test")]
     [SerializeField] private string prefabId = MetaverseNetworkBehaviourSmokePrefabInstaller.DefaultPrefabId;
+    [SerializeField] private bool useNetworkServerApi = true;
     [SerializeField] private int requiredPlayersBeforeSpawn = 1;
     [SerializeField] private int requiredPlayersBeforeSnapshot = 3;
     [SerializeField] private float initialDelaySeconds = 5f;
@@ -22,7 +23,13 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
 
     private bool started;
     private bool snapshotPlayerTargetLogged;
+    private string lastRejectReason = string.Empty;
     private MetaverseNetworkIdentity spawnedIdentity;
+
+    public bool IsStarted => started;
+    public bool SnapshotPlayerTargetLogged => snapshotPlayerTargetLogged;
+    public string LastRejectReason => lastRejectReason;
+    public MetaverseNetworkIdentity SpawnedIdentity => spawnedIdentity;
 
     public void Bind(MetaverseSpawnManager manager)
     {
@@ -76,7 +83,8 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
         if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
         if (spawnManager == null)
         {
-            Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke skipped. Spawn manager is missing.");
+            SetRejectReason("spawn_manager_missing");
+            Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke skipped. Spawn manager is missing. | phase=33A");
             yield break;
         }
 
@@ -88,18 +96,27 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Waiting for spawn players | required=" + spawnRequiredPlayers);
+            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Waiting for spawn players | phase=33A | mirrorRoute=NetworkServer.SpawnPrefab" +
+                      " | required=" + spawnRequiredPlayers);
         }
 
+        float spawnWaitStartedAt = Time.realtimeSinceStartup;
         float lastSpawnWaitLogAt = Time.realtimeSinceStartup;
         while (GetCurrentPlayers() < spawnRequiredPlayers)
         {
+            if (maxWaitBeforeSpawnSeconds > 0f && Time.realtimeSinceStartup - spawnWaitStartedAt > maxWaitBeforeSpawnSeconds)
+            {
+                SetRejectReason("spawn_wait_timeout");
+                Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Spawn wait timed out | phase=33A | required=" + spawnRequiredPlayers + " | current=" + GetCurrentPlayers());
+                yield break;
+            }
+
             if (logMessages && Time.realtimeSinceStartup - lastSpawnWaitLogAt >= 30f)
             {
                 lastSpawnWaitLogAt = Time.realtimeSinceStartup;
-                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Still waiting for spawn players | required=" + spawnRequiredPlayers +
-                          " | current=" + GetCurrentPlayers() +
-                          " | noTimeout=true");
+                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Still waiting for spawn players | phase=33A" +
+                          " | required=" + spawnRequiredPlayers +
+                          " | current=" + GetCurrentPlayers());
             }
 
             yield return new WaitForSeconds(1f);
@@ -107,29 +124,35 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Spawn player target reached | required=" + spawnRequiredPlayers +
+            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Spawn player target reached | phase=33A | required=" + spawnRequiredPlayers +
                       " | current=" + GetCurrentPlayers());
         }
 
         yield return new WaitForSeconds(Mathf.Max(0f, initialDelaySeconds));
 
-        bool spawned = spawnManager.TrySpawnPrefab(
-            safePrefabId,
-            new Vector3(3f, 1.5f, 0f),
-            Quaternion.identity,
-            -1,
-            out spawnedIdentity);
+        bool spawned;
+        if (useNetworkServerApi)
+        {
+            spawned = MetaverseNetworkServer.SpawnPrefab(safePrefabId, new Vector3(3f, 1.5f, 0f), Quaternion.identity, out spawnedIdentity);
+        }
+        else
+        {
+            spawned = spawnManager.TrySpawnPrefab(safePrefabId, new Vector3(3f, 1.5f, 0f), Quaternion.identity, -1, out spawnedIdentity);
+        }
 
         if (!spawned || spawnedIdentity == null)
         {
-            Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke spawn failed | prefabId=" + safePrefabId);
+            SetRejectReason("spawn_failed");
+            Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke spawn failed | phase=33A | prefabId=" + safePrefabId +
+                             " | managerReject=" + (spawnManager != null ? spawnManager.LastSpawnRejectReason : string.Empty));
             yield break;
         }
 
         float spawnedAt = Time.realtimeSinceStartup;
         if (logMessages)
         {
-            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke spawn issued | netId=" + spawnedIdentity.NetId +
+            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke spawn issued | phase=33A | mirrorRoute=NetworkServer.SpawnPrefab" +
+                      " | netId=" + spawnedIdentity.NetId +
                       " | prefabId=" + spawnedIdentity.PrefabId +
                       " | expectedCallbacks=OnStartServer,OnStartAuthority,OnNetworkSpawn,OnStartClient" +
                       " | snapshotRequiredPlayers=" + snapshotRequiredPlayers);
@@ -137,21 +160,28 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Waiting for snapshot players | required=" + snapshotRequiredPlayers +
+            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Waiting for snapshot players | phase=33A | required=" + snapshotRequiredPlayers +
                       " | current=" + GetCurrentPlayers() +
                       " | activeNetId=" + spawnedIdentity.NetId);
         }
 
+        float snapshotWaitStartedAt = Time.realtimeSinceStartup;
         float lastSnapshotWaitLogAt = Time.realtimeSinceStartup;
         while (spawnedIdentity != null && spawnedIdentity.gameObject != null && GetCurrentPlayers() < snapshotRequiredPlayers)
         {
+            if (maxSnapshotWaitSeconds > 0f && Time.realtimeSinceStartup - snapshotWaitStartedAt > maxSnapshotWaitSeconds)
+            {
+                Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Snapshot wait timed out | phase=33A | required=" + snapshotRequiredPlayers + " | current=" + GetCurrentPlayers());
+                break;
+            }
+
             if (logMessages && Time.realtimeSinceStartup - lastSnapshotWaitLogAt >= 15f)
             {
                 lastSnapshotWaitLogAt = Time.realtimeSinceStartup;
-                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Still waiting for snapshot players | required=" + snapshotRequiredPlayers +
+                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Still waiting for snapshot players | phase=33A" +
+                          " | required=" + snapshotRequiredPlayers +
                           " | current=" + GetCurrentPlayers() +
-                          " | activeNetId=" + spawnedIdentity.NetId +
-                          " | noTimeout=true");
+                          " | activeNetId=" + spawnedIdentity.NetId);
             }
 
             yield return new WaitForSeconds(1f);
@@ -163,7 +193,8 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
             snapshotPlayerTargetLogged = true;
             if (logMessages)
             {
-                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Snapshot player target reached | required=" + snapshotRequiredPlayers +
+                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Snapshot player target reached | phase=33A" +
+                          " | required=" + snapshotRequiredPlayers +
                           " | current=" + GetCurrentPlayers() +
                           " | activeNetId=" + spawnedIdentity.NetId +
                           " | expectedClientSnapshotCallbacks=OnStartClient,OnNetworkSpawn");
@@ -171,7 +202,8 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Snapshot player target was not reached because spawned identity was removed | required=" + snapshotRequiredPlayers +
+            Debug.LogWarning("[MetaverseNetworkBehaviourLifecycleSmokeController] Snapshot player target was not reached | phase=33A" +
+                             " | required=" + snapshotRequiredPlayers +
                              " | current=" + GetCurrentPlayers());
         }
 
@@ -181,34 +213,50 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
         {
             if (logMessages)
             {
-                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Holding probe for minimum alive time | remainingSeconds=" + remainingMinimumAlive.ToString("0.0") +
+                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Holding probe for minimum alive time | phase=33A" +
+                          " | remainingSeconds=" + remainingMinimumAlive.ToString("0.0") +
                           " | activeNetId=" + spawnedIdentity.NetId);
             }
 
             yield return new WaitForSeconds(remainingMinimumAlive);
         }
 
-        if (snapshotPlayerTargetReached)
-        {
-            yield return new WaitForSeconds(Mathf.Max(0f, despawnDelayAfterSnapshotPlayersSeconds));
-        }
+        if (snapshotPlayerTargetReached) yield return new WaitForSeconds(Mathf.Max(0f, despawnDelayAfterSnapshotPlayersSeconds));
 
         if (spawnedIdentity != null && spawnedIdentity.gameObject != null)
         {
             int netId = spawnedIdentity.NetId;
-            spawnManager.Despawn(spawnedIdentity.gameObject, "network_behaviour_lifecycle_snapshot_smoke_completed");
+            if (useNetworkServerApi) MetaverseNetworkServer.Despawn(spawnedIdentity, "phase33A_network_behaviour_lifecycle_smoke_completed");
+            else spawnManager.Despawn(spawnedIdentity.gameObject, "phase33A_network_behaviour_lifecycle_smoke_completed");
+
             if (logMessages)
             {
-                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke despawn issued | netId=" + netId +
+                Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke despawn issued | phase=33A | mirrorRoute=NetworkServer.Despawn" +
+                          " | netId=" + netId +
                           " | snapshotPlayerTargetReached=" + BoolText(snapshotPlayerTargetReached) +
                           " | expectedCallbacks=OnNetworkDespawn,OnStopAuthority,OnStopServer,OnStopClient");
             }
         }
 
+        SetRejectReason(string.Empty);
         if (logMessages)
         {
-            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke flow completed | phase=19.1 | expected=network_behaviour_snapshot_callbacks | snapshotPlayerTargetReached=" + BoolText(snapshotPlayerTargetLogged));
+            Debug.Log("[MetaverseNetworkBehaviourLifecycleSmokeController] Smoke flow completed | phase=33A | expected=NetworkBehaviour lifecycle callbacks" +
+                      " | snapshotPlayerTargetReached=" + BoolText(snapshotPlayerTargetLogged) +
+                      " | summary=" + GetSmokeDebugSummary());
         }
+    }
+
+    public string GetSmokeDebugSummary()
+    {
+        MetaverseNetworkBehaviourLifecycleProbe probe = spawnedIdentity != null ? spawnedIdentity.GetComponent<MetaverseNetworkBehaviourLifecycleProbe>() : null;
+        return "Phase33A NetworkBehaviourLifecycleSmoke" +
+               " | started=" + started +
+               " | activeNetId=" + (spawnedIdentity != null ? spawnedIdentity.NetId : 0) +
+               " | snapshotTargetLogged=" + snapshotPlayerTargetLogged +
+               " | players=" + GetCurrentPlayers() +
+               " | lastReject=" + Safe(lastRejectReason) +
+               " | probe=" + (probe != null ? probe.GetSmokeDebugSummary() : "null");
     }
 
     private int GetCurrentPlayers()
@@ -221,8 +269,18 @@ public class MetaverseNetworkBehaviourLifecycleSmokeController : MonoBehaviour
         return registry != null ? registry.CurrentPlayerCount : 0;
     }
 
+    private void SetRejectReason(string reason)
+    {
+        lastRejectReason = Safe(reason);
+    }
+
     private string BoolText(bool value)
     {
         return value ? "true" : "false";
+    }
+
+    private string Safe(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
     }
 }

@@ -17,4 +17,50 @@ MonoBehaviour:
   dontDestroyOnLoad: 1
   spawnManagerObjectName: MetaverseSpawnManager
   spawnedRootObjectName: Metaverse_Spawned_Root
+  autoInstallSpawnNetworkBridge: 1
+  spawnBridgeObjectName: MetaverseSpawnNetworkBridge
+  autoInstallNetworkRpcBridge: 1
+  networkRpcBridgeObjectName: MetaverseNetworkRpcBridge
   logInstall: 1
+  enableRuntimeSpawnTestPrefab: 0
+  enableSpawnRouteSmokeTest: 0
+  enableClientSpawnRouteSmokeReporter: 0
+  enableNetworkBehaviourLifecycleSmokeTest: 0
+  networkBehaviourLifecycleSmokePrefabId: metaverse_network_behaviour_probe
+  networkBehaviourLifecycleSmokeSpawnRequiredPlayers: 1
+  networkBehaviourLifecycleSmokeSnapshotRequiredPlayers: 3
+  networkBehaviourLifecycleSmokeInitialDelaySeconds: 5
+  networkBehaviourLifecycleSmokeMinimumAliveSeconds: 25
+  networkBehaviourLifecycleSmokeMaxWaitBeforeSpawnSeconds: 120
+  networkBehaviourLifecycleSmokeMaxSnapshotWaitSeconds: 180
+  networkBehaviourLifecycleSmokeDespawnDelayAfterSnapshotSeconds: 8
+  enableNetworkRpcSmokeTest: 1
+  networkRpcSmokePrefabId: metaverse_network_rpc_probe
+  networkRpcSmokeSpawnRequiredPlayers: 1
+  networkRpcSmokeSnapshotRequiredPlayers: 0
+  networkRpcSmokeInitialDelaySeconds: 5
+  networkRpcSmokeMinimumAliveSeconds: 30
+  networkRpcSmokeDespawnDelayAfterSnapshotSeconds: 10
+  autoInstallNetworkStateSyncBridge: 0
+  networkStateSyncBridgeObjectName: MetaverseNetworkStateSyncBridge
+  enableNetworkStateSyncSmokeTest: 0
+  networkStateSyncSmokePrefabId: metaverse_network_state_sync_probe
+  networkStateSyncSmokeSpawnRequiredPlayers: 1
+  networkStateSyncSmokeSnapshotRequiredPlayers: 3
+  networkStateSyncSmokeInitialDelaySeconds: 5
+  networkStateSyncSmokeMinimumAliveSeconds: 30
+  networkStateSyncSmokeUpdateDelayAfterSnapshotSeconds: 3
+  networkStateSyncSmokeDespawnDelayAfterSnapshotSeconds: 10
+  autoInstallNetworkOwnershipBridge: 0
+  networkOwnershipBridgeObjectName: MetaverseNetworkOwnershipBridge
+  autoInstallNetworkPlayerObjectServer: 1
+  networkPlayerObjectServerObjectName: MetaverseNetworkPlayerObjectServer
+  enableNetworkPlayerObjectSmokeTest: 0
+  networkPlayerObjectSmokePrefabId: metaverse_player_object_probe
+  networkPlayerObjectSmokeRequiredPlayers: 3
+  autoInstallNetworkPlayerMovementBridge: 0
+  networkPlayerMovementBridgeObjectName: MetaverseNetworkPlayerMovementBridge
+  enableNetworkPlayerMovementSmokeTest: 0
+  networkPlayerMovementSmokeRequiredPlayers: 3
+  networkPlayerMovementSpeed: 2.5
+  networkPlayerMovementMaxDeltaTime: 0.25

@@ -11,20 +11,15 @@ public static class MetaverseNetworkBehaviourSmokePrefabInstaller
         if (spawnManager == null) return null;
         string safePrefabId = string.IsNullOrWhiteSpace(prefabId) ? DefaultPrefabId : prefabId.Trim();
 
-        MetaverseNetworkPrefabRegistry registry = spawnManager.PrefabRegistry;
-        if (registry == null)
-        {
-            registry = ScriptableObject.CreateInstance<MetaverseNetworkPrefabRegistry>();
-            registry.name = RuntimeRegistryName;
-            spawnManager.SetPrefabRegistry(registry);
-        }
+        MetaverseNetworkPrefabRegistry registry = EnsureRegistry(spawnManager);
+        if (registry == null) return null;
 
         if (registry.TryGetPrefab(safePrefabId, out GameObject existingPrefab) && existingPrefab != null)
         {
             EnsureProbeComponents(existingPrefab, safePrefabId);
             if (logMessages)
             {
-                Debug.Log("[MetaverseNetworkBehaviourSmokePrefabInstaller] Runtime probe prefab already registered | prefabId=" + safePrefabId);
+                Debug.Log("[MetaverseNetworkBehaviourSmokePrefabInstaller] Runtime probe prefab already registered | phase=33A | prefabId=" + safePrefabId);
             }
             return existingPrefab;
         }
@@ -47,11 +42,30 @@ public static class MetaverseNetworkBehaviourSmokePrefabInstaller
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseNetworkBehaviourSmokePrefabInstaller] Runtime probe prefab registered | prefabId=" + safePrefabId +
+            Debug.Log("[MetaverseNetworkBehaviourSmokePrefabInstaller] Runtime probe prefab registered | phase=33A | mirrorRoute=NetworkServer.SpawnPrefab" +
+                      " | prefabId=" + safePrefabId +
                       " | registry=" + registry.name);
         }
 
         return template;
+    }
+
+    public static bool IsRuntimeProbePrefabInstalled(MetaverseSpawnManager spawnManager, string prefabId)
+    {
+        if (spawnManager == null || spawnManager.PrefabRegistry == null) return false;
+        string safePrefabId = string.IsNullOrWhiteSpace(prefabId) ? DefaultPrefabId : prefabId.Trim();
+        return spawnManager.PrefabRegistry.TryGetPrefab(safePrefabId, out GameObject prefab) && prefab != null;
+    }
+
+    private static MetaverseNetworkPrefabRegistry EnsureRegistry(MetaverseSpawnManager spawnManager)
+    {
+        if (spawnManager == null) return null;
+        MetaverseNetworkPrefabRegistry registry = spawnManager.PrefabRegistry;
+        if (registry != null) return registry;
+        registry = ScriptableObject.CreateInstance<MetaverseNetworkPrefabRegistry>();
+        registry.name = RuntimeRegistryName;
+        spawnManager.SetPrefabRegistry(registry);
+        return registry;
     }
 
     private static void EnsureProbeComponents(GameObject obj, string prefabId)

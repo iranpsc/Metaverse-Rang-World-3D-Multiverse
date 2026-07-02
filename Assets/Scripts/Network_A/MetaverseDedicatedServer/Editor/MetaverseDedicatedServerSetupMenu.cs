@@ -27,6 +27,14 @@ public static class MetaverseDedicatedServerSetupMenu
         config.SetSpawnBridgeObjectName("MetaverseSpawnNetworkBridge");
         config.SetAutoInstallNetworkRpcBridge(true);
         config.SetNetworkRpcBridgeObjectName("MetaverseNetworkRpcBridge");
+        config.SetAutoInstallNetworkStateSyncBridge(true);
+        config.SetNetworkStateSyncBridgeObjectName("MetaverseNetworkStateSyncBridge");
+        config.SetAutoInstallNetworkOwnershipBridge(true);
+        config.SetNetworkOwnershipBridgeObjectName("MetaverseNetworkOwnershipBridge");
+        config.SetAutoInstallNetworkPlayerObjectServer(true);
+        config.SetNetworkPlayerObjectServerObjectName("MetaverseNetworkPlayerObjectServer");
+        config.SetAutoInstallNetworkPlayerMovementBridge(true);
+        config.SetNetworkPlayerMovementBridgeObjectName("MetaverseNetworkPlayerMovementBridge");
         config.SetLogInstall(true);
         config.SetEnableRuntimeSpawnTestPrefab(false);
         config.SetEnableSpawnRouteSmokeTest(false);
@@ -47,12 +55,74 @@ public static class MetaverseDedicatedServerSetupMenu
         config.SetNetworkRpcSmokeInitialDelaySeconds(5f);
         config.SetNetworkRpcSmokeMinimumAliveSeconds(30f);
         config.SetNetworkRpcSmokeDespawnDelayAfterSnapshotSeconds(10f);
+        config.SetEnableNetworkStateSyncSmokeTest(false);
+        config.SetNetworkStateSyncSmokePrefabId("metaverse_network_state_sync_probe");
+        config.SetNetworkStateSyncSmokeSpawnRequiredPlayers(1);
+        config.SetNetworkStateSyncSmokeSnapshotRequiredPlayers(3);
+        config.SetNetworkStateSyncSmokeInitialDelaySeconds(5f);
+        config.SetNetworkStateSyncSmokeMinimumAliveSeconds(30f);
+        config.SetNetworkStateSyncSmokeUpdateDelayAfterSnapshotSeconds(3f);
+        config.SetNetworkStateSyncSmokeDespawnDelayAfterSnapshotSeconds(10f);
+        config.SetEnableNetworkPlayerObjectSmokeTest(false);
+        config.SetNetworkPlayerObjectSmokePrefabId("metaverse_player_object_probe");
+        config.SetNetworkPlayerObjectSmokeRequiredPlayers(3);
+        config.SetEnableNetworkPlayerMovementSmokeTest(false);
+        config.SetNetworkPlayerMovementSmokeRequiredPlayers(3);
+        config.SetNetworkPlayerMovementSpeed(2.5f);
+        config.SetNetworkPlayerMovementMaxDeltaTime(0.25f);
 
         EditorUtility.SetDirty(registry);
         EditorUtility.SetDirty(config);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log("[MetaverseDedicatedServerSetupMenu] Runtime assets created or updated.");
+        Debug.Log("[MetaverseDedicatedServerSetupMenu] Runtime assets created or updated for Phase33A.");
+    }
+
+    [MenuItem("Metaverse/Dedicated Server/Setup/Enable Phase 33A Smoke Tests")]
+    public static void EnablePhase33ASmokeTests()
+    {
+        CreateOrUpdateRuntimeAssets();
+        MetaverseDedicatedServerRuntimeConfig config = AssetDatabase.LoadAssetAtPath<MetaverseDedicatedServerRuntimeConfig>(RuntimeConfigPath);
+        if (config == null)
+        {
+            Debug.LogError("[MetaverseDedicatedServerSetupMenu] Runtime config was not found.");
+            return;
+        }
+
+        config.SetEnableSpawnRouteSmokeTest(true);
+        config.SetEnableClientSpawnRouteSmokeReporter(true);
+        config.SetEnableNetworkBehaviourLifecycleSmokeTest(true);
+        config.SetEnableNetworkRpcSmokeTest(true);
+        config.SetEnableNetworkStateSyncSmokeTest(true);
+        config.SetEnableNetworkPlayerObjectSmokeTest(true);
+        config.SetEnableNetworkPlayerMovementSmokeTest(true);
+        EditorUtility.SetDirty(config);
+        AssetDatabase.SaveAssets();
+        Debug.Log("[MetaverseDedicatedServerSetupMenu] Phase33A smoke tests enabled.");
+    }
+
+    [MenuItem("Metaverse/Dedicated Server/Setup/Disable Phase 33A Smoke Tests")]
+    public static void DisablePhase33ASmokeTests()
+    {
+        CreateOrUpdateRuntimeAssets();
+        MetaverseDedicatedServerRuntimeConfig config = AssetDatabase.LoadAssetAtPath<MetaverseDedicatedServerRuntimeConfig>(RuntimeConfigPath);
+        if (config == null)
+        {
+            Debug.LogError("[MetaverseDedicatedServerSetupMenu] Runtime config was not found.");
+            return;
+        }
+
+        config.SetEnableRuntimeSpawnTestPrefab(false);
+        config.SetEnableSpawnRouteSmokeTest(false);
+        config.SetEnableClientSpawnRouteSmokeReporter(false);
+        config.SetEnableNetworkBehaviourLifecycleSmokeTest(false);
+        config.SetEnableNetworkRpcSmokeTest(false);
+        config.SetEnableNetworkStateSyncSmokeTest(false);
+        config.SetEnableNetworkPlayerObjectSmokeTest(false);
+        config.SetEnableNetworkPlayerMovementSmokeTest(false);
+        EditorUtility.SetDirty(config);
+        AssetDatabase.SaveAssets();
+        Debug.Log("[MetaverseDedicatedServerSetupMenu] Phase33A smoke tests disabled.");
     }
 
     [MenuItem("Metaverse/Dedicated Server/Setup/Scan And Register Network_A Prefabs")]
@@ -84,7 +154,7 @@ public static class MetaverseDedicatedServerSetupMenu
         registry.ValidateRegistry();
         EditorUtility.SetDirty(registry);
         AssetDatabase.SaveAssets();
-        Debug.Log($"[MetaverseDedicatedServerSetupMenu] Registered prefabs with MetaverseNetworkIdentity | count={count}");
+        Debug.Log($"[MetaverseDedicatedServerSetupMenu] Registered prefabs with MetaverseNetworkIdentity | count={count} | {registry.GetDebugSummary()}");
     }
 
     [MenuItem("Metaverse/Dedicated Server/Setup/Add Identity To Selected Prefabs And Register")]
@@ -124,7 +194,7 @@ public static class MetaverseDedicatedServerSetupMenu
         EditorUtility.SetDirty(registry);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log($"[MetaverseDedicatedServerSetupMenu] Selected prefabs processed | changed={changedCount} | registered={registeredCount}");
+        Debug.Log($"[MetaverseDedicatedServerSetupMenu] Selected prefabs processed | changed={changedCount} | registered={registeredCount} | {registry.GetDebugSummary()}");
     }
 
     private static bool AssignPrefabIdInsidePrefab(string path, string prefabId, bool addIdentityIfMissing)

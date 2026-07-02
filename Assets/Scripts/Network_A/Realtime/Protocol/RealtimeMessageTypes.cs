@@ -35,6 +35,10 @@ namespace Network_A.Realtime.Protocol
         public const string Command = "command";
         public const string ClientRpc = "client_rpc";
         public const string TargetRpc = "target_rpc";
+        public const string SyncVar = "sync_var";
+        public const string NetworkTransform = "network_transform";
+        public const string Ownership = "ownership";
+        public const string PlayerInput = "player_input";
 
         public const string ChatMessage = "message";
 

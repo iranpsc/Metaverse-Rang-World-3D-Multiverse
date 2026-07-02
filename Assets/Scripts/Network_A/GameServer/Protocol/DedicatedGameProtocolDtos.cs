@@ -120,6 +120,37 @@ namespace Network_A.GameServer.Protocol
         public string message;
     }
 
+
+
+    [Serializable]
+    public class DedicatedMirrorLikeRouteDto
+    {
+        public string phase;
+        public string mirrorRoute;
+        public string type;
+        public string roomId;
+        public string serverId;
+        public string connectionId;
+        public string userId;
+        public string playerId;
+        public string reason;
+        public long ts;
+    }
+
+    [Serializable]
+    public class DedicatedMirrorLikeAckDto
+    {
+        public string type;
+        public bool ok;
+        public string reason;
+        public string mirrorRoute;
+        public string requestId;
+        public string connectionId;
+        public string userId;
+        public string playerId;
+        public long ts;
+    }
+
     /*
     توضیح مکتوب فایل:
     این فایل دی تی اوهای پیام های ساده بین کلاینت و یونیتی ددیکیتد سرور را نگه می دارد.

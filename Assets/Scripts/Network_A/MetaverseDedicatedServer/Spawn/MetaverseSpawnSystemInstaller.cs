@@ -7,10 +7,15 @@ public static class MetaverseSpawnSystemInstaller
     private const string DefaultRootName = "Metaverse_Spawned_Root";
     private const string DefaultBridgeName = "MetaverseSpawnNetworkBridge";
     private const string DefaultRpcBridgeName = "MetaverseNetworkRpcBridge";
+    private const string DefaultStateSyncBridgeName = "MetaverseNetworkStateSyncBridge";
+    private const string DefaultOwnershipBridgeName = "MetaverseNetworkOwnershipBridge";
+    private const string DefaultPlayerObjectServerName = "MetaverseNetworkPlayerObjectServer";
+    private const string DefaultPlayerMovementBridgeName = "MetaverseNetworkPlayerMovementBridge";
     private const string DefaultSmokeControllerName = "MetaverseServerSpawnRouteSmokeController";
     private const string DefaultClientReporterName = "MetaverseClientSpawnRouteSmokeReporter";
     private const string DefaultNetworkBehaviourSmokeName = "MetaverseNetworkBehaviourLifecycleSmokeController";
     private const string DefaultNetworkRpcSmokeName = "MetaverseNetworkRpcSmokeController";
+    private const string DefaultNetworkStateSyncSmokeName = "MetaverseNetworkStateSyncSmokeController";
 
     public static MetaverseSpawnManager Install(MetaverseDedicatedServerRuntimeConfig config)
     {
@@ -21,6 +26,57 @@ public static class MetaverseSpawnSystemInstaller
         manager.SetPrefabRegistry(registry);
         manager.SetSpawnedRoot(FindOrCreateSpawnedRoot(config));
 
+        InstallRuntimePrefabs(manager, config);
+        bool shouldRebindGameplayRouters = InstallMirrorLikeGameplayApiBridges(manager, config);
+        InstallSmokeControllers(manager, config);
+        InstallPlayerObjectServer(manager, config);
+        InstallClientReporter(manager, config);
+
+        if (shouldRebindGameplayRouters) RebindGameplayRouters();
+        if (config != null && config.DontDestroyOnLoad) Object.DontDestroyOnLoad(manager.gameObject);
+        if (config != null && config.LogInstall) Debug.Log(GetInstallSummary(manager, config));
+        return manager;
+    }
+
+    public static MetaverseSpawnManager InstallFromResources()
+    {
+        return Install(MetaverseDedicatedServerRuntimeConfig.LoadDefault());
+    }
+
+    public static MetaverseSpawnManager InstallMirrorLikeGameplayApi(MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return Install(config);
+    }
+
+    public static MetaverseSpawnManager InstallMirrorLikeGameplayApiFromResources()
+    {
+        return Install(MetaverseDedicatedServerRuntimeConfig.LoadDefault());
+    }
+
+    public static bool IsMirrorLikeGameplayApiInstalled()
+    {
+        return MetaverseSpawnManager.Instance != null &&
+               HasSceneComponent<MetaverseSpawnNetworkBridge>() &&
+               MetaverseNetworkRpcBridge.Instance != null &&
+               MetaverseNetworkStateSyncBridge.Instance != null &&
+               MetaverseNetworkOwnershipBridge.Instance != null &&
+               MetaverseNetworkPlayerMovementBridge.Instance != null;
+    }
+
+    public static string GetMirrorLikeGameplayApiInstallSummary()
+    {
+        return "Phase33A Mirror-Like API" +
+               " | spawnManager=" + BoolText(MetaverseSpawnManager.Instance != null) +
+               " | spawnBridge=" + BoolText(HasSceneComponent<MetaverseSpawnNetworkBridge>()) +
+               " | rpcBridge=" + BoolText(MetaverseNetworkRpcBridge.Instance != null) +
+               " | stateSyncBridge=" + BoolText(MetaverseNetworkStateSyncBridge.Instance != null) +
+               " | ownershipBridge=" + BoolText(MetaverseNetworkOwnershipBridge.Instance != null) +
+               " | movementBridge=" + BoolText(MetaverseNetworkPlayerMovementBridge.Instance != null) +
+               " | installed=" + BoolText(IsMirrorLikeGameplayApiInstalled());
+    }
+
+    private static void InstallRuntimePrefabs(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
+    {
         if (ShouldInstallRuntimeTestPrefab(config))
         {
             MetaverseRuntimeSpawnTestPrefabInstaller.InstallRuntimeTestPrefab(manager, config == null || config.LogInstall);
@@ -42,9 +98,29 @@ public static class MetaverseSpawnSystemInstaller
                 config == null || config.LogInstall);
         }
 
-        bool shouldRebindGameplayRouters = false;
+        if (ShouldInstallNetworkStateSyncSmokeTest(config))
+        {
+            MetaverseNetworkStateSyncSmokePrefabInstaller.InstallRuntimeStateSyncProbePrefab(
+                manager,
+                config != null ? config.NetworkStateSyncSmokePrefabId : MetaverseNetworkStateSyncSmokePrefabInstaller.DefaultPrefabId,
+                config == null || config.LogInstall);
+        }
 
-        if (config != null && config.AutoInstallSpawnNetworkBridge)
+        if (ShouldInstallNetworkPlayerObjectRuntimePrefab(config))
+        {
+            MetaverseNetworkPlayerObjectSmokePrefabInstaller.InstallRuntimePlayerObjectProbePrefab(
+                manager,
+                config != null ? config.NetworkPlayerObjectSmokePrefabId : MetaverseNetworkPlayerObjectSmokePrefabInstaller.DefaultPrefabId,
+                config == null || config.LogInstall);
+        }
+    }
+
+    private static bool InstallMirrorLikeGameplayApiBridges(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
+    {
+        bool shouldRebindGameplayRouters = false;
+        if (config == null) return false;
+
+        if (config.AutoInstallSpawnNetworkBridge)
         {
             MetaverseSpawnNetworkBridge bridge = FindOrCreateSpawnNetworkBridge(config);
             bridge.Bind(manager);
@@ -52,7 +128,7 @@ public static class MetaverseSpawnSystemInstaller
             shouldRebindGameplayRouters = true;
         }
 
-        if (config != null && config.AutoInstallNetworkRpcBridge)
+        if (config.AutoInstallNetworkRpcBridge)
         {
             MetaverseNetworkRpcBridge rpcBridge = FindOrCreateNetworkRpcBridge(config);
             rpcBridge.Bind(manager);
@@ -60,64 +136,72 @@ public static class MetaverseSpawnSystemInstaller
             shouldRebindGameplayRouters = true;
         }
 
-        if (shouldRebindGameplayRouters)
+        if (config.AutoInstallNetworkStateSyncBridge)
         {
-            RebindGameplayRouters();
+            MetaverseNetworkStateSyncBridge stateSyncBridge = FindOrCreateNetworkStateSyncBridge(config);
+            stateSyncBridge.Bind(manager);
+            if (config.DontDestroyOnLoad) Object.DontDestroyOnLoad(stateSyncBridge.gameObject);
+            shouldRebindGameplayRouters = true;
         }
 
+        if (config.AutoInstallNetworkOwnershipBridge)
+        {
+            MetaverseNetworkOwnershipBridge ownershipBridge = FindOrCreateNetworkOwnershipBridge(config);
+            ownershipBridge.Bind(manager);
+            if (config.DontDestroyOnLoad) Object.DontDestroyOnLoad(ownershipBridge.gameObject);
+            shouldRebindGameplayRouters = true;
+        }
+
+        if (config.AutoInstallNetworkPlayerMovementBridge)
+        {
+            MetaverseNetworkPlayerMovementBridge movementBridge = FindOrCreateNetworkPlayerMovementBridge(config);
+            movementBridge.Bind(manager, config);
+            if (config.DontDestroyOnLoad) Object.DontDestroyOnLoad(movementBridge.gameObject);
+            shouldRebindGameplayRouters = true;
+        }
+
+        return shouldRebindGameplayRouters;
+    }
+
+    private static void InstallSmokeControllers(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
+    {
         if (ShouldInstallServerSmokeTest(config))
         {
             MetaverseServerSpawnRouteSmokeController smokeController = FindOrCreateServerSpawnRouteSmokeController(manager);
-            if (config != null && config.DontDestroyOnLoad && smokeController != null)
-            {
-                Object.DontDestroyOnLoad(smokeController.gameObject);
-            }
+            if (config != null && config.DontDestroyOnLoad && smokeController != null) Object.DontDestroyOnLoad(smokeController.gameObject);
         }
 
         if (ShouldInstallNetworkBehaviourSmokeServerController(config))
         {
             MetaverseNetworkBehaviourLifecycleSmokeController networkBehaviourSmokeController = FindOrCreateNetworkBehaviourSmokeController(manager);
-            if (config != null && config.DontDestroyOnLoad && networkBehaviourSmokeController != null)
-            {
-                Object.DontDestroyOnLoad(networkBehaviourSmokeController.gameObject);
-            }
+            if (config != null && config.DontDestroyOnLoad && networkBehaviourSmokeController != null) Object.DontDestroyOnLoad(networkBehaviourSmokeController.gameObject);
         }
 
         if (ShouldInstallNetworkRpcSmokeServerController(config))
         {
             MetaverseNetworkRpcSmokeController networkRpcSmokeController = FindOrCreateNetworkRpcSmokeController(manager, config);
-            if (config != null && config.DontDestroyOnLoad && networkRpcSmokeController != null)
-            {
-                Object.DontDestroyOnLoad(networkRpcSmokeController.gameObject);
-            }
+            if (config != null && config.DontDestroyOnLoad && networkRpcSmokeController != null) Object.DontDestroyOnLoad(networkRpcSmokeController.gameObject);
         }
 
-        if (!ShouldInstallServerSmokeTest(config) && ShouldInstallClientSmokeReporter(config))
+        if (ShouldInstallNetworkStateSyncSmokeServerController(config))
         {
-            MetaverseClientSpawnRouteSmokeReporter reporter = FindOrCreateClientSpawnRouteSmokeReporter(manager);
-            if (config != null && config.DontDestroyOnLoad && reporter != null)
-            {
-                Object.DontDestroyOnLoad(reporter.gameObject);
-            }
+            MetaverseNetworkStateSyncSmokeController networkStateSyncSmokeController = FindOrCreateNetworkStateSyncSmokeController(manager, config);
+            if (config != null && config.DontDestroyOnLoad && networkStateSyncSmokeController != null) Object.DontDestroyOnLoad(networkStateSyncSmokeController.gameObject);
         }
-
-        if (config != null && config.DontDestroyOnLoad) Object.DontDestroyOnLoad(manager.gameObject);
-        if (config != null && config.LogInstall)
-        {
-            Debug.Log("[MetaverseSpawnSystemInstaller] Spawn system installed | registry=" +
-                      (manager.PrefabRegistry != null ? manager.PrefabRegistry.name : "null") +
-                      " | smokeTest=" + BoolText(ShouldInstallServerSmokeTest(config)) +
-                      " | clientReporter=" + BoolText(ShouldInstallClientSmokeReporter(config)) +
-                      " | networkBehaviourSmoke=" + BoolText(ShouldInstallNetworkBehaviourSmokeTest(config)) +
-                      " | networkRpcBridge=" + BoolText(config.AutoInstallNetworkRpcBridge) +
-                      " | networkRpcSmoke=" + BoolText(ShouldInstallNetworkRpcSmokeTest(config)));
-        }
-        return manager;
     }
 
-    public static MetaverseSpawnManager InstallFromResources()
+    private static void InstallPlayerObjectServer(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
     {
-        return Install(MetaverseDedicatedServerRuntimeConfig.LoadDefault());
+        if (!ShouldInstallNetworkPlayerObjectServer(config)) return;
+        MetaverseNetworkPlayerObjectServer playerObjectServer = FindOrCreateNetworkPlayerObjectServer(manager, config);
+        if (config != null && config.DontDestroyOnLoad && playerObjectServer != null) Object.DontDestroyOnLoad(playerObjectServer.gameObject);
+    }
+
+    private static void InstallClientReporter(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
+    {
+        if (ShouldInstallServerSmokeTest(config) || !ShouldInstallClientSmokeReporter(config)) return;
+        MetaverseClientSpawnRouteSmokeReporter reporter = FindOrCreateClientSpawnRouteSmokeReporter(manager);
+        if (config != null && config.DontDestroyOnLoad && reporter != null) Object.DontDestroyOnLoad(reporter.gameObject);
     }
 
     private static bool ShouldInstallRuntimeTestPrefab(MetaverseDedicatedServerRuntimeConfig config)
@@ -148,6 +232,36 @@ public static class MetaverseSpawnSystemInstaller
     private static bool ShouldInstallNetworkRpcSmokeServerController(MetaverseDedicatedServerRuntimeConfig config)
     {
         return ShouldInstallNetworkRpcSmokeTest(config) && Application.isBatchMode;
+    }
+
+    private static bool ShouldInstallNetworkStateSyncSmokeTest(MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return config != null && config.EnableNetworkStateSyncSmokeTest;
+    }
+
+    private static bool ShouldInstallNetworkPlayerObjectSmokeTest(MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return config != null && config.EnableNetworkPlayerObjectSmokeTest;
+    }
+
+    private static bool ShouldInstallNetworkPlayerMovementSmokeTest(MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return config != null && config.EnableNetworkPlayerMovementSmokeTest;
+    }
+
+    private static bool ShouldInstallNetworkPlayerObjectRuntimePrefab(MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return config != null && (config.AutoInstallNetworkPlayerObjectServer || config.EnableNetworkPlayerObjectSmokeTest || config.EnableNetworkPlayerMovementSmokeTest);
+    }
+
+    private static bool ShouldInstallNetworkPlayerObjectServer(MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return config != null && config.AutoInstallNetworkPlayerObjectServer && Application.isBatchMode;
+    }
+
+    private static bool ShouldInstallNetworkStateSyncSmokeServerController(MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return ShouldInstallNetworkStateSyncSmokeTest(config) && Application.isBatchMode;
     }
 
     private static bool ShouldInstallClientSmokeReporter(MetaverseDedicatedServerRuntimeConfig config)
@@ -197,6 +311,48 @@ public static class MetaverseSpawnSystemInstaller
         string objectName = config != null ? config.NetworkRpcBridgeObjectName : DefaultRpcBridgeName;
         GameObject obj = new GameObject(objectName);
         return obj.AddComponent<MetaverseNetworkRpcBridge>();
+    }
+
+    private static MetaverseNetworkStateSyncBridge FindOrCreateNetworkStateSyncBridge(MetaverseDedicatedServerRuntimeConfig config)
+    {
+#if UNITY_2023_1_OR_NEWER
+        MetaverseNetworkStateSyncBridge existing = Object.FindFirstObjectByType<MetaverseNetworkStateSyncBridge>();
+#else
+        MetaverseNetworkStateSyncBridge existing = Object.FindObjectOfType<MetaverseNetworkStateSyncBridge>();
+#endif
+        if (existing != null) return existing;
+
+        string objectName = config != null ? config.NetworkStateSyncBridgeObjectName : DefaultStateSyncBridgeName;
+        GameObject obj = new GameObject(objectName);
+        return obj.AddComponent<MetaverseNetworkStateSyncBridge>();
+    }
+
+    private static MetaverseNetworkOwnershipBridge FindOrCreateNetworkOwnershipBridge(MetaverseDedicatedServerRuntimeConfig config)
+    {
+#if UNITY_2023_1_OR_NEWER
+        MetaverseNetworkOwnershipBridge existing = Object.FindFirstObjectByType<MetaverseNetworkOwnershipBridge>();
+#else
+        MetaverseNetworkOwnershipBridge existing = Object.FindObjectOfType<MetaverseNetworkOwnershipBridge>();
+#endif
+        if (existing != null) return existing;
+
+        string objectName = config != null ? config.NetworkOwnershipBridgeObjectName : DefaultOwnershipBridgeName;
+        GameObject obj = new GameObject(objectName);
+        return obj.AddComponent<MetaverseNetworkOwnershipBridge>();
+    }
+
+    private static MetaverseNetworkPlayerMovementBridge FindOrCreateNetworkPlayerMovementBridge(MetaverseDedicatedServerRuntimeConfig config)
+    {
+#if UNITY_2023_1_OR_NEWER
+        MetaverseNetworkPlayerMovementBridge existing = Object.FindFirstObjectByType<MetaverseNetworkPlayerMovementBridge>();
+#else
+        MetaverseNetworkPlayerMovementBridge existing = Object.FindObjectOfType<MetaverseNetworkPlayerMovementBridge>();
+#endif
+        if (existing != null) return existing;
+
+        string objectName = config != null ? config.NetworkPlayerMovementBridgeObjectName : DefaultPlayerMovementBridgeName;
+        GameObject obj = new GameObject(objectName);
+        return obj.AddComponent<MetaverseNetworkPlayerMovementBridge>();
     }
 
     private static MetaverseServerSpawnRouteSmokeController FindOrCreateServerSpawnRouteSmokeController(MetaverseSpawnManager manager)
@@ -275,6 +431,45 @@ public static class MetaverseSpawnSystemInstaller
         return controller;
     }
 
+    private static MetaverseNetworkPlayerObjectServer FindOrCreateNetworkPlayerObjectServer(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
+    {
+#if UNITY_2023_1_OR_NEWER
+        MetaverseNetworkPlayerObjectServer existing = Object.FindFirstObjectByType<MetaverseNetworkPlayerObjectServer>();
+#else
+        MetaverseNetworkPlayerObjectServer existing = Object.FindObjectOfType<MetaverseNetworkPlayerObjectServer>();
+#endif
+        if (existing != null)
+        {
+            existing.Bind(manager, config);
+            return existing;
+        }
+
+        string objectName = config != null ? config.NetworkPlayerObjectServerObjectName : DefaultPlayerObjectServerName;
+        GameObject obj = new GameObject(objectName);
+        MetaverseNetworkPlayerObjectServer server = obj.AddComponent<MetaverseNetworkPlayerObjectServer>();
+        server.Bind(manager, config);
+        return server;
+    }
+
+    private static MetaverseNetworkStateSyncSmokeController FindOrCreateNetworkStateSyncSmokeController(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
+    {
+#if UNITY_2023_1_OR_NEWER
+        MetaverseNetworkStateSyncSmokeController existing = Object.FindFirstObjectByType<MetaverseNetworkStateSyncSmokeController>();
+#else
+        MetaverseNetworkStateSyncSmokeController existing = Object.FindObjectOfType<MetaverseNetworkStateSyncSmokeController>();
+#endif
+        if (existing != null)
+        {
+            existing.Bind(manager, config);
+            return existing;
+        }
+
+        GameObject obj = new GameObject(DefaultNetworkStateSyncSmokeName);
+        MetaverseNetworkStateSyncSmokeController controller = obj.AddComponent<MetaverseNetworkStateSyncSmokeController>();
+        controller.Bind(manager, config);
+        return controller;
+    }
+
     private static Transform FindOrCreateSpawnedRoot(MetaverseDedicatedServerRuntimeConfig config)
     {
         string objectName = config != null ? config.SpawnedRootObjectName : DefaultRootName;
@@ -300,6 +495,34 @@ public static class MetaverseSpawnSystemInstaller
             if (routers[i] == null) continue;
             routers[i].Rebind();
         }
+    }
+
+    private static string GetInstallSummary(MetaverseSpawnManager manager, MetaverseDedicatedServerRuntimeConfig config)
+    {
+        return "[MetaverseSpawnSystemInstaller] Phase33A install completed" +
+               " | registry=" + (manager != null && manager.PrefabRegistry != null ? manager.PrefabRegistry.name : "null") +
+               " | smokeTest=" + BoolText(ShouldInstallServerSmokeTest(config)) +
+               " | clientReporter=" + BoolText(ShouldInstallClientSmokeReporter(config)) +
+               " | networkBehaviourSmoke=" + BoolText(ShouldInstallNetworkBehaviourSmokeTest(config)) +
+               " | networkRpcBridge=" + BoolText(config != null && config.AutoInstallNetworkRpcBridge) +
+               " | networkRpcSmoke=" + BoolText(ShouldInstallNetworkRpcSmokeTest(config)) +
+               " | mirrorLikeApiSmoke=" + BoolText(config != null && config.EnableMirrorLikeGameplayApiSmokeTest) +
+               " | networkStateSyncBridge=" + BoolText(config != null && config.AutoInstallNetworkStateSyncBridge) +
+               " | networkStateSyncSmoke=" + BoolText(ShouldInstallNetworkStateSyncSmokeTest(config)) +
+               " | networkOwnershipBridge=" + BoolText(config != null && config.AutoInstallNetworkOwnershipBridge) +
+               " | networkPlayerObjectSmoke=" + BoolText(ShouldInstallNetworkPlayerObjectSmokeTest(config)) +
+               " | networkPlayerMovementBridge=" + BoolText(config != null && config.AutoInstallNetworkPlayerMovementBridge) +
+               " | networkPlayerMovementSmoke=" + BoolText(ShouldInstallNetworkPlayerMovementSmokeTest(config)) +
+               " | " + GetMirrorLikeGameplayApiInstallSummary();
+    }
+
+    private static bool HasSceneComponent<T>() where T : Component
+    {
+#if UNITY_2023_1_OR_NEWER
+        return Object.FindFirstObjectByType<T>() != null;
+#else
+        return Object.FindObjectOfType<T>() != null;
+#endif
     }
 
     private static string BoolText(bool value)

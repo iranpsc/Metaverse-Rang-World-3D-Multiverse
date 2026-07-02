@@ -18,6 +18,9 @@ namespace Network_A.GameServer.Gameplay
         [SerializeField] private DedicatedPlayerStateStore playerStateStore;
         [SerializeField] private MetaverseSpawnNetworkBridge spawnNetworkBridge;
         [SerializeField] private MetaverseNetworkRpcBridge rpcNetworkBridge;
+        [SerializeField] private MetaverseNetworkStateSyncBridge stateSyncBridge;
+        [SerializeField] private MetaverseNetworkOwnershipBridge ownershipBridge;
+        [SerializeField] private MetaverseNetworkPlayerMovementBridge playerMovementBridge;
 
         [Header("Rules")]
         [SerializeField] private bool sendStateAckToSender = true;
@@ -27,6 +30,11 @@ namespace Network_A.GameServer.Gameplay
         [SerializeField] private bool logDuplicatePlayerStateMessages = false;
         [SerializeField] private bool logPlayerStateMessages = true;
 
+        [Header("Mirror-Like RPC Route")]
+        [SerializeField] private bool logNetworkCommandMessages = true;
+        [SerializeField] private bool logNetworkCommandRejects = true;
+        [SerializeField] private bool useRpcBridgeRejectReasonForCommandErrors = true;
+
         [Header("Debug")]
         [SerializeField] private bool logMessageFormat = true;
 
@@ -34,6 +42,8 @@ namespace Network_A.GameServer.Gameplay
         private bool eventsSubscribed;
         private MetaverseSpawnNetworkBridge subscribedSpawnNetworkBridge;
         private MetaverseNetworkRpcBridge subscribedRpcNetworkBridge;
+        private MetaverseNetworkStateSyncBridge subscribedStateSyncBridge;
+        private MetaverseNetworkOwnershipBridge subscribedOwnershipBridge;
         private bool attemptedSpawnBridgeAutoInstall;
         private bool loggedSpawnBridgeSubscription;
         private readonly ConcurrentDictionary<string, long> dict_lastStateSequenceByConnectionId =
@@ -57,11 +67,16 @@ namespace Network_A.GameServer.Gameplay
         {
             if (!eventsSubscribed) return;
             if (spawnNetworkBridge == null || subscribedSpawnNetworkBridge != spawnNetworkBridge ||
-                rpcNetworkBridge == null || subscribedRpcNetworkBridge != rpcNetworkBridge)
+                rpcNetworkBridge == null || subscribedRpcNetworkBridge != rpcNetworkBridge ||
+                stateSyncBridge == null || subscribedStateSyncBridge != stateSyncBridge ||
+                ownershipBridge == null || subscribedOwnershipBridge != ownershipBridge ||
+                playerMovementBridge == null)
             {
                 EnsureReferences();
                 EnsureSpawnBridgeSubscription();
                 EnsureRpcBridgeSubscription();
+                EnsureStateSyncBridgeSubscription();
+                EnsureOwnershipBridgeSubscription();
             }
         }
 
@@ -83,7 +98,10 @@ namespace Network_A.GameServer.Gameplay
                       " | playerRegistry=" + BoolText(playerRegistry != null) +
                       " | playerStateStore=" + BoolText(playerStateStore != null) +
                       " | spawnNetworkBridge=" + SpawnBridgeStatusText() +
-                      " | rpcNetworkBridge=" + RpcBridgeStatusText());
+                      " | rpcNetworkBridge=" + RpcBridgeStatusText() +
+                      " | stateSyncBridge=" + StateSyncBridgeStatusText() +
+                      " | ownershipBridge=" + OwnershipBridgeStatusText() +
+                      " | playerMovementBridge=" + PlayerMovementBridgeStatusText());
         }
 
         //* این تابع رفرنس های وب سوکت سرور، رجیستری و استور وضعیت را پیدا می کند.
@@ -109,12 +127,18 @@ namespace Network_A.GameServer.Gameplay
 
             FindSpawnNetworkBridge();
             FindRpcNetworkBridge();
+            FindStateSyncBridge();
+            FindOwnershipBridge();
+            FindPlayerMovementBridge();
 
-            if (spawnNetworkBridge == null || rpcNetworkBridge == null)
+            if (spawnNetworkBridge == null || rpcNetworkBridge == null || stateSyncBridge == null || ownershipBridge == null || playerMovementBridge == null)
             {
                 TryAutoInstallSpawnBridgeFromRuntimeConfig();
                 FindSpawnNetworkBridge();
                 FindRpcNetworkBridge();
+                FindStateSyncBridge();
+                FindOwnershipBridge();
+                FindPlayerMovementBridge();
             }
 
             if (connectionsField == null)
@@ -149,6 +173,8 @@ namespace Network_A.GameServer.Gameplay
             eventsSubscribed = true;
             EnsureSpawnBridgeSubscription();
             EnsureRpcBridgeSubscription();
+            EnsureStateSyncBridgeSubscription();
+            EnsureOwnershipBridgeSubscription();
         }
 
 
@@ -192,6 +218,42 @@ namespace Network_A.GameServer.Gameplay
             Debug.Log("[DedicatedGameMessageRouter] RPC bridge subscription ready | rpcNetworkBridge=OK");
         }
 
+        //* این تابع رویداد بریج سینک استیت را فقط یک بار به رُتر وصل می کند.
+        private void EnsureStateSyncBridgeSubscription()
+        {
+            if (!eventsSubscribed || stateSyncBridge == null) return;
+            if (subscribedStateSyncBridge == stateSyncBridge) return;
+
+            if (subscribedStateSyncBridge != null)
+            {
+                subscribedStateSyncBridge.OutboundMessageReady -= HandleStateSyncBridgeOutboundMessageReady;
+            }
+
+            stateSyncBridge.OutboundMessageReady -= HandleStateSyncBridgeOutboundMessageReady;
+            stateSyncBridge.OutboundMessageReady += HandleStateSyncBridgeOutboundMessageReady;
+            subscribedStateSyncBridge = stateSyncBridge;
+
+            Debug.Log("[DedicatedGameMessageRouter] StateSync bridge subscription ready | stateSyncBridge=OK");
+        }
+
+        //* این تابع رویداد بریج مالکیت را فقط یک بار به رُتر وصل می کند.
+        private void EnsureOwnershipBridgeSubscription()
+        {
+            if (!eventsSubscribed || ownershipBridge == null) return;
+            if (subscribedOwnershipBridge == ownershipBridge) return;
+
+            if (subscribedOwnershipBridge != null)
+            {
+                subscribedOwnershipBridge.OutboundMessageReady -= HandleOwnershipBridgeOutboundMessageReady;
+            }
+
+            ownershipBridge.OutboundMessageReady -= HandleOwnershipBridgeOutboundMessageReady;
+            ownershipBridge.OutboundMessageReady += HandleOwnershipBridgeOutboundMessageReady;
+            subscribedOwnershipBridge = ownershipBridge;
+
+            Debug.Log("[DedicatedGameMessageRouter] Ownership bridge subscription ready | ownershipBridge=OK");
+        }
+
         //* این تابع بریج اسپاون را در صحنه پیدا می کند.
         private void FindSpawnNetworkBridge()
         {
@@ -217,6 +279,48 @@ namespace Network_A.GameServer.Gameplay
             if (rpcNetworkBridge == null) rpcNetworkBridge = FindFirstObjectByType<MetaverseNetworkRpcBridge>();
 #else
             if (rpcNetworkBridge == null) rpcNetworkBridge = FindObjectOfType<MetaverseNetworkRpcBridge>();
+#endif
+        }
+
+        //* این تابع بریج سینک استیت را در صحنه پیدا می کند.
+        private void FindStateSyncBridge()
+        {
+            if (stateSyncBridge != null) return;
+
+            stateSyncBridge = GetComponent<MetaverseNetworkStateSyncBridge>();
+            if (stateSyncBridge == null) stateSyncBridge = GetComponentInChildren<MetaverseNetworkStateSyncBridge>(true);
+#if UNITY_2023_1_OR_NEWER
+            if (stateSyncBridge == null) stateSyncBridge = FindFirstObjectByType<MetaverseNetworkStateSyncBridge>();
+#else
+            if (stateSyncBridge == null) stateSyncBridge = FindObjectOfType<MetaverseNetworkStateSyncBridge>();
+#endif
+        }
+
+        //* این تابع بریج مالکیت را در صحنه پیدا می کند.
+        private void FindOwnershipBridge()
+        {
+            if (ownershipBridge != null) return;
+
+            ownershipBridge = GetComponent<MetaverseNetworkOwnershipBridge>();
+            if (ownershipBridge == null) ownershipBridge = GetComponentInChildren<MetaverseNetworkOwnershipBridge>(true);
+#if UNITY_2023_1_OR_NEWER
+            if (ownershipBridge == null) ownershipBridge = FindFirstObjectByType<MetaverseNetworkOwnershipBridge>();
+#else
+            if (ownershipBridge == null) ownershipBridge = FindObjectOfType<MetaverseNetworkOwnershipBridge>();
+#endif
+        }
+
+        //* این تابع بریج حرکت پلیر را در صحنه پیدا می کند.
+        private void FindPlayerMovementBridge()
+        {
+            if (playerMovementBridge != null) return;
+
+            playerMovementBridge = GetComponent<MetaverseNetworkPlayerMovementBridge>();
+            if (playerMovementBridge == null) playerMovementBridge = GetComponentInChildren<MetaverseNetworkPlayerMovementBridge>(true);
+#if UNITY_2023_1_OR_NEWER
+            if (playerMovementBridge == null) playerMovementBridge = FindFirstObjectByType<MetaverseNetworkPlayerMovementBridge>();
+#else
+            if (playerMovementBridge == null) playerMovementBridge = FindObjectOfType<MetaverseNetworkPlayerMovementBridge>();
 #endif
         }
 
@@ -246,6 +350,27 @@ namespace Network_A.GameServer.Gameplay
             return attemptedSpawnBridgeAutoInstall ? "PENDING" : "NOT_READY";
         }
 
+        //* این تابع وضعیت بریج سینک استیت را برای لاگ تمیز نشان می دهد.
+        private string StateSyncBridgeStatusText()
+        {
+            if (stateSyncBridge != null) return "OK";
+            return attemptedSpawnBridgeAutoInstall ? "PENDING" : "NOT_READY";
+        }
+
+        //* این تابع وضعیت بریج مالکیت را برای لاگ تمیز نشان می دهد.
+        private string OwnershipBridgeStatusText()
+        {
+            if (ownershipBridge != null) return "OK";
+            return attemptedSpawnBridgeAutoInstall ? "PENDING" : "NOT_READY";
+        }
+
+        //* این تابع وضعیت بریج حرکت پلیر را برای لاگ تمیز نشان می دهد.
+        private string PlayerMovementBridgeStatusText()
+        {
+            if (playerMovementBridge != null) return "OK";
+            return attemptedSpawnBridgeAutoInstall ? "PENDING" : "NOT_READY";
+        }
+
         //* این تابع رویدادهای قبلی را جدا می کند.
         private void Unsubscribe()
         {
@@ -271,6 +396,18 @@ namespace Network_A.GameServer.Gameplay
             {
                 subscribedRpcNetworkBridge.OutboundMessageReady -= HandleRpcBridgeOutboundMessageReady;
                 subscribedRpcNetworkBridge = null;
+            }
+
+            if (subscribedStateSyncBridge != null)
+            {
+                subscribedStateSyncBridge.OutboundMessageReady -= HandleStateSyncBridgeOutboundMessageReady;
+                subscribedStateSyncBridge = null;
+            }
+
+            if (subscribedOwnershipBridge != null)
+            {
+                subscribedOwnershipBridge.OutboundMessageReady -= HandleOwnershipBridgeOutboundMessageReady;
+                subscribedOwnershipBridge = null;
             }
 
             eventsSubscribed = false;
@@ -316,6 +453,12 @@ namespace Network_A.GameServer.Gameplay
                 return;
             }
 
+            if (IsNetworkPlayerInputRouteMessage(text, messageType))
+            {
+                await HandleNetworkPlayerInputAsync(connection, text, messageFormat, messageRoute);
+                return;
+            }
+
             if (IsNetworkCommandRouteMessage(text, messageType))
             {
                 await HandleNetworkCommandAsync(connection, text, messageFormat, messageRoute);
@@ -328,11 +471,67 @@ namespace Network_A.GameServer.Gameplay
                 return;
             }
 
+            if (IsNetworkOwnershipRouteMessage(text, messageType))
+            {
+                await SendErrorAsync(connection, "ownership_server_authoritative", "Network ownership is server-authoritative in this phase.");
+                return;
+            }
+
+            if (IsNetworkStateSyncRouteMessage(text, messageType))
+            {
+                await SendErrorAsync(connection, "state_sync_server_authoritative", "SyncVar and NetworkTransform are server-authoritative in this phase.");
+                return;
+            }
+
             if (IsSpawnRouteMessage(text, messageType))
             {
                 await SendErrorAsync(connection, "spawn_server_authoritative", "Spawn and despawn are server-authoritative in this phase.");
                 return;
             }
+        }
+
+        //* این تابع ورودی حرکت مالک آبجکت را بعد از احراز به سرور تحویل می دهد.
+        private async Task HandleNetworkPlayerInputAsync(DedicatedWebSocketConnection connection, string text, string messageFormat, string messageRoute)
+        {
+            DedicatedPlayerSession session = playerRegistry.GetByConnectionId(connection.ConnectionId);
+            if (session == null)
+            {
+                await SendErrorAsync(connection, "session_missing", "Authenticated session was not found.");
+                return;
+            }
+
+            if (playerMovementBridge == null)
+            {
+                await SendErrorAsync(connection, "player_movement_bridge_not_ready", "Network player movement bridge is not ready.");
+                return;
+            }
+
+            if (!MetaverseNetworkPlayerInputMessageCodec.TryReadPlayerInputPayload(text, out MetaverseNetworkPlayerInputPayload payload) || payload == null)
+            {
+                await SendErrorAsync(connection, "player_input_parse_failed", "Player input payload could not be parsed.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(payload.roomId) &&
+                !string.Equals(payload.roomId.Trim(), session.roomId, StringComparison.Ordinal))
+            {
+                await SendErrorAsync(connection, "room_mismatch", "Player input room does not match authenticated session.");
+                return;
+            }
+
+            bool handled = playerMovementBridge.HandleServerOwnerInput(session, payload);
+            if (!handled)
+            {
+                await SendErrorAsync(connection, "player_input_not_handled", "Player input could not be handled on server.");
+                return;
+            }
+
+            Debug.Log("[DedicatedGameMessageRouter] Player input handled | userId=" + session.userId +
+                      " | roomId=" + session.roomId +
+                      " | netId=" + payload.netId +
+                      " | sequence=" + payload.sequence +
+                      " | messageFormat=" + messageFormat +
+                      " | route=" + messageRoute);
         }
 
         //* این تابع کامند کلاینت را بعد از احراز به آبجکت شبکه ای روی سرور تحویل می دهد.
@@ -353,30 +552,38 @@ namespace Network_A.GameServer.Gameplay
 
             if (!MetaverseNetworkRpcMessageCodec.TryReadCommandPayload(text, out MetaverseNetworkRpcPayload payload) || payload == null)
             {
-                await SendErrorAsync(connection, "command_parse_failed", "Network command payload could not be parsed.");
+                await SendNetworkCommandRejectedAsync(connection, session, null, "command_parse_failed");
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(payload.roomId) &&
-                !string.Equals(payload.roomId.Trim(), session.roomId, StringComparison.Ordinal))
+            NormalizeNetworkCommandPayload(payload, session);
+
+            string preflightRejectReason = ValidateNetworkCommandPreflight(session, payload);
+            if (!string.IsNullOrWhiteSpace(preflightRejectReason))
             {
-                await SendErrorAsync(connection, "room_mismatch", "Network command room does not match authenticated session.");
+                await SendNetworkCommandRejectedAsync(connection, session, payload, preflightRejectReason);
                 return;
             }
 
             bool handled = rpcNetworkBridge.HandleServerCommand(session, payload);
             if (!handled)
             {
-                await SendErrorAsync(connection, "command_not_handled", "Network command could not be handled on server.");
+                string bridgeReason = ResolveRpcBridgeCommandRejectReason("command_not_handled");
+                await SendNetworkCommandRejectedAsync(connection, session, payload, bridgeReason);
                 return;
             }
 
-            Debug.Log("[DedicatedGameMessageRouter] Network command handled | userId=" + session.userId +
-                      " | roomId=" + session.roomId +
-                      " | netId=" + payload.netId +
-                      " | command=" + SafeForLog(payload.methodName) +
-                      " | messageFormat=" + messageFormat +
-                      " | route=" + messageRoute);
+            if (logNetworkCommandMessages)
+            {
+                Debug.Log("[DedicatedGameMessageRouter] Cmd handled | userId=" + session.userId +
+                          " | playerId=" + session.playerId +
+                          " | roomId=" + session.roomId +
+                          " | netId=" + payload.netId +
+                          " | command=" + SafeForLog(payload.methodName) +
+                          " | messageFormat=" + messageFormat +
+                          " | route=" + messageRoute +
+                          " | mirrorRoute=Cmd/Command");
+            }
         }
 
         //* این تابع پیام player_state را پردازش، ذخیره و برای بقیه پلیرهای همان روم پخش می کند.
@@ -584,6 +791,50 @@ namespace Network_A.GameServer.Gameplay
                       " | roomId=" + roomId +
                       " | outgoingMessageFormat=" + MetaverseNetworkRpcMessageCodec.ReadMessageFormat(envelopeJson) +
                       " | outgoingRoute=" + MetaverseNetworkRpcMessageCodec.ReadRouteForLog(envelopeJson));
+        }
+
+        //* این تابع پیام آماده سینک ور یا ترنسفورم را از بریج می گیرد و برای کلاینت های همان روم پخش می کند.
+        private void HandleStateSyncBridgeOutboundMessageReady(string rawJson)
+        {
+            if (string.IsNullOrWhiteSpace(rawJson)) return;
+
+            string roomId = ResolveBroadcastRoomId(rawJson);
+            if (string.IsNullOrWhiteSpace(roomId))
+            {
+                Debug.LogWarning("[DedicatedGameMessageRouter] State sync message ignored. Room is empty.");
+                return;
+            }
+
+            string envelopeJson = MetaverseNetworkStateSyncMessageCodec.EnsureGameEnvelopeRoom(rawJson, roomId);
+            if (string.IsNullOrWhiteSpace(envelopeJson)) return;
+
+            int sentCount = BroadcastToRoom(roomId, envelopeJson, string.Empty);
+            Debug.Log("[DedicatedGameMessageRouter] StateSync route broadcast | sentCount=" + sentCount +
+                      " | roomId=" + roomId +
+                      " | outgoingMessageFormat=" + MetaverseNetworkStateSyncMessageCodec.ReadMessageFormat(envelopeJson) +
+                      " | outgoingRoute=" + MetaverseNetworkStateSyncMessageCodec.ReadRouteForLog(envelopeJson));
+        }
+
+        //* این تابع پیام آماده مالکیت را از بریج می گیرد و برای کلاینت های همان روم پخش می کند.
+        private void HandleOwnershipBridgeOutboundMessageReady(string rawJson)
+        {
+            if (string.IsNullOrWhiteSpace(rawJson)) return;
+
+            string roomId = ResolveBroadcastRoomId(rawJson);
+            if (string.IsNullOrWhiteSpace(roomId))
+            {
+                Debug.LogWarning("[DedicatedGameMessageRouter] Ownership message ignored. Room is empty.");
+                return;
+            }
+
+            string envelopeJson = MetaverseNetworkOwnershipMessageCodec.EnsureGameEnvelopeRoom(rawJson, roomId);
+            if (string.IsNullOrWhiteSpace(envelopeJson)) return;
+
+            int sentCount = BroadcastToRoom(roomId, envelopeJson, string.Empty);
+            Debug.Log("[DedicatedGameMessageRouter] Ownership route broadcast | sentCount=" + sentCount +
+                      " | roomId=" + roomId +
+                      " | outgoingMessageFormat=" + MetaverseNetworkOwnershipMessageCodec.ReadMessageFormat(envelopeJson) +
+                      " | outgoingRoute=" + MetaverseNetworkOwnershipMessageCodec.ReadRouteForLog(envelopeJson));
         }
 
         //* این تابع تارگت آر پی سی را فقط به کانکشن هدف همان روم می فرستد.
@@ -811,6 +1062,114 @@ namespace Network_A.GameServer.Gameplay
             }
         }
 
+        //* این تابع پِیلود کامند را با سشن احراز شده هم راستا می کند.
+        private void NormalizeNetworkCommandPayload(MetaverseNetworkRpcPayload payload, DedicatedPlayerSession session)
+        {
+            if (payload == null || session == null) return;
+
+            payload.type = RealtimeMessageTypes.Command;
+            payload.roomId = string.IsNullOrWhiteSpace(payload.roomId) ? SafeForLog(session.roomId) : SafeForLog(payload.roomId);
+            payload.senderConnectionId = SafeForLog(session.connectionId);
+            payload.senderUserId = SafeForLog(session.userId);
+            payload.senderPlayerId = SafeForLog(session.playerId);
+            payload.methodName = SafeForLog(payload.methodName);
+            payload.prefabId = SafeForLog(payload.prefabId);
+            payload.payloadJson = string.IsNullOrWhiteSpace(payload.payloadJson) ? "{}" : payload.payloadJson.Trim();
+        }
+
+        //* این تابع قبل از تحویل کامند به بریج، خطاهای پایه مسیر شبیه میرور را بررسی می کند.
+        private string ValidateNetworkCommandPreflight(DedicatedPlayerSession session, MetaverseNetworkRpcPayload payload)
+        {
+            if (session == null) return "session_missing";
+            if (!session.isAuthenticated) return "session_not_authenticated";
+            if (payload == null) return "payload_missing";
+            if (payload.netId <= 0) return "invalid_net_id";
+            if (string.IsNullOrWhiteSpace(payload.methodName)) return "invalid_command_name";
+            if (!string.IsNullOrWhiteSpace(payload.roomId) &&
+                !string.Equals(payload.roomId.Trim(), session.roomId, StringComparison.Ordinal))
+            {
+                return "room_mismatch";
+            }
+
+            return string.Empty;
+        }
+
+        //* این تابع دلیل رد شدن کامند را از بریج آر پی سی یا مقدار جایگزین می خواند.
+        private string ResolveRpcBridgeCommandRejectReason(string fallbackReason)
+        {
+            if (!useRpcBridgeRejectReasonForCommandErrors || rpcNetworkBridge == null)
+            {
+                return SafeReason(fallbackReason, "command_not_handled");
+            }
+
+            string bridgeReason = rpcNetworkBridge.LastServerCommandRejectReason;
+            return string.IsNullOrWhiteSpace(bridgeReason) ? SafeReason(fallbackReason, "command_not_handled") : bridgeReason.Trim();
+        }
+
+        //* این تابع خطای دقیق کامند شبیه میرور را برای همان کلاینت برمی گرداند.
+        private async Task SendNetworkCommandRejectedAsync(DedicatedWebSocketConnection connection, DedicatedPlayerSession session, MetaverseNetworkRpcPayload payload, string reason)
+        {
+            string safeReason = SafeReason(reason, "command_rejected");
+            string messageText = BuildNetworkCommandRejectMessage(safeReason, payload);
+
+            if (logNetworkCommandRejects)
+            {
+                Debug.LogWarning("[DedicatedGameMessageRouter] Cmd rejected | reason=" + safeReason +
+                                 " | connectionId=" + (connection != null ? connection.ConnectionId : string.Empty) +
+                                 " | userId=" + SafeForLog(session != null ? session.userId : string.Empty) +
+                                 " | playerId=" + SafeForLog(session != null ? session.playerId : string.Empty) +
+                                 " | roomId=" + SafeForLog(session != null ? session.roomId : string.Empty) +
+                                 " | netId=" + (payload != null ? payload.netId : 0) +
+                                 " | command=" + SafeForLog(payload != null ? payload.methodName : string.Empty) +
+                                 " | mirrorRoute=Cmd/Command");
+            }
+
+            await SendErrorAsync(connection, safeReason, messageText);
+        }
+
+        //* این تابع متن خطای خوانا برای رد شدن کامند می سازد.
+        private string BuildNetworkCommandRejectMessage(string reason, MetaverseNetworkRpcPayload payload)
+        {
+            string commandName = SafeForLog(payload != null ? payload.methodName : string.Empty);
+            int netId = payload != null ? payload.netId : 0;
+
+            switch (SafeReason(reason, "command_rejected"))
+            {
+                case "command_parse_failed":
+                    return "Command payload could not be parsed.";
+                case "session_missing":
+                    return "Authenticated session was not found.";
+                case "session_not_authenticated":
+                    return "Command requires an authenticated session.";
+                case "payload_missing":
+                    return "Command payload is missing.";
+                case "invalid_net_id":
+                    return "Command requires a valid network identity netId.";
+                case "invalid_command_name":
+                    return "Command name is empty or invalid.";
+                case "payload_too_large":
+                    return "Command payload is larger than the allowed limit.";
+                case "room_mismatch":
+                    return "Command room does not match authenticated session.";
+                case "spawn_manager_missing":
+                    return "Spawn manager is not ready for Command dispatch.";
+                case "net_id_not_found":
+                    return "Command target network identity was not found on server.";
+                case "prefab_mismatch":
+                    return "Command prefabId does not match the server network identity.";
+                case "authority_rejected":
+                    return "Command was rejected because the sender does not own the network identity.";
+                default:
+                    return "Command could not be handled on server. netId=" + netId + " command=" + commandName;
+            }
+        }
+
+        //* این تابع مقدار دلیل را امن و خوانا می کند.
+        private string SafeReason(string value, string fallback)
+        {
+            return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        }
+
         //* این تابع پیام خطای گیم را برای همان کانکشن ارسال می کند.
         private async Task SendErrorAsync(DedicatedWebSocketConnection connection, string reason, string messageText)
         {
@@ -853,6 +1212,13 @@ namespace Network_A.GameServer.Gameplay
             return DedicatedRealtimeEnvelopeCodec.Matches(text, RealtimeChannels.Presence, RealtimeMessageTypes.PlayerState);
         }
 
+        //* این تابع بررسی می کند پیام ورودی ورودی حرکت مالک آبجکت است یا نه.
+        private bool IsNetworkPlayerInputRouteMessage(string text, string messageType)
+        {
+            if (string.Equals(messageType, RealtimeMessageTypes.PlayerInput, StringComparison.Ordinal)) return true;
+            return MetaverseNetworkPlayerInputMessageCodec.IsPlayerInputEnvelope(text);
+        }
+
         //* این تابع بررسی می کند پیام ورودی یک کامند شبکه ای است یا نه.
         private bool IsNetworkCommandRouteMessage(string text, string messageType)
         {
@@ -867,6 +1233,21 @@ namespace Network_A.GameServer.Gameplay
             if (string.Equals(messageType, RealtimeMessageTypes.TargetRpc, StringComparison.Ordinal)) return true;
             return MetaverseNetworkRpcMessageCodec.IsClientRpcEnvelope(text) ||
                    MetaverseNetworkRpcMessageCodec.IsTargetRpcEnvelope(text);
+        }
+
+        //* این تابع بررسی می کند پیام ورودی از نوع مالکیت سرور به کلاینت است یا نه.
+        private bool IsNetworkOwnershipRouteMessage(string text, string messageType)
+        {
+            if (string.Equals(messageType, RealtimeMessageTypes.Ownership, StringComparison.Ordinal)) return true;
+            return MetaverseNetworkOwnershipMessageCodec.IsOwnershipEnvelope(text);
+        }
+
+        //* این تابع بررسی می کند پیام ورودی از نوع سینک استیت سرور به کلاینت است یا نه.
+        private bool IsNetworkStateSyncRouteMessage(string text, string messageType)
+        {
+            if (string.Equals(messageType, RealtimeMessageTypes.SyncVar, StringComparison.Ordinal)) return true;
+            if (string.Equals(messageType, RealtimeMessageTypes.NetworkTransform, StringComparison.Ordinal)) return true;
+            return MetaverseNetworkStateSyncMessageCodec.IsStateSyncEnvelope(text);
         }
 
         //* این تابع بررسی می کند پیام ورودی مربوط به اسپاون یا دیسپاون است یا نه.

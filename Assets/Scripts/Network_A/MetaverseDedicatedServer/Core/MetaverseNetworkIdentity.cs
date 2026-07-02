@@ -8,6 +8,9 @@ public class MetaverseNetworkIdentity : MonoBehaviour
     [SerializeField] private string prefabId = string.Empty;
     [SerializeField] private int netId;
     [SerializeField] private int ownerConnectionId = -1;
+    [SerializeField] private string ownerConnectionIdText = string.Empty;
+    [SerializeField] private string ownerUserId = string.Empty;
+    [SerializeField] private string ownerPlayerId = string.Empty;
     [SerializeField] private bool serverOwned = true;
     [SerializeField] private bool localPlayer;
     [SerializeField] private bool spawned;
@@ -29,6 +32,9 @@ public class MetaverseNetworkIdentity : MonoBehaviour
     public string PrefabId => prefabId;
     public int NetId => netId;
     public int OwnerConnectionId => ownerConnectionId;
+    public string OwnerConnectionIdText => ownerConnectionIdText;
+    public string OwnerUserId => ownerUserId;
+    public string OwnerPlayerId => ownerPlayerId;
     public bool IsServerOwned => serverOwned;
     public bool IsLocalPlayer => localPlayer;
     public bool IsSpawned => spawned;
@@ -36,19 +42,46 @@ public class MetaverseNetworkIdentity : MonoBehaviour
     public bool IsClient => isClient;
     public bool HasAuthority => hasAuthority;
 
+    public bool HasValidNetId => netId > 0;
+    public bool IsServerOnly => isServer && !isClient;
+    public bool IsClientOnly => isClient && !isServer;
+    public bool IsOwned => !serverOwned && (!string.IsNullOrWhiteSpace(ownerConnectionIdText) || !string.IsNullOrWhiteSpace(ownerUserId) || !string.IsNullOrWhiteSpace(ownerPlayerId) || ownerConnectionId >= 0);
+    public bool IsLocalOwner => IsLocalClientOwner(ownerConnectionIdText, ownerUserId, ownerPlayerId);
+    public bool HasStartedCallbacks => callbacksStarted;
+    public bool HasStartedAuthorityCallbacks => authorityStarted;
+    public bool HasStartedLocalPlayerCallbacks => localPlayerStarted;
+
     public event Action<MetaverseNetworkIdentity> Spawned;
     public event Action<MetaverseNetworkIdentity> Despawned;
+    public event Action<MetaverseNetworkIdentity> OwnershipChanged;
 
     public void AssignSpawnData(string newPrefabId, int newNetId, int newOwnerConnectionId, bool newServerOwned, bool newLocalPlayer)
+    {
+        AssignSpawnData(newPrefabId, newNetId, newOwnerConnectionId, string.Empty, string.Empty, string.Empty, newServerOwned, newLocalPlayer);
+    }
+
+    public void AssignSpawnData(
+        string newPrefabId,
+        int newNetId,
+        int newOwnerConnectionId,
+        string newOwnerConnectionIdText,
+        string newOwnerUserId,
+        string newOwnerPlayerId,
+        bool newServerOwned,
+        bool newLocalPlayer)
     {
         prefabId = SafeTrim(newPrefabId);
         netId = Mathf.Max(0, newNetId);
         ownerConnectionId = newOwnerConnectionId;
+        ownerConnectionIdText = SafeTrim(newOwnerConnectionIdText);
+        if (ownerConnectionId < 0) ownerConnectionId = ParseConnectionId(ownerConnectionIdText);
+        ownerUserId = SafeTrim(newOwnerUserId);
+        ownerPlayerId = SafeTrim(newOwnerPlayerId);
         serverOwned = newServerOwned;
-        localPlayer = newLocalPlayer;
-        ApplyDefaultRuntimeRole(newLocalPlayer);
+        bool resolvedLocalPlayer = newLocalPlayer || IsLocalClientOwner(ownerConnectionIdText, ownerUserId, ownerPlayerId);
+        ApplyDefaultRuntimeRole(resolvedLocalPlayer);
         spawned = true;
-        if (logLifecycle) Debug.Log($"[MetaverseNetworkIdentity] Spawn assigned | netId={netId} | prefabId={prefabId} | owner={ownerConnectionId}");
+        if (logLifecycle) Debug.Log($"[MetaverseNetworkIdentity] Spawn assigned | netId={netId} | prefabId={prefabId} | ownerUserId={ownerUserId}");
         InvokeStartCallbacks();
         Spawned?.Invoke(this);
     }
@@ -66,11 +99,48 @@ public class MetaverseNetworkIdentity : MonoBehaviour
     public void SetOwnerConnectionId(int newOwnerConnectionId)
     {
         ownerConnectionId = newOwnerConnectionId;
+        ownerConnectionIdText = newOwnerConnectionId >= 0 ? newOwnerConnectionId.ToString() : string.Empty;
+    }
+
+    public void SetOwnerInfo(string newOwnerConnectionIdText, string newOwnerUserId, string newOwnerPlayerId, bool newServerOwned)
+    {
+        string previousOwnerConnectionId = ownerConnectionIdText;
+        string previousOwnerUserId = ownerUserId;
+        string previousOwnerPlayerId = ownerPlayerId;
+
+        ownerConnectionIdText = SafeTrim(newOwnerConnectionIdText);
+        ownerConnectionId = ParseConnectionId(ownerConnectionIdText);
+        ownerUserId = SafeTrim(newOwnerUserId);
+        ownerPlayerId = SafeTrim(newOwnerPlayerId);
+        serverOwned = newServerOwned;
+
+        bool resolvedLocalPlayer = IsLocalClientOwner(ownerConnectionIdText, ownerUserId, ownerPlayerId);
+        bool authorityRole = isServer || resolvedLocalPlayer;
+        SetNetworkRole(isServer, isClient, authorityRole, resolvedLocalPlayer);
+
+        if (spawned)
+        {
+            InvokeOwnershipChangedCallbacks(previousOwnerConnectionId, ownerConnectionIdText, previousOwnerUserId, ownerUserId, previousOwnerPlayerId, ownerPlayerId);
+        }
+    }
+
+    public void SetOwnerInfo(int newOwnerConnectionId, string newOwnerUserId, string newOwnerPlayerId, bool newServerOwned)
+    {
+        SetOwnerInfo(newOwnerConnectionId >= 0 ? newOwnerConnectionId.ToString() : string.Empty, newOwnerUserId, newOwnerPlayerId, newServerOwned);
+    }
+
+    public void ClearOwnerInfo(bool makeServerOwned = true)
+    {
+        SetOwnerInfo(string.Empty, string.Empty, string.Empty, makeServerOwned);
     }
 
     public void SetServerOwned(bool value)
     {
         serverOwned = value;
+        if (value && spawned)
+        {
+            SetNetworkRole(isServer, isClient, isServer, false);
+        }
     }
 
     public void SetLocalPlayer(bool value)
@@ -114,16 +184,50 @@ public class MetaverseNetworkIdentity : MonoBehaviour
         }
     }
 
+    public void RefreshRuntimeRoleFromCurrentOwner()
+    {
+        bool resolvedLocalPlayer = IsLocalClientOwner(ownerConnectionIdText, ownerUserId, ownerPlayerId);
+        SetNetworkRole(Application.isBatchMode, !Application.isBatchMode, Application.isBatchMode || resolvedLocalPlayer, resolvedLocalPlayer);
+    }
+
     public bool IsOwnedBy(int connectionId)
     {
         return ownerConnectionId >= 0 && ownerConnectionId == connectionId;
+    }
+
+    public bool IsOwnedBy(string connectionId)
+    {
+        return !string.IsNullOrWhiteSpace(connectionId) && string.Equals(ownerConnectionIdText, connectionId.Trim(), StringComparison.Ordinal);
+    }
+
+    public bool IsOwnedByUser(string userId)
+    {
+        return !string.IsNullOrWhiteSpace(userId) && string.Equals(ownerUserId, userId.Trim(), StringComparison.Ordinal);
+    }
+
+    public bool IsOwnedByPlayer(string playerId)
+    {
+        return !string.IsNullOrWhiteSpace(playerId) && string.Equals(ownerPlayerId, playerId.Trim(), StringComparison.Ordinal);
+    }
+
+    public bool IsOwnedByAny(string connectionId, string userId, string playerId)
+    {
+        if (!string.IsNullOrWhiteSpace(connectionId) && IsOwnedBy(connectionId)) return true;
+        if (!string.IsNullOrWhiteSpace(userId) && IsOwnedByUser(userId)) return true;
+        if (!string.IsNullOrWhiteSpace(playerId) && IsOwnedByPlayer(playerId)) return true;
+        return false;
+    }
+
+    public bool IsOwnedByLocalClient()
+    {
+        return IsLocalClientOwner(ownerConnectionIdText, ownerUserId, ownerPlayerId);
     }
 
     public void MarkSpawned()
     {
         if (!spawned)
         {
-            ApplyDefaultRuntimeRole(localPlayer);
+            ApplyDefaultRuntimeRole(localPlayer || IsLocalClientOwner(ownerConnectionIdText, ownerUserId, ownerPlayerId));
         }
 
         spawned = true;
@@ -146,11 +250,17 @@ public class MetaverseNetworkIdentity : MonoBehaviour
         MarkDespawned();
         netId = 0;
         ownerConnectionId = -1;
+        ownerConnectionIdText = string.Empty;
+        ownerUserId = string.Empty;
+        ownerPlayerId = string.Empty;
         serverOwned = true;
         localPlayer = false;
         isServer = false;
         isClient = false;
         hasAuthority = false;
+        callbacksStarted = false;
+        authorityStarted = false;
+        localPlayerStarted = false;
     }
 
     public void ResetForPool()
@@ -179,6 +289,31 @@ public class MetaverseNetworkIdentity : MonoBehaviour
         isClient = clientRole;
         hasAuthority = authorityRole;
         localPlayer = newLocalPlayer;
+    }
+
+    private bool IsLocalClientOwner(string connectionIdText, string userId, string playerId)
+    {
+        if (Application.isBatchMode) return false;
+
+        if (!string.IsNullOrWhiteSpace(connectionIdText) &&
+            string.Equals(SafeTrim(connectionIdText), MetaverseNetworkClient.connectionId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(userId) &&
+            string.Equals(SafeTrim(userId), MetaverseNetworkClient.userId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(playerId) &&
+            string.Equals(SafeTrim(playerId), MetaverseNetworkClient.playerId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private void InvokeStartCallbacks()
@@ -237,6 +372,35 @@ public class MetaverseNetworkIdentity : MonoBehaviour
         localPlayerStarted = false;
     }
 
+    private void InvokeOwnershipChangedCallbacks(string previousOwnerConnectionId, string newOwnerConnectionId, string previousOwnerUserId, string newOwnerUserId, string previousOwnerPlayerId, string newOwnerPlayerId)
+    {
+        bool isLocalOwner = IsLocalClientOwner(newOwnerConnectionId, newOwnerUserId, newOwnerPlayerId);
+        MetaverseNetworkBehaviour[] behaviours = GetNetworkBehaviours();
+        if (behaviours == null) return;
+
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MetaverseNetworkBehaviour behaviour = behaviours[i];
+            if (behaviour == null) continue;
+
+            try
+            {
+                behaviour.OnOwnershipChanged(previousOwnerUserId, newOwnerUserId, previousOwnerPlayerId, newOwnerPlayerId, isLocalOwner);
+                if (logBehaviourCallbacks)
+                {
+                    Debug.Log("[MetaverseNetworkIdentity] Behaviour callback | netId=" + netId +
+                              " | behaviour=" + behaviour.GetType().Name + " | callback=OnOwnershipChanged");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex, behaviour);
+            }
+        }
+
+        OwnershipChanged?.Invoke(this);
+    }
+
     private void InvokeOnBehaviours(MetaverseNetworkBehaviour[] behaviours, string callbackName, Action<MetaverseNetworkBehaviour> callback)
     {
         if (behaviours == null || callback == null) return;
@@ -260,6 +424,12 @@ public class MetaverseNetworkIdentity : MonoBehaviour
                 Debug.LogException(ex, behaviour);
             }
         }
+    }
+
+    private int ParseConnectionId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return -1;
+        return int.TryParse(value.Trim(), out int parsed) ? parsed : -1;
     }
 
     private string SafeTrim(string value)

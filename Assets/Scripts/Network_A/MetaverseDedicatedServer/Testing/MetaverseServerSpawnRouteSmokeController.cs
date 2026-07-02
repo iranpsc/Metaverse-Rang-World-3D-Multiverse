@@ -10,6 +10,7 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
 
     [Header("Auto Smoke")]
     [SerializeField] private bool autoRunInBatchMode = true;
+    [SerializeField] private bool useNetworkServerApi = true;
     [SerializeField] private int spawnWhenPlayerCountAtLeast = 1;
     [SerializeField] private int secondSpawnWhenPlayerCountAtLeast = 2;
     [SerializeField] private float spawnDelayAfterConditionSeconds = 3f;
@@ -24,12 +25,21 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
 
     private bool started;
     private bool completed;
+    private int issuedSpawnCount;
+    private int issuedDespawnCount;
+    private string lastRejectReason = string.Empty;
     private MetaverseNetworkIdentity firstSpawnedIdentity;
     private MetaverseNetworkIdentity secondSpawnedIdentity;
+
+    public bool IsCompleted => completed;
+    public int IssuedSpawnCount => issuedSpawnCount;
+    public int IssuedDespawnCount => issuedDespawnCount;
+    public string LastRejectReason => lastRejectReason;
 
     public void Bind(MetaverseSpawnManager manager)
     {
         spawnManager = manager;
+        TryStart();
     }
 
     private void OnEnable()
@@ -71,7 +81,7 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseServerSpawnRouteSmokeController] Waiting for first spawn players | required=" + spawnWhenPlayerCountAtLeast);
+            Debug.Log("[MetaverseServerSpawnRouteSmokeController] Waiting for first spawn players | phase=33A | mirrorRoute=NetworkServer.Spawn | required=" + spawnWhenPlayerCountAtLeast);
         }
 
         while (playerRegistry.GetCurrentPlayerCount() < spawnWhenPlayerCountAtLeast)
@@ -79,16 +89,13 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
             yield return new WaitForSeconds(0.5f);
         }
 
-        if (spawnDelayAfterConditionSeconds > 0f)
-        {
-            yield return new WaitForSeconds(spawnDelayAfterConditionSeconds);
-        }
-
+        if (spawnDelayAfterConditionSeconds > 0f) yield return new WaitForSeconds(spawnDelayAfterConditionSeconds);
         firstSpawnedIdentity = TrySpawnTestObject("A", firstSpawnPosition);
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseServerSpawnRouteSmokeController] Waiting for second spawn players | required=" + secondSpawnWhenPlayerCountAtLeast +
+            Debug.Log("[MetaverseServerSpawnRouteSmokeController] Waiting for second spawn players | phase=33A | mirrorRoute=NetworkServer.Spawn" +
+                      " | required=" + secondSpawnWhenPlayerCountAtLeast +
                       " | current=" + playerRegistry.GetCurrentPlayerCount());
         }
 
@@ -111,28 +118,28 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
 
             if (!firstDespawned && now >= firstDespawnAt)
             {
-                TryDespawnTestObject(firstSpawnedIdentity, "spawn_route_smoke_test_first_completed");
+                TryDespawnTestObject(firstSpawnedIdentity, "phase33A_spawn_route_first_completed");
                 firstSpawnedIdentity = null;
                 firstDespawned = true;
             }
 
             if (!secondDespawned && now >= secondDespawnAt)
             {
-                TryDespawnTestObject(secondSpawnedIdentity, "spawn_route_smoke_test_second_completed");
+                TryDespawnTestObject(secondSpawnedIdentity, "phase33A_spawn_route_second_completed");
                 secondSpawnedIdentity = null;
                 secondDespawned = true;
             }
 
-            if (!firstDespawned || !secondDespawned)
-            {
-                yield return new WaitForSeconds(0.5f);
-            }
+            if (!firstDespawned || !secondDespawned) yield return new WaitForSeconds(0.5f);
         }
 
         completed = true;
         if (logMessages)
         {
-            Debug.Log("[MetaverseServerSpawnRouteSmokeController] Smoke flow completed | expectedRoutes=game/spawn,game/snapshot,game/despawn");
+            Debug.Log("[MetaverseServerSpawnRouteSmokeController] Smoke flow completed | phase=33A | expected=NetworkServer.Spawn->game/spawn->NetworkServer.Despawn->game/despawn" +
+                      " | issuedSpawnCount=" + issuedSpawnCount +
+                      " | issuedDespawnCount=" + issuedDespawnCount +
+                      " | summary=" + GetSmokeDebugSummary());
         }
     }
 
@@ -141,37 +148,55 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
         EnsureReferences();
         if (spawnManager == null)
         {
-            Debug.LogWarning("[MetaverseServerSpawnRouteSmokeController] Spawn smoke failed. SpawnManager is missing | label=" + label);
+            SetRejectReason("spawn_manager_missing");
+            Debug.LogWarning("[MetaverseServerSpawnRouteSmokeController] Spawn smoke failed. SpawnManager is missing | label=" + label + " | phase=33A");
             return null;
         }
 
         GameObject prefab = MetaverseRuntimeSpawnTestPrefabInstaller.InstallRuntimeTestPrefab(spawnManager, logMessages);
         if (prefab == null)
         {
-            Debug.LogWarning("[MetaverseServerSpawnRouteSmokeController] Spawn smoke failed. Runtime prefab is missing | label=" + label);
+            SetRejectReason("runtime_prefab_missing");
+            Debug.LogWarning("[MetaverseServerSpawnRouteSmokeController] Spawn smoke failed. Runtime prefab is missing | label=" + label + " | phase=33A");
             return null;
         }
 
-        GameObject obj = Instantiate(prefab, position, Quaternion.identity);
-        obj.name = "Metaverse_Spawn_Test_Cube_Server_" + label;
-        obj.SetActive(true);
+        MetaverseNetworkIdentity spawnedIdentity;
+        bool spawned;
 
-        MetaverseNetworkIdentity identity = obj.GetComponent<MetaverseNetworkIdentity>();
-        if (identity == null) identity = obj.AddComponent<MetaverseNetworkIdentity>();
-        identity.AssignPrefabId(MetaverseRuntimeSpawnTestPrefabInstaller.TestPrefabId);
-
-        MetaverseNetworkIdentity spawnedIdentity = spawnManager.Spawn(obj, -1);
-
-        if (spawnedIdentity == null)
+        if (useNetworkServerApi)
         {
-            Debug.LogWarning("[MetaverseServerSpawnRouteSmokeController] Spawn smoke failed. SpawnManager returned null | label=" + label);
-            Destroy(obj);
+            spawned = MetaverseNetworkServer.SpawnPrefab(MetaverseRuntimeSpawnTestPrefabInstaller.TestPrefabId, position, Quaternion.identity, out spawnedIdentity);
+        }
+        else
+        {
+            GameObject obj = Instantiate(prefab, position, Quaternion.identity);
+            obj.name = "Metaverse_Spawn_Test_Cube_Server_" + label;
+            obj.SetActive(true);
+            MetaverseNetworkIdentity identity = obj.GetComponent<MetaverseNetworkIdentity>();
+            if (identity == null) identity = obj.AddComponent<MetaverseNetworkIdentity>();
+            identity.AssignPrefabId(MetaverseRuntimeSpawnTestPrefabInstaller.TestPrefabId);
+            spawnedIdentity = spawnManager.Spawn(obj, -1);
+            spawned = spawnedIdentity != null;
+            if (!spawned) Destroy(obj);
+        }
+
+        if (!spawned || spawnedIdentity == null)
+        {
+            SetRejectReason("spawn_failed");
+            Debug.LogWarning("[MetaverseServerSpawnRouteSmokeController] Spawn smoke failed. Spawn returned null | label=" + label +
+                             " | phase=33A | managerReject=" + Safe(spawnManager.LastSpawnRejectReason));
             return null;
         }
 
-        Debug.Log("[MetaverseServerSpawnRouteSmokeController] Smoke spawn issued | label=" + label +
+        spawnedIdentity.gameObject.name = "Metaverse_Spawn_Test_Cube_Server_" + label;
+        issuedSpawnCount++;
+        SetRejectReason(string.Empty);
+
+        Debug.Log("[MetaverseServerSpawnRouteSmokeController] Smoke spawn issued | phase=33A | mirrorRoute=NetworkServer.SpawnPrefab" +
+                  " | label=" + label +
                   " | netId=" + spawnedIdentity.NetId +
-                  " | prefabId=" + spawnedIdentity.PrefabId +
+                  " | prefabId=" + Safe(spawnedIdentity.PrefabId) +
                   " | currentPlayers=" + (playerRegistry != null ? playerRegistry.GetCurrentPlayerCount() : -1) +
                   " | expectedOutgoingRoute=game/spawn");
         return spawnedIdentity;
@@ -179,17 +204,27 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
 
     private void TryDespawnTestObject(MetaverseNetworkIdentity identity, string reason)
     {
-        if (spawnManager == null || identity == null)
-        {
-            return;
-        }
-
+        if (identity == null) return;
         int netId = identity.NetId;
-        spawnManager.Despawn(identity.gameObject, reason);
+        if (useNetworkServerApi) MetaverseNetworkServer.Despawn(identity, reason);
+        else if (spawnManager != null) spawnManager.Despawn(identity.gameObject, reason);
 
-        Debug.Log("[MetaverseServerSpawnRouteSmokeController] Smoke despawn issued | netId=" + netId +
-                  " | reason=" + reason +
+        issuedDespawnCount++;
+        Debug.Log("[MetaverseServerSpawnRouteSmokeController] Smoke despawn issued | phase=33A | mirrorRoute=NetworkServer.Despawn" +
+                  " | netId=" + netId +
+                  " | reason=" + Safe(reason) +
                   " | expectedOutgoingRoute=game/despawn");
+    }
+
+    public string GetSmokeDebugSummary()
+    {
+        return "Phase33A ServerSpawnRouteSmoke" +
+               " | completed=" + completed +
+               " | spawns=" + issuedSpawnCount +
+               " | despawns=" + issuedDespawnCount +
+               " | spawnedCount=" + (spawnManager != null ? spawnManager.SpawnedCount : -1) +
+               " | players=" + (playerRegistry != null ? playerRegistry.GetCurrentPlayerCount() : -1) +
+               " | lastReject=" + Safe(lastRejectReason);
     }
 
     private void EnsureReferences()
@@ -204,5 +239,15 @@ public class MetaverseServerSpawnRouteSmokeController : MonoBehaviour
             playerRegistry = FindObjectOfType<DedicatedPlayerRegistry>();
 #endif
         }
+    }
+
+    private void SetRejectReason(string reason)
+    {
+        lastRejectReason = Safe(reason);
+    }
+
+    private string Safe(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
     }
 }

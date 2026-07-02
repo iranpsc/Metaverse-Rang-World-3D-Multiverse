@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "MetaverseNetworkPrefabRegistry", menuName = "Metaverse/Dedicated Server/Prefab Registry")]
@@ -32,6 +33,7 @@ public class MetaverseNetworkPrefabRegistry : ScriptableObject
     }
 
     public IReadOnlyList<Entry> Entries => prefabs;
+    public bool IsCacheBuilt => cacheBuilt;
 
     public void RegisterPrefab(GameObject prefab)
     {
@@ -99,6 +101,25 @@ public class MetaverseNetworkPrefabRegistry : ScriptableObject
         return false;
     }
 
+    public bool TryGetPrefabIdByName(string prefabName, out string prefabId)
+    {
+        EnsureCache();
+        prefabId = string.Empty;
+        string cleanName = RemoveCloneSuffix(prefabName);
+        if (string.IsNullOrWhiteSpace(cleanName)) return false;
+
+        for (int i = 0; i < prefabs.Count; i++)
+        {
+            Entry entry = prefabs[i];
+            if (entry == null || entry.prefab == null) continue;
+            if (!string.Equals(RemoveCloneSuffix(entry.prefab.name), cleanName, StringComparison.Ordinal)) continue;
+            prefabId = SafeTrim(entry.prefabId);
+            return !string.IsNullOrWhiteSpace(prefabId);
+        }
+
+        return false;
+    }
+
     public bool ContainsPrefabId(string prefabId)
     {
         EnsureCache();
@@ -106,10 +127,27 @@ public class MetaverseNetworkPrefabRegistry : ScriptableObject
         return dictPrefabById.ContainsKey(prefabId);
     }
 
+    public bool IsRegistered(string prefabId)
+    {
+        return ContainsPrefabId(prefabId);
+    }
+
+    public bool IsRegistered(GameObject prefab)
+    {
+        return TryGetPrefabId(prefab, out _);
+    }
+
     public List<string> GetPrefabIds()
     {
         EnsureCache();
         return new List<string>(dictPrefabById.Keys);
+    }
+
+    public string GetRegisteredPrefabIdsCsv()
+    {
+        List<string> ids = GetPrefabIds();
+        ids.Sort(StringComparer.Ordinal);
+        return string.Join(",", ids);
     }
 
     public void RebuildCache()
@@ -156,6 +194,16 @@ public class MetaverseNetworkPrefabRegistry : ScriptableObject
                 if (logWarnings) Debug.LogWarning($"[MetaverseNetworkPrefabRegistry] Prefab has no MetaverseNetworkIdentity | prefab={entry.prefab.name}");
             }
         }
+    }
+
+    public string GetDebugSummary()
+    {
+        EnsureCache();
+        StringBuilder sb = new StringBuilder();
+        sb.Append("count=").Append(dictPrefabById.Count);
+        sb.Append(" | cacheBuilt=").Append(cacheBuilt);
+        sb.Append(" | prefabIds=").Append(GetRegisteredPrefabIdsCsv());
+        return sb.ToString();
     }
 
     private void EnsureCache()

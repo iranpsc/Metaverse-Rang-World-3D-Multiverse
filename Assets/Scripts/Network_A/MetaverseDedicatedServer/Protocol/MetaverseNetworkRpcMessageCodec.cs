@@ -10,9 +10,19 @@ public static class MetaverseNetworkRpcMessageCodec
         return CreateEnvelopeJson(RealtimeMessageTypes.Command, payload, roomId);
     }
 
+    public static string CreateCmdEnvelopeJson(MetaverseNetworkRpcPayload payload, string roomId = "")
+    {
+        return CreateCommandEnvelopeJson(payload, roomId);
+    }
+
     public static string CreateClientRpcEnvelopeJson(MetaverseNetworkRpcPayload payload, string roomId = "")
     {
         return CreateEnvelopeJson(RealtimeMessageTypes.ClientRpc, payload, roomId);
+    }
+
+    public static string CreateRpcEnvelopeJson(MetaverseNetworkRpcPayload payload, string roomId = "")
+    {
+        return CreateClientRpcEnvelopeJson(payload, roomId);
     }
 
     public static string CreateTargetRpcEnvelopeJson(MetaverseNetworkRpcPayload payload, string roomId = "")
@@ -29,8 +39,12 @@ public static class MetaverseNetworkRpcMessageCodec
         if (string.IsNullOrWhiteSpace(safeType)) return string.Empty;
 
         payload.type = safeType;
+        payload.SetMethodName(payload.ReadMethodName());
         if (!string.IsNullOrWhiteSpace(roomId)) payload.roomId = roomId.Trim();
-        if (payload.clientTimeUnixMs <= 0) payload.clientTimeUnixMs = NowUnixMs();
+        if (payload.clientTimeUnixMs <= 0 && safeType == RealtimeMessageTypes.Command) payload.clientTimeUnixMs = NowUnixMs();
+        if (payload.serverTimeUnixMs <= 0 && safeType != RealtimeMessageTypes.Command) payload.serverTimeUnixMs = NowUnixMs();
+        payload.mirrorRoute = MetaverseDedicatedMessageTypes.ReadMirrorLikeRoute(safeType);
+        payload.NormalizeDefaults();
 
         string payloadJson = JsonUtility.ToJson(payload);
         return DedicatedRealtimeEnvelopeCodec.WrapGamePayload(safeType, payloadJson, payload.roomId);
@@ -67,6 +81,11 @@ public static class MetaverseNetworkRpcMessageCodec
         return TryReadPayload(rawJson, RealtimeMessageTypes.ClientRpc, out payload);
     }
 
+    public static bool TryReadRpcPayload(string rawJson, out MetaverseNetworkRpcPayload payload)
+    {
+        return TryReadClientRpcPayload(rawJson, out payload);
+    }
+
     public static bool TryReadTargetRpcPayload(string rawJson, out MetaverseNetworkRpcPayload payload)
     {
         return TryReadPayload(rawJson, RealtimeMessageTypes.TargetRpc, out payload);
@@ -78,11 +97,9 @@ public static class MetaverseNetworkRpcMessageCodec
         if (string.IsNullOrWhiteSpace(rawJson)) return false;
 
         string messageType = DedicatedRealtimeEnvelopeCodec.ReadMessageType(rawJson);
-        if (!string.IsNullOrWhiteSpace(expectedType) &&
-            !string.Equals(messageType, expectedType, StringComparison.Ordinal))
-        {
-            return false;
-        }
+        if (string.IsNullOrWhiteSpace(messageType)) messageType = ReadLegacyType(rawJson);
+
+        if (!string.IsNullOrWhiteSpace(expectedType) && !string.Equals(messageType, expectedType, StringComparison.Ordinal)) return false;
 
         string payloadJson = DedicatedRealtimeEnvelopeCodec.ReadPayloadOrRawJson(rawJson);
         if (string.IsNullOrWhiteSpace(payloadJson)) return false;
@@ -92,8 +109,11 @@ public static class MetaverseNetworkRpcMessageCodec
             MetaverseNetworkRpcPayload parsed = JsonUtility.FromJson<MetaverseNetworkRpcPayload>(payloadJson);
             if (parsed == null) return false;
             if (string.IsNullOrWhiteSpace(parsed.type)) parsed.type = messageType;
+            parsed.SetMethodName(parsed.ReadMethodName());
+            parsed.mirrorRoute = MetaverseDedicatedMessageTypes.ReadMirrorLikeRoute(parsed.type);
+            parsed.NormalizeDefaults();
             payload = parsed;
-            return true;
+            return payload.HasValidNetworkTarget();
         }
         catch (Exception ex)
         {
@@ -126,7 +146,30 @@ public static class MetaverseNetworkRpcMessageCodec
 
     public static string ReadRouteForLog(string rawJson)
     {
-        return DedicatedRealtimeEnvelopeCodec.ReadRouteForLog(rawJson);
+        string route = DedicatedRealtimeEnvelopeCodec.ReadRouteForLog(rawJson);
+        string type = DedicatedRealtimeEnvelopeCodec.ReadMessageType(rawJson);
+        if (string.IsNullOrWhiteSpace(type)) type = ReadLegacyType(rawJson);
+        return route + " | mirrorRoute=" + MetaverseDedicatedMessageTypes.ReadMirrorLikeRoute(type);
+    }
+
+    public static string ReadMirrorLikeRouteForLog(string rawJson)
+    {
+        string type = DedicatedRealtimeEnvelopeCodec.ReadMessageType(rawJson);
+        if (string.IsNullOrWhiteSpace(type)) type = ReadLegacyType(rawJson);
+        return MetaverseDedicatedMessageTypes.ReadMirrorLikeRoute(type);
+    }
+
+    private static string ReadLegacyType(string rawJson)
+    {
+        try
+        {
+            MetaverseNetworkRpcPayload payload = JsonUtility.FromJson<MetaverseNetworkRpcPayload>(rawJson);
+            return payload == null ? string.Empty : SafeTrim(payload.type);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static long NowUnixMs()

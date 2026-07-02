@@ -163,6 +163,11 @@ MonoBehaviour:
   autoAddMissingComponents: 1
   runOnAwake: 1
   runOnStart: 1
+  allowRepeatedAutoFix: 0
+  runtimeConfig: {fileID: 0}
+  autoInstallMetaverseSpawnPipeline: 1
+  autoBindMirrorLikeSmokeController: 1
+  bindMetaverseBridgesToRouter: 1
   verboseLogs: 1
 --- !u!114 &1415647047
 MonoBehaviour:
@@ -180,6 +185,7 @@ MonoBehaviour:
   disableWebSocketEcho: 1
   runOnAwake: 1
   runOnStart: 1
+  allowRepeatedAutoFix: 0
   verboseLogs: 1
 --- !u!114 &1415647048
 MonoBehaviour:
@@ -220,10 +226,21 @@ MonoBehaviour:
   webSocketServer: {fileID: 1415647053}
   playerRegistry: {fileID: 1415647049}
   playerStateStore: {fileID: 1415647048}
+  spawnNetworkBridge: {fileID: 0}
+  rpcNetworkBridge: {fileID: 0}
+  stateSyncBridge: {fileID: 0}
+  ownershipBridge: {fileID: 0}
+  playerMovementBridge: {fileID: 0}
   sendStateAckToSender: 1
   broadcastStateToSender: 0
   broadcastPresenceEvents: 1
+  dedupePlayerStateMessages: 1
+  logDuplicatePlayerStateMessages: 0
   logPlayerStateMessages: 1
+  logNetworkCommandMessages: 1
+  logNetworkCommandRejects: 1
+  useRpcBridgeRejectReasonForCommandErrors: 1
+  logMessageFormat: 1
 --- !u!114 &1415647051
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -239,9 +256,11 @@ MonoBehaviour:
   webSocketServer: {fileID: 1415647053}
   ticketVerifier: {fileID: 1415647052}
   playerRegistry: {fileID: 1415647049}
+  runtime: {fileID: 0}
   closeConnectionOnAuthFailed: 1
   ignoreNonAuthMessagesBeforeAuth: 1
   rejectSecondAuthTicket: 1
+  logMessageFormat: 1
 --- !u!114 &1415647052
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -255,6 +274,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Network_A.GameServer.Auth.DedicatedTicketVerifier
   runtime: {fileID: 1415647056}
+  controlClient: {fileID: 0}
+  renewServiceTokenBeforeVerify: 1
+  retryVerifyOnceOnTokenExpired: 1
   timeoutSeconds: 15
   logRawResponse: 1
 --- !u!114 &1415647053
@@ -273,6 +295,8 @@ MonoBehaviour:
   autoStartOnRuntimeStarted: 1
   echoTestMessages: 0
   maxConnections: 20
+  logTextMessages: 1
+  logFullTextMessages: 0
 --- !u!114 &1415647054
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -292,6 +316,8 @@ MonoBehaviour:
   registerBeforeHeartbeat: 1
   currentPlayersForTest: 0
   usePlayerRegistryCount: 1
+  sendImmediateHeartbeatOnPlayerCountChanged: 1
+  logPlayerCountChanges: 1
 --- !u!114 &1415647055
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -308,8 +334,14 @@ MonoBehaviour:
   timeoutSeconds: 15
   autoRegisterOnRuntimeStarted: 0
   logRawResponse: 1
+  logFullSuccessfulResponse: 0
   sendOfflineOnRuntimeStopped: 1
   sendOfflineOnDestroy: 1
+  serviceTokenRenewalEnabled: 1
+  serviceTokenRenewalTtlSeconds: 300
+  serviceTokenRenewalSafetyMarginSeconds: 90
+  serviceTokenRenewalRetryCooldownSeconds: 20
+  playerRegistry: {fileID: 0}
 --- !u!114 &1415647056
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -322,7 +354,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: aefd79333ec43c34d97aee8ab7911e1d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Network_A.GameServer.DedicatedServerRuntime
-  config: {fileID: 0}
+  config: {fileID: 1415647057}
 --- !u!114 &1415647057
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -339,10 +371,10 @@ MonoBehaviour:
   autoStart: 1
   verboseLogs: 1
   allowRuntimeOverrides: 1
-  autoStartWhenServerFlagExists: 1
+  autoStartWhenServerFlagExists: 0
   logRuntimeOverrideSource: 1
   controlBaseUrl: https://dev-world-3d.metarang.com
-  serviceToken: mgst1.eyJzZXJ2ZXJJZCI6ImRzX3dpbmRvd3NfbG9jYWxfMDAxIiwicHVycG9zZSI6ImRlZGljYXRlZF9zZXJ2ZXIiLCJpc3N1ZWRBdCI6MTc4MjcwMjYwNjk2OCwiZXhwaXJlc0F0IjoxNzg1Mjk0NjA2OTY4LCJub25jZSI6ImFlZjcxZGNjYWNmZDQ4OTgwZDM4YzU0YWQ2MzE5ODAwIiwibWV0YWRhdGEiOnsic291cmNlIjoiY3JlYXRlX2dhbWVfc2VydmVyX3NlcnZpY2VfdG9rZW5fdG9vbCIsInJlcXVlc3RlZFR0bFNlY29uZHMiOjI1OTIwMDB9fQ.68d08583d621b645309273fa03602a708c6148290a56ed3adf2e24732a4e383f
+  serviceToken: mgst1.eyJzZXJ2ZXJJZCI6ImRzX3dpbmRvd3NfbG9jYWxfMDAxIiwicHVycG9zZSI6ImRlZGljYXRlZF9zZXJ2ZXIiLCJpc3N1ZWRBdCI6MTc4MjkzNDIxMTA2OCwiZXhwaXJlc0F0IjoxNzgyOTM0NTExMDY4LCJub25jZSI6ImU1NmE1NzUyY2M0MzlmMjRmMmYyNDgyYTYwNTQyYjRiIiwibWV0YWRhdGEiOnsic291cmNlIjoiY3JlYXRlX2dhbWVfc2VydmVyX3NlcnZpY2VfdG9rZW5fdG9vbCIsInJlcXVlc3RlZFR0bFNlY29uZHMiOjMwMH19.bab65f2ab7c3d5943b131619059a23ac680f3021cdc47a80990c715806df1bd0
   serverId: ds_windows_local_001
   roomId: ' '
   roomName: 
@@ -392,8 +424,124 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1001 &1418978903
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 933.6527
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 569.5032
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 440573469369978907, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8253694493860665324, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+      propertyPath: m_Name
+      value: Dedicated_Players_Root
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: fcdab2b5c4575a54bbd5f15960a8b35b, type: 3}
+--- !u!1001 &1607599755
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 2354765065720099879, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_Name
+      value: Shared_World_3D_Root
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 933.6527
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 569.5032
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5235653606153390271, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 0777228ee75b425408d527c9e238fcce, type: 3}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
   - {fileID: 1415647059}
+  - {fileID: 1607599755}
+  - {fileID: 1418978903}

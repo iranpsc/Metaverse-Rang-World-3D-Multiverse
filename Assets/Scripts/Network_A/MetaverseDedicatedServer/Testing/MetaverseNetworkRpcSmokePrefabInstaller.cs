@@ -24,7 +24,7 @@ public static class MetaverseNetworkRpcSmokePrefabInstaller
             EnsureProbeComponents(existingPrefab, safePrefabId);
             if (logMessages)
             {
-                Debug.Log("[MetaverseNetworkRpcSmokePrefabInstaller] Runtime RPC probe prefab already registered | prefabId=" + safePrefabId);
+                Debug.Log("[MetaverseNetworkRpcSmokePrefabInstaller] Runtime RPC probe prefab already registered | phase=33A | prefabId=" + safePrefabId);
             }
             return existingPrefab;
         }
@@ -48,11 +48,19 @@ public static class MetaverseNetworkRpcSmokePrefabInstaller
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseNetworkRpcSmokePrefabInstaller] Runtime RPC probe prefab registered | prefabId=" + safePrefabId +
+            Debug.Log("[MetaverseNetworkRpcSmokePrefabInstaller] Runtime RPC probe prefab registered | phase=33A | mirrorRoute=Cmd->Rpc->TargetRpc" +
+                      " | prefabId=" + safePrefabId +
                       " | registry=" + registry.name);
         }
 
         return template;
+    }
+
+    public static bool IsRuntimeRpcProbePrefabInstalled(MetaverseSpawnManager spawnManager, string prefabId)
+    {
+        if (spawnManager == null || spawnManager.PrefabRegistry == null) return false;
+        string safePrefabId = string.IsNullOrWhiteSpace(prefabId) ? DefaultPrefabId : prefabId.Trim();
+        return spawnManager.PrefabRegistry.TryGetPrefab(safePrefabId, out GameObject prefab) && prefab != null;
     }
 
     private static void EnsureProbeComponents(GameObject obj, string prefabId)

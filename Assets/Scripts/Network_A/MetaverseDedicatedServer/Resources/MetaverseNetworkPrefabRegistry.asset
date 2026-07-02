@@ -17,4 +17,6 @@ MonoBehaviour:
     prefab: {fileID: 1539947945379524784, guid: 3f0450f30e4a66a49adc8e5a824cac47, type: 3}
   - prefabId: player_remote
     prefab: {fileID: 5732834497862297417, guid: 0fec470ee8e01be4aa7fe87af2801ba0, type: 3}
+  - prefabId: metaverse_player_object_probe
+    prefab: {fileID: 0}
   logWarnings: 1

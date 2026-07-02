@@ -23,9 +23,17 @@ namespace Network_A.GameServer
         [SerializeField] private bool sendOfflineOnRuntimeStopped = true;
         [SerializeField] private bool sendOfflineOnDestroy = true;
 
+        [Header("Service Token Renewal")]
+        [SerializeField] private bool serviceTokenRenewalEnabled = true;
+        [SerializeField] private int serviceTokenRenewalTtlSeconds = 300;
+        [SerializeField] private int serviceTokenRenewalSafetyMarginSeconds = 90;
+        [SerializeField] private int serviceTokenRenewalRetryCooldownSeconds = 20;
+
         public bool IsRegistered { get; private set; }
         public string LastRegisterReason { get; private set; }
         public string LastHeartbeatReason { get; private set; }
+        public string LastServiceTokenRenewReason { get; private set; }
+        public long LastServiceTokenExpiresAtMs { get; private set; }
         public string LastError { get; private set; }
 
         public event Action RegisterSucceeded;
@@ -39,6 +47,9 @@ namespace Network_A.GameServer
 
         private bool isSendingOffline;
         private bool offlineSentForCurrentRuntime;
+        private string renewedServiceToken = string.Empty;
+        private float lastServiceTokenRenewAttemptAt = -9999f;
+        private bool isRenewingServiceToken;
 
         //* این تابع رفرنس ران تایم ددیکیتد سرور را در شروع آبجکت پیدا می کند.
         private void Awake()
@@ -98,6 +109,11 @@ namespace Network_A.GameServer
         {
             offlineSentForCurrentRuntime = false;
             isSendingOffline = false;
+            renewedServiceToken = string.Empty;
+            LastServiceTokenExpiresAtMs = 0;
+            LastServiceTokenRenewReason = string.Empty;
+            lastServiceTokenRenewAttemptAt = -9999f;
+            isRenewingServiceToken = false;
 
             if (!autoRegisterOnRuntimeStarted) return;
 
@@ -157,7 +173,7 @@ namespace Network_A.GameServer
 
             DedicatedRegisterRequestDto request = new DedicatedRegisterRequestDto
             {
-                serviceToken = config.serviceToken,
+                serviceToken = ResolveServiceToken(config),
                 serverId = config.serverId,
                 host = config.publicHost,
                 port = config.publicPort,
@@ -248,6 +264,284 @@ namespace Network_A.GameServer
             }
         }
 
+        //* این تابع سرویس توکن فعال را برای ماژول های دیگر ددیکیتد سرور برمی گرداند.
+        public string GetActiveServiceToken()
+        {
+            DedicatedServerConfigData config = GetSafeConfig();
+            return ResolveServiceToken(config);
+        }
+
+        //* این تابع قبل از استفاده حساس، در صورت نیاز سرویس توکن را تازه می کند و مقدار فعال را برمی گرداند.
+        public async Task<string> GetFreshServiceTokenAsync(CancellationToken cancellationToken = default, bool forceRenew = false)
+        {
+            if (forceRenew)
+            {
+                await RenewServiceTokenAsync(cancellationToken);
+            }
+            else
+            {
+                await RenewServiceTokenIfNeededAsync(cancellationToken);
+            }
+
+            return GetActiveServiceToken();
+        }
+
+        //* این تابع بررسی می کند آیا سرویس توکن ددیکیتد سرور باید تمدید شود یا نه.
+        public bool ShouldRenewServiceToken()
+        {
+            if (!serviceTokenRenewalEnabled) return false;
+            if (isRenewingServiceToken) return false;
+
+            DedicatedServerConfigData config = GetSafeConfig();
+            if (config == null) return false;
+            if (string.IsNullOrWhiteSpace(ResolveServiceToken(config))) return false;
+
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long safetyMs = Mathf.Max(5, serviceTokenRenewalSafetyMarginSeconds) * 1000L;
+
+            if (LastServiceTokenExpiresAtMs <= 0) return true;
+            return nowMs >= LastServiceTokenExpiresAtMs - safetyMs;
+        }
+
+        //* این تابع در صورت نزدیک شدن سرویس توکن به انقضا، آن را از نود جی اس تمدید می کند.
+        public async Task<bool> RenewServiceTokenIfNeededAsync(CancellationToken cancellationToken = default)
+        {
+            if (!ShouldRenewServiceToken()) return true;
+
+            float now = Time.realtimeSinceStartup;
+            if (now - lastServiceTokenRenewAttemptAt < Mathf.Max(1, serviceTokenRenewalRetryCooldownSeconds))
+            {
+                return true;
+            }
+
+            return await RenewServiceTokenAsync(cancellationToken);
+        }
+
+        //* این تابع سرویس توکن جدید را از کنترل نود جی اس دریافت می کند و برای درخواست های بعدی نگه می دارد.
+        [ContextMenu("Renew Dedicated Service Token Now")]
+        public async void Btn_RenewServiceTokenNow()
+        {
+            await RenewServiceTokenAsync();
+        }
+
+        //* این تابع سرویس توکن ددیکیتد سرور را به شکل مستقیم تمدید می کند.
+        public async Task<bool> RenewServiceTokenAsync(CancellationToken cancellationToken = default)
+        {
+            if (!serviceTokenRenewalEnabled) return true;
+            if (isRenewingServiceToken) return true;
+
+            DedicatedServerConfigData config = GetSafeConfig();
+
+            if (config == null)
+            {
+                LastError = "Dedicated runtime config is missing.";
+                Debug.LogError("[GameServerControlDedicatedClient] Service token renew failed | " + LastError);
+                return false;
+            }
+
+            string currentServiceToken = ResolveServiceToken(config);
+            if (string.IsNullOrWhiteSpace(currentServiceToken))
+            {
+                LastError = "Service token is empty.";
+                Debug.LogError("[GameServerControlDedicatedClient] Service token renew failed | " + LastError);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(config.serverId))
+            {
+                LastError = "serverId is empty.";
+                Debug.LogError("[GameServerControlDedicatedClient] Service token renew failed | " + LastError);
+                return false;
+            }
+
+            isRenewingServiceToken = true;
+            lastServiceTokenRenewAttemptAt = Time.realtimeSinceStartup;
+
+            try
+            {
+                DedicatedServiceTokenRenewRequestDto request = new DedicatedServiceTokenRenewRequestDto
+                {
+                    serviceToken = currentServiceToken,
+                    serverId = SafeTrim(config.serverId),
+                    roomId = ResolveHeartbeatRoomId(config),
+                    ttlSeconds = Mathf.Clamp(serviceTokenRenewalTtlSeconds, 30, 3600)
+                };
+
+                string url = BuildControlUrl(config.controlBaseUrl, "/game-server-control/dedicated/renew-service-token");
+                string json = JsonUtility.ToJson(request);
+
+                Debug.Log("[GameServerControlDedicatedClient] Service token renew request | serverId=" +
+                          request.serverId + " | roomId=" + request.roomId + " | ttlSeconds=" + request.ttlSeconds);
+
+                DedicatedHttpResult httpResult = await SendJsonPostAsync(url, json, cancellationToken);
+
+                if (!httpResult.IsSuccess)
+                {
+                    LastError = httpResult.ErrorMessage;
+                    Debug.LogError("[GameServerControlDedicatedClient] Service token renew failed | " + httpResult.ErrorMessage);
+                    return false;
+                }
+
+                DedicatedServiceTokenRenewResponseDto response = JsonUtility.FromJson<DedicatedServiceTokenRenewResponseDto>(httpResult.RawBody);
+
+                if (response == null || !response.success || response.data == null || string.IsNullOrWhiteSpace(response.data.serviceToken))
+                {
+                    string responseReason = response != null ? response.reason : "service_token_renew_parse_failed";
+                    string responseMessage = response != null ? response.message : httpResult.RawBody;
+
+                    LastError = responseReason + " | " + responseMessage;
+                    Debug.LogError("[GameServerControlDedicatedClient] Service token renew failed | " + LastError);
+                    return false;
+                }
+
+                renewedServiceToken = response.data.serviceToken;
+                LastServiceTokenExpiresAtMs = response.data.expiresAt;
+                LastServiceTokenRenewReason = response.reason;
+                LastError = string.Empty;
+
+                Debug.Log("[GameServerControlDedicatedClient] Service token renew ok | reason=" + response.reason +
+                          " | serverId=" + response.data.serverId +
+                          " | ttlSeconds=" + response.data.ttlSeconds +
+                          " | expiresAt=" + response.data.expiresAt);
+
+                return true;
+            }
+            finally
+            {
+                isRenewingServiceToken = false;
+            }
+        }
+
+        //* این تابع خروج یک پلیر را به نود جی اس گزارش می دهد تا سشن سمت کنترل هم تمیز شود.
+        public async Task<bool> ReportPlayerLeftAsync(
+            DedicatedPlayerSession session,
+            string reason,
+            CancellationToken cancellationToken = default)
+        {
+            if (session == null)
+            {
+                Debug.LogWarning("[GameServerControlDedicatedClient] Player left report skipped. Session is missing.");
+                return false;
+            }
+
+            DedicatedServerConfigData config = GetSafeConfig();
+
+            if (config == null)
+            {
+                Debug.LogError("[GameServerControlDedicatedClient] Player left report failed | Dedicated runtime config is missing.");
+                return false;
+            }
+
+            if (!ValidateServiceToken(config, out string tokenError))
+            {
+                Debug.LogError("[GameServerControlDedicatedClient] Player left report failed | " + tokenError);
+                return false;
+            }
+
+            DedicatedPlayerLeftRequestDto request = new DedicatedPlayerLeftRequestDto
+            {
+                serviceToken = ResolveServiceToken(config),
+                serverId = SafeValue(session.serverId, config.serverId),
+                roomId = SafeValue(session.roomId, config.roomId),
+                sessionId = SafeTrim(session.sessionId),
+                userId = SafeTrim(session.userId),
+                playerId = SafeValue(session.playerId, session.userId),
+                connectionId = SafeTrim(session.connectionId),
+                reason = SafeReason(reason),
+                currentPlayers = ReadCurrentPlayersFromRegistry(0)
+            };
+
+            if (string.IsNullOrWhiteSpace(request.serverId) ||
+                string.IsNullOrWhiteSpace(request.userId))
+            {
+                Debug.LogWarning("[GameServerControlDedicatedClient] Player left report skipped | serverId/userId missing.");
+                return false;
+            }
+
+            string url = BuildControlUrl(config.controlBaseUrl, "/game-server-control/dedicated/player-left");
+            string json = JsonUtility.ToJson(request);
+
+            Debug.Log("[GameServerControlDedicatedClient] Player left request | userId=" +
+                      request.userId + " | sessionId=" + request.sessionId +
+                      " | currentPlayers=" + request.currentPlayers +
+                      " | reason=" + request.reason);
+
+            DedicatedHttpResult httpResult = await SendJsonPostAsync(url, json, cancellationToken);
+
+            if (!httpResult.IsSuccess)
+            {
+                if (IsPlayerLeftIdempotentSuccess(httpResult.RawBody, httpResult.ErrorMessage, out string idempotentReason))
+                {
+                    Debug.LogWarning("[GameServerControlDedicatedClient] Player left already settled | reason=" +
+                                     idempotentReason + " | userId=" + request.userId +
+                                     " | sessionId=" + request.sessionId +
+                                     " | currentPlayers=" + request.currentPlayers);
+                    return true;
+                }
+
+                Debug.LogError("[GameServerControlDedicatedClient] Player left failed | " + httpResult.ErrorMessage);
+                return false;
+            }
+
+            DedicatedBasicResponseDto response = ParseBasicResponse(httpResult.RawBody);
+
+            if (response == null || !response.success)
+            {
+                string responseReason = response != null ? response.reason : "player_left_failed";
+                string responseMessage = response != null ? response.message : httpResult.RawBody;
+
+                if (IsPlayerLeftIdempotentSuccess(responseReason, responseMessage, out string idempotentReason))
+                {
+                    Debug.LogWarning("[GameServerControlDedicatedClient] Player left already settled | reason=" +
+                                     idempotentReason + " | userId=" + request.userId +
+                                     " | sessionId=" + request.sessionId +
+                                     " | currentPlayers=" + request.currentPlayers);
+                    return true;
+                }
+
+                Debug.LogError("[GameServerControlDedicatedClient] Player left failed | " +
+                               responseReason + " | " + responseMessage);
+                return false;
+            }
+
+            Debug.Log("[GameServerControlDedicatedClient] Player left ok | reason=" + response.reason +
+                      " | userId=" + request.userId +
+                      " | serverCurrentPlayers=" + request.currentPlayers);
+
+            return true;
+        }
+
+        private bool IsPlayerLeftIdempotentSuccess(string rawBody, string errorMessage, out string reason)
+        {
+            reason = ReadPlayerLeftIdempotentReason(rawBody);
+            if (!string.IsNullOrWhiteSpace(reason)) return true;
+
+            reason = ReadPlayerLeftIdempotentReason(errorMessage);
+            return !string.IsNullOrWhiteSpace(reason);
+        }
+
+        private string ReadPlayerLeftIdempotentReason(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+            string text = value.ToLowerInvariant();
+
+            if (text.Contains("player_not_found_in_server_sessions")) return "player_not_found_in_server_sessions";
+            if (text.Contains("player_already_removed")) return "player_already_removed";
+            if (text.Contains("player_not_found")) return "player_not_found";
+            if (text.Contains("session_already_closed")) return "session_already_closed";
+            if (text.Contains("session_closed")) return "session_closed";
+            if (text.Contains("empty_session_after_player_left")) return "empty_session_after_player_left";
+
+            return string.Empty;
+        }
+
+        private string SafeReason(string reason)
+        {
+            string safe = SafeTrim(reason);
+            return string.IsNullOrWhiteSpace(safe) ? "unknown" : safe;
+        }
+
         //* این تابع هارت بیت را با وضعیت آنلاین یا آفلاین ارسال می کند.
         private async Task<bool> SendHeartbeatWithStatusAsync(int currentPlayers, string status, bool isOffline, CancellationToken cancellationToken)
         {
@@ -269,7 +563,7 @@ namespace Network_A.GameServer
 
             DedicatedHeartbeatRequestDto request = new DedicatedHeartbeatRequestDto
             {
-                serviceToken = config.serviceToken,
+                serviceToken = ResolveServiceToken(config),
                 serverId = config.serverId,
                 roomId = heartbeatRoomId,
                 roomName = heartbeatRoomName,
@@ -384,6 +678,28 @@ namespace Network_A.GameServer
         private string SafeTrim(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        }
+
+        private string SafeValue(string value, string fallback)
+        {
+            string cleanedValue = SafeTrim(value);
+
+            if (!string.IsNullOrEmpty(cleanedValue))
+            {
+                return cleanedValue;
+            }
+
+            return SafeTrim(fallback);
+        }
+
+        private string ResolveServiceToken(DedicatedServerConfigData config)
+        {
+            if (!string.IsNullOrWhiteSpace(renewedServiceToken))
+            {
+                return renewedServiceToken.Trim();
+            }
+
+            return config == null ? string.Empty : SafeTrim(config.serviceToken);
         }
 
         //* این تابع کانفیگ فعال ران تایم را به شکل امن برمی گرداند.
@@ -604,6 +920,50 @@ namespace Network_A.GameServer
         public float cpuPercent;
         public int pingMs;
         public int uptimeSeconds;
+    }
+
+    [Serializable]
+    public class DedicatedPlayerLeftRequestDto
+    {
+        public string serviceToken;
+        public string serverId;
+        public string roomId;
+        public string sessionId;
+        public string userId;
+        public string playerId;
+        public string connectionId;
+        public string reason;
+        public int currentPlayers;
+    }
+
+    [Serializable]
+    public class DedicatedServiceTokenRenewRequestDto
+    {
+        public string serviceToken;
+        public string serverId;
+        public string roomId;
+        public int ttlSeconds;
+    }
+
+    [Serializable]
+    public class DedicatedServiceTokenRenewResponseDto
+    {
+        public bool success;
+        public string reason;
+        public string message;
+        public DedicatedServiceTokenRenewDataDto data;
+    }
+
+    [Serializable]
+    public class DedicatedServiceTokenRenewDataDto
+    {
+        public string serviceToken;
+        public string serverId;
+        public string roomId;
+        public long issuedAt;
+        public long expiresAt;
+        public int ttlSeconds;
+        public int renewAfterSeconds;
     }
 
     [Serializable]

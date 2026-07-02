@@ -43,6 +43,9 @@ namespace Network_A.Tests.Realtime
         [SerializeField] private int waitTimeoutMs = 15000;
         [SerializeField] private int reliableAckTimeoutMs = 5000;
 
+        [Header("Auth Refresh Gate")]
+        [SerializeField] private int accessTokenRefreshSkewSeconds = 60;
+
         [Header("Keep Alive")]
         [SerializeField] private bool enableTestKeepAlive = false;
         [SerializeField] private int keepAliveIntervalMs = 5000;
@@ -399,9 +402,11 @@ namespace Network_A.Tests.Realtime
                 isLeaveRoomRunning = false;
             }
 
+            accessToken = await EnsureFreshAccessTokenBeforeRealtimeAuthAsync(accessToken, tokenSource);
+
             if (string.IsNullOrWhiteSpace(accessToken))
             {
-                return Fail("Realtime access token is empty. tokenSource=" + SafeTokenSource(tokenSource));
+                return Fail("Realtime access token is empty after refresh gate. tokenSource=" + SafeTokenSource(tokenSource));
             }
 
             UpdateCurrentUserIdentityFromAccessToken(accessToken);
@@ -424,6 +429,115 @@ namespace Network_A.Tests.Realtime
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
             return true;
+        }
+
+
+        //* این تابع قبل از آث ریل تایم، اکسس توکن را تازه می کند تا توکن اکسپایر شده ارسال نشود.
+        private async Task<string> EnsureFreshAccessTokenBeforeRealtimeAuthAsync(string accessToken, string tokenSource)
+        {
+            string safeTokenSource = SafeTokenSource(tokenSource);
+
+            if (!IsAccessTokenRefreshRequired(accessToken))
+            {
+                return string.IsNullOrWhiteSpace(accessToken) ? string.Empty : accessToken.Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(SecureTokenStorage.GetRefreshToken()))
+            {
+                Log("Access token refresh is required before realtime auth, but refresh token is empty. tokenSource=" + safeTokenSource);
+                return string.Empty;
+            }
+
+            Log("Access token is expired or near expiry. Refreshing before realtime auth. tokenSource=" + safeTokenSource);
+
+            bool refreshed = await AuthRefreshManager.Refresh();
+
+            if (!refreshed)
+            {
+                Log("Refresh before realtime auth failed. tokenSource=" + safeTokenSource);
+                return string.Empty;
+            }
+
+            string refreshedToken = SecureTokenStorage.GetAccessToken();
+
+            if (string.IsNullOrWhiteSpace(refreshedToken))
+            {
+                Log("Refresh before realtime auth returned empty access token. tokenSource=" + safeTokenSource);
+                return string.Empty;
+            }
+
+            Log("Refresh before realtime auth succeeded. tokenSource=" + safeTokenSource);
+            return refreshedToken.Trim();
+        }
+
+        //* این تابع تشخیص می دهد اکسس توکن خالی، اکسپایر شده یا نزدیک اکسپایر است یا نه.
+        private bool IsAccessTokenRefreshRequired(string accessToken)
+        {
+            if (string.IsNullOrWhiteSpace(accessToken)) return true;
+
+            if (!TryReadJwtExpiryUnixSeconds(accessToken, out long expiresAtUnixSeconds))
+            {
+                return false;
+            }
+
+            long nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            int safeSkewSeconds = Mathf.Clamp(accessTokenRefreshSkewSeconds, 0, 3600);
+
+            return expiresAtUnixSeconds <= nowUnixSeconds + safeSkewSeconds;
+        }
+
+        //* این تابع زمان اکسپایر شدن توکن جی دبلیو تی را از کلیم exp می خواند.
+        private static bool TryReadJwtExpiryUnixSeconds(string token, out long expiresAtUnixSeconds)
+        {
+            expiresAtUnixSeconds = 0;
+
+            string payloadJson = ReadJwtPayloadJson(token);
+            if (string.IsNullOrWhiteSpace(payloadJson)) return false;
+
+            return TryExtractJsonLongValue(payloadJson, "exp", out expiresAtUnixSeconds);
+        }
+
+        //* این تابع مقدار عددی یک کلید جیسون را بدون وابستگی اضافه می خواند.
+        private static bool TryExtractJsonLongValue(string json, string key, out long value)
+        {
+            value = 0;
+
+            if (string.IsNullOrWhiteSpace(json) || string.IsNullOrWhiteSpace(key)) return false;
+
+            string pattern = "\"" + key + "\"";
+            int keyIndex = json.IndexOf(pattern, StringComparison.Ordinal);
+            if (keyIndex < 0) return false;
+
+            int colonIndex = json.IndexOf(':', keyIndex + pattern.Length);
+            if (colonIndex < 0) return false;
+
+            int valueStart = colonIndex + 1;
+            while (valueStart < json.Length && char.IsWhiteSpace(json[valueStart])) valueStart++;
+
+            bool quoted = valueStart < json.Length && json[valueStart] == '"';
+            if (quoted) valueStart++;
+
+            int valueEnd = valueStart;
+            while (valueEnd < json.Length)
+            {
+                char c = json[valueEnd];
+
+                if (quoted)
+                {
+                    if (c == '"') break;
+                }
+                else if (c == ',' || c == '}' || c == ']' || char.IsWhiteSpace(c))
+                {
+                    break;
+                }
+
+                valueEnd++;
+            }
+
+            if (valueEnd <= valueStart) return false;
+
+            string rawValue = json.Substring(valueStart, valueEnd - valueStart).Trim();
+            return long.TryParse(rawValue, out value);
         }
 
         private async Task<bool> ConnectAsync()

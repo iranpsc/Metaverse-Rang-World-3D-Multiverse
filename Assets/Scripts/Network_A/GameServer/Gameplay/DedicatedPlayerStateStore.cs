@@ -26,13 +26,41 @@ namespace Network_A.GameServer.Gameplay
         public event Action<DedicatedPlayerStateRecord> PlayerStateUpdated;
         public event Action<DedicatedPlayerStateRecord, string> PlayerStateRemoved;
 
+        public string LastStateRejectReason { get; private set; } = string.Empty;
+        public long LastAcceptedSequence { get; private set; } = 0;
+        public long LastRejectedSequence { get; private set; } = 0;
+
         //* این تابع آخرین وضعیت حرکتی پلیر احراز شده را ذخیره یا به روز می کند.
         public DedicatedPlayerStateRecord UpdateState(
             DedicatedPlayerSession session,
             DedicatedPlayerStateMessageDto message,
             long serverTimeUnixMs)
         {
-            if (session == null || message == null) return null;
+            LastStateRejectReason = string.Empty;
+            if (session == null)
+            {
+                LastStateRejectReason = "session_missing";
+                return null;
+            }
+
+            if (message == null)
+            {
+                LastStateRejectReason = "message_missing";
+                return null;
+            }
+
+            lock (syncLock)
+            {
+                if (dict_stateByConnectionId.TryGetValue(session.connectionId, out DedicatedPlayerStateRecord oldRecord))
+                {
+                    if (message.sequence > 0 && oldRecord.sequence > 0 && message.sequence <= oldRecord.sequence)
+                    {
+                        LastRejectedSequence = message.sequence;
+                        LastStateRejectReason = "stale_or_duplicate_sequence";
+                        return oldRecord;
+                    }
+                }
+            }
 
             DedicatedPlayerStateRecord record = new DedicatedPlayerStateRecord
             {
@@ -67,6 +95,7 @@ namespace Network_A.GameServer.Gameplay
                 dict_stateByConnectionId[session.connectionId] = record;
             }
 
+            LastAcceptedSequence = record.sequence;
             PlayerStateUpdated?.Invoke(record);
 
             return record;
@@ -117,6 +146,104 @@ namespace Network_A.GameServer.Gameplay
             {
                 return new List<DedicatedPlayerStateRecord>(dict_stateByConnectionId.Values);
             }
+        }
+
+
+        //* این تابع وضعیت آخر یک یوزر را برمی گرداند.
+        public DedicatedPlayerStateRecord GetByUserId(string userId)
+        {
+            string safeUserId = SafeTrim(userId);
+            if (string.IsNullOrWhiteSpace(safeUserId)) return null;
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerStateRecord record in dict_stateByConnectionId.Values)
+                {
+                    if (record == null) continue;
+                    if (string.Equals(SafeTrim(record.userId), safeUserId, StringComparison.Ordinal)) return record;
+                }
+            }
+
+            return null;
+        }
+
+        //* این تابع وضعیت آخر یک پلیر را برمی گرداند.
+        public DedicatedPlayerStateRecord GetByPlayerId(string playerId)
+        {
+            string safePlayerId = SafeTrim(playerId);
+            if (string.IsNullOrWhiteSpace(safePlayerId)) return null;
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerStateRecord record in dict_stateByConnectionId.Values)
+                {
+                    if (record == null) continue;
+                    if (string.Equals(SafeTrim(record.playerId), safePlayerId, StringComparison.Ordinal)) return record;
+                }
+            }
+
+            return null;
+        }
+
+        //* این تابع بررسی می کند وضعیت یک کانکشن وجود دارد یا نه.
+        public bool HasStateForConnection(string connectionId)
+        {
+            if (string.IsNullOrWhiteSpace(connectionId)) return false;
+            lock (syncLock)
+            {
+                return dict_stateByConnectionId.ContainsKey(connectionId);
+            }
+        }
+
+        //* این تابع اسنپ شات وضعیت پلیرهای یک روم را می سازد.
+        public List<DedicatedPlayerStateRecord> CreateRoomSnapshot(string roomId)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            List<DedicatedPlayerStateRecord> result = new List<DedicatedPlayerStateRecord>();
+            if (string.IsNullOrWhiteSpace(safeRoomId)) return result;
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerStateRecord record in dict_stateByConnectionId.Values)
+                {
+                    if (record == null) continue;
+                    if (string.Equals(SafeTrim(record.roomId), safeRoomId, StringComparison.Ordinal)) result.Add(record);
+                }
+            }
+
+            return result;
+        }
+
+        //* این تابع وضعیت یک یوزر را حذف می کند.
+        public bool RemoveByUserId(string userId, string reason)
+        {
+            DedicatedPlayerStateRecord record = GetByUserId(userId);
+            if (record == null) return false;
+            return RemoveByConnectionId(record.connectionId, reason);
+        }
+
+        //* این تابع وضعیت یک پلیر را حذف می کند.
+        public bool RemoveByPlayerId(string playerId, string reason)
+        {
+            DedicatedPlayerStateRecord record = GetByPlayerId(playerId);
+            if (record == null) return false;
+            return RemoveByConnectionId(record.connectionId, reason);
+        }
+
+        //* این تابع خلاصه وضعیت استور را برای تست فاز سی و سه آ برمی گرداند.
+        public string GetMirrorLikeStateStoreDebugSummary()
+        {
+            return "phase=33A" +
+                   " | mirrorRoute=PlayerStateStore" +
+                   " | states=" + StateCount +
+                   " | lastAcceptedSequence=" + LastAcceptedSequence +
+                   " | lastRejectedSequence=" + LastRejectedSequence +
+                   " | lastRejectReason=" + LastStateRejectReason;
+        }
+
+        private string SafeTrim(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
         }
 
         //* این تابع همه وضعیت های ذخیره شده را پاک می کند.

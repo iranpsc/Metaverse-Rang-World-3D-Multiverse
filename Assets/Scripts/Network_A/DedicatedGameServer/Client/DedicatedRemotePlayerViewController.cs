@@ -14,6 +14,7 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private DedicatedRemotePlayerStateReceiver remoteStateReceiver;
         [SerializeField] private G7ThreeDModeController threeDModeController;
         [SerializeField] private RealtimeWebSocketG7RoomLobbyTestController realtimeRoomController;
+        [SerializeField] private RealtimeGrpcStreamingG7RoomLobbyTestController grpcStreamingRealtimeRoomController;
         [SerializeField] private DedicatedPlayerStateAutoSender legacyPlayerStateAutoSender;
 
         [Header("Startup")]
@@ -138,6 +139,7 @@ namespace Network_A.DedicatedGameServer.Client
             if (remoteStateReceiver == null) remoteStateReceiver = FindObjectOfType<DedicatedRemotePlayerStateReceiver>(true);
             if (threeDModeController == null) threeDModeController = FindObjectOfType<G7ThreeDModeController>(true);
             if (realtimeRoomController == null) realtimeRoomController = FindObjectOfType<RealtimeWebSocketG7RoomLobbyTestController>(true);
+            if (grpcStreamingRealtimeRoomController == null) grpcStreamingRealtimeRoomController = FindObjectOfType<RealtimeGrpcStreamingG7RoomLobbyTestController>(true);
             if (legacyPlayerStateAutoSender == null) legacyPlayerStateAutoSender = FindObjectOfType<DedicatedPlayerStateAutoSender>(true);
         }
 
@@ -181,6 +183,12 @@ namespace Network_A.DedicatedGameServer.Client
                 realtimeRoomController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
                 realtimeRoomController.OnRoomLeftFor3D += HandleRealtimeRoomLeft;
             }
+
+            if (grpcStreamingRealtimeRoomController != null)
+            {
+                grpcStreamingRealtimeRoomController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
+                grpcStreamingRealtimeRoomController.OnRoomLeftFor3D += HandleRealtimeRoomLeft;
+            }
         }
 
         //* این تابع ایونت های وصل شده را قطع می کند.
@@ -202,6 +210,11 @@ namespace Network_A.DedicatedGameServer.Client
             if (realtimeRoomController != null)
             {
                 realtimeRoomController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
+            }
+
+            if (grpcStreamingRealtimeRoomController != null)
+            {
+                grpcStreamingRealtimeRoomController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
             }
         }
 
@@ -712,10 +725,27 @@ namespace Network_A.DedicatedGameServer.Client
         //* این تابع نام نمایشی لوکال را از ریل تایم یا ددیکیتد می سازد.
         private string ResolveLocalDisplayName()
         {
-            if (realtimeRoomController != null && !string.IsNullOrWhiteSpace(realtimeRoomController.CurrentUserName)) return realtimeRoomController.CurrentUserName.Trim();
+            string realtimeUserName = ResolveRealtimeUserName();
+            if (!string.IsNullOrWhiteSpace(realtimeUserName)) return realtimeUserName.Trim();
             if (wsClient != null && !string.IsNullOrWhiteSpace(wsClient.PlayerId)) return wsClient.PlayerId.Trim();
             if (wsClient != null && !string.IsNullOrWhiteSpace(wsClient.UserId)) return wsClient.UserId.Trim();
             return "You";
+        }
+
+        //* این تابع نام یوزر ریل تایم را از کنترلر مناسب پلتفرم می خواند.
+        private string ResolveRealtimeUserName()
+        {
+            if (grpcStreamingRealtimeRoomController != null && !string.IsNullOrWhiteSpace(grpcStreamingRealtimeRoomController.CurrentUserName))
+            {
+                return grpcStreamingRealtimeRoomController.CurrentUserName.Trim();
+            }
+
+            if (realtimeRoomController != null && !string.IsNullOrWhiteSpace(realtimeRoomController.CurrentUserName))
+            {
+                return realtimeRoomController.CurrentUserName.Trim();
+            }
+
+            return string.Empty;
         }
 
         //* این تابع نام نمایشی ریموت را از پیام یا کش می سازد.

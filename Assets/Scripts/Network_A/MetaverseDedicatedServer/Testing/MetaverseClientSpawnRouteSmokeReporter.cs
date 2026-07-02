@@ -12,6 +12,18 @@ public class MetaverseClientSpawnRouteSmokeReporter : MonoBehaviour
     private bool reporterEnabled;
     private int observedSpawnCount;
     private int observedDespawnCount;
+    private int observedPhase33ASpawnCount;
+    private int observedPhase33ADespawnCount;
+    private string lastObservedRoute = string.Empty;
+    private string lastObservedPrefabId = string.Empty;
+    private int lastObservedNetId;
+
+    public int ObservedSpawnCount => observedSpawnCount;
+    public int ObservedDespawnCount => observedDespawnCount;
+    public int ObservedPhase33ASpawnCount => observedPhase33ASpawnCount;
+    public int ObservedPhase33ADespawnCount => observedPhase33ADespawnCount;
+    public string LastObservedRoute => lastObservedRoute;
+    public int LastObservedNetId => lastObservedNetId;
 
     public void Bind(MetaverseSpawnManager manager)
     {
@@ -78,7 +90,8 @@ public class MetaverseClientSpawnRouteSmokeReporter : MonoBehaviour
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseClientSpawnRouteSmokeReporter] Bound | spawnedCount=" + spawnManager.SpawnedCount);
+            Debug.Log("[MetaverseClientSpawnRouteSmokeReporter] Bound | phase=33A | mirrorRoute=ClientSpawnObserver" +
+                      " | spawnedCount=" + spawnManager.SpawnedCount);
         }
     }
 
@@ -96,23 +109,63 @@ public class MetaverseClientSpawnRouteSmokeReporter : MonoBehaviour
     private void HandleClientObjectSpawned(MetaverseNetworkIdentity identity, MetaverseSpawnPayload payload)
     {
         observedSpawnCount++;
+        lastObservedRoute = payload != null ? Safe(payload.mirrorRoute) : "ClientApplySpawn";
+        lastObservedPrefabId = payload != null ? Safe(payload.prefabId) : string.Empty;
+        lastObservedNetId = payload != null ? payload.netId : (identity != null ? identity.NetId : 0);
+
+        if (IsPhase33APayload(payload)) observedPhase33ASpawnCount++;
         if (!logMessages) return;
 
-        Debug.Log("[MetaverseClientSpawnRouteSmokeReporter] Client spawn observed | observedSpawnCount=" + observedSpawnCount +
+        Debug.Log("[MetaverseClientSpawnRouteSmokeReporter] Client spawn observed | phase=33A | mirrorRoute=ClientApplySpawn" +
+                  " | observedSpawnCount=" + observedSpawnCount +
+                  " | phase33ASpawnCount=" + observedPhase33ASpawnCount +
                   " | activeSpawnedCount=" + (spawnManager != null ? spawnManager.SpawnedCount : -1) +
-                  " | netId=" + (payload != null ? payload.netId : 0) +
-                  " | prefabId=" + (payload != null ? payload.prefabId : string.Empty) +
+                  " | netId=" + lastObservedNetId +
+                  " | prefabId=" + lastObservedPrefabId +
+                  " | payloadRoute=" + lastObservedRoute +
                   " | objectName=" + (identity != null ? identity.name : "null"));
     }
 
     private void HandleClientObjectDespawned(int netId, string reason)
     {
         observedDespawnCount++;
+        observedPhase33ADespawnCount++;
+        lastObservedRoute = "ClientApplyDespawn";
+        lastObservedNetId = netId;
         if (!logMessages) return;
 
-        Debug.Log("[MetaverseClientSpawnRouteSmokeReporter] Client despawn observed | observedDespawnCount=" + observedDespawnCount +
+        Debug.Log("[MetaverseClientSpawnRouteSmokeReporter] Client despawn observed | phase=33A | mirrorRoute=ClientApplyDespawn" +
+                  " | observedDespawnCount=" + observedDespawnCount +
+                  " | phase33ADespawnCount=" + observedPhase33ADespawnCount +
                   " | activeSpawnedCount=" + (spawnManager != null ? spawnManager.SpawnedCount : -1) +
                   " | netId=" + netId +
-                  " | reason=" + (string.IsNullOrWhiteSpace(reason) ? string.Empty : reason.Trim()));
+                  " | reason=" + Safe(reason));
+    }
+
+    public string GetSmokeDebugSummary()
+    {
+        return "Phase33A ClientSpawnRouteReporter" +
+               " | enabled=" + reporterEnabled +
+               " | subscribed=" + subscribed +
+               " | spawns=" + observedSpawnCount +
+               " | despawns=" + observedDespawnCount +
+               " | phase33ASpawns=" + observedPhase33ASpawnCount +
+               " | phase33ADespawns=" + observedPhase33ADespawnCount +
+               " | lastNetId=" + lastObservedNetId +
+               " | lastRoute=" + Safe(lastObservedRoute) +
+               " | lastPrefabId=" + Safe(lastObservedPrefabId);
+    }
+
+    private bool IsPhase33APayload(MetaverseSpawnPayload payload)
+    {
+        if (payload == null) return false;
+        if (!string.IsNullOrWhiteSpace(payload.mirrorRoute)) return true;
+        if (!string.IsNullOrWhiteSpace(payload.spawnReason) && payload.spawnReason.Contains("phase33A")) return true;
+        return false;
+    }
+
+    private string Safe(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
     }
 }

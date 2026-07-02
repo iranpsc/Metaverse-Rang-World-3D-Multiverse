@@ -31,6 +31,20 @@ namespace Network_A.GameServer.Players
         public event Action<DedicatedPlayerSession> PlayerRegistered;
         public event Action<DedicatedPlayerSession, string> PlayerRemoved;
 
+        public int UniqueUserCount
+        {
+            get
+            {
+                lock (syncLock)
+                {
+                    return dict_connectionIdByUserId.Count;
+                }
+            }
+        }
+
+        public bool HasAnyAuthenticatedPlayer => CurrentPlayerCount > 0;
+
+
         //* این تابع پلیر تأیید شده را داخل رجیستری ددیکیتد سرور ثبت می کند.
         public bool TryRegisterVerifiedPlayer(
             DedicatedWebSocketConnection connection,
@@ -335,6 +349,196 @@ namespace Network_A.GameServer.Players
         private string SafeTrim(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        }
+
+
+        //* این تابع تلاش می کند سشن را با کانکشن آی دی برگرداند.
+        public bool TryGetByConnectionId(string connectionId, out DedicatedPlayerSession session)
+        {
+            session = GetByConnectionId(connectionId);
+            return session != null;
+        }
+
+        //* این تابع سشن را با یوزر آی دی برمی گرداند.
+        public DedicatedPlayerSession GetByUserId(string userId)
+        {
+            string safeUserId = SafeTrim(userId);
+            if (string.IsNullOrWhiteSpace(safeUserId)) return null;
+
+            lock (syncLock)
+            {
+                if (!dict_connectionIdByUserId.TryGetValue(safeUserId, out string connectionId)) return null;
+                return dict_playersByConnectionId.TryGetValue(connectionId, out DedicatedPlayerSession session) ? session : null;
+            }
+        }
+
+        //* این تابع تلاش می کند سشن را با یوزر آی دی برگرداند.
+        public bool TryGetByUserId(string userId, out DedicatedPlayerSession session)
+        {
+            session = GetByUserId(userId);
+            return session != null;
+        }
+
+        //* این تابع سشن را با پلیر آی دی پیدا می کند.
+        public DedicatedPlayerSession GetByPlayerId(string playerId)
+        {
+            string safePlayerId = SafeTrim(playerId);
+            if (string.IsNullOrWhiteSpace(safePlayerId)) return null;
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
+                {
+                    if (session == null) continue;
+                    if (string.Equals(SafeTrim(session.playerId), safePlayerId, StringComparison.Ordinal)) return session;
+                }
+            }
+
+            return null;
+        }
+
+        //* این تابع تلاش می کند سشن را با پلیر آی دی برگرداند.
+        public bool TryGetByPlayerId(string playerId, out DedicatedPlayerSession session)
+        {
+            session = GetByPlayerId(playerId);
+            return session != null;
+        }
+
+        //* این تابع سشن را با سشن آی دی پیدا می کند.
+        public DedicatedPlayerSession GetBySessionId(string sessionId)
+        {
+            string safeSessionId = SafeTrim(sessionId);
+            if (string.IsNullOrWhiteSpace(safeSessionId)) return null;
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
+                {
+                    if (session == null) continue;
+                    if (string.Equals(SafeTrim(session.sessionId), safeSessionId, StringComparison.Ordinal)) return session;
+                }
+            }
+
+            return null;
+        }
+
+        //* این تابع سشن های یک روم را برای مسیرهای اسپاون و سینک می سازد.
+        public List<DedicatedPlayerSession> CreateRoomSnapshot(string roomId)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            List<DedicatedPlayerSession> result = new List<DedicatedPlayerSession>();
+            if (string.IsNullOrWhiteSpace(safeRoomId)) return result;
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
+                {
+                    if (session == null) continue;
+                    if (string.Equals(SafeTrim(session.roomId), safeRoomId, StringComparison.Ordinal)) result.Add(session);
+                }
+            }
+
+            return result;
+        }
+
+        //* این تابع فقط سشن های آماده و آث شده را برای مسیر شبیه میرور برمی گرداند.
+        public List<DedicatedPlayerSession> CreateMirrorLikeGameplaySnapshot(string roomId = "")
+        {
+            string safeRoomId = SafeTrim(roomId);
+            List<DedicatedPlayerSession> result = new List<DedicatedPlayerSession>();
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
+                {
+                    if (session == null) continue;
+                    if (!session.IsMirrorLikeReady) continue;
+                    if (!string.IsNullOrWhiteSpace(safeRoomId) && !string.Equals(SafeTrim(session.roomId), safeRoomId, StringComparison.Ordinal)) continue;
+                    result.Add(session);
+                }
+            }
+
+            return result;
+        }
+
+        //* این تابع تعداد پلیرهای آث شده داخل یک روم را برمی گرداند.
+        public int GetAuthenticatedPlayerCountInRoom(string roomId)
+        {
+            return CreateMirrorLikeGameplaySnapshot(roomId).Count;
+        }
+
+        //* این تابع کانکشن آی دی را با یوزر آی دی پیدا می کند.
+        public bool TryGetConnectionIdByUserId(string userId, out string connectionId)
+        {
+            connectionId = string.Empty;
+            string safeUserId = SafeTrim(userId);
+            if (string.IsNullOrWhiteSpace(safeUserId)) return false;
+
+            lock (syncLock)
+            {
+                if (!dict_connectionIdByUserId.TryGetValue(safeUserId, out connectionId)) return false;
+            }
+
+            connectionId = SafeTrim(connectionId);
+            return !string.IsNullOrWhiteSpace(connectionId);
+        }
+
+        //* این تابع بررسی می کند که کانکشن داخل روم مورد نظر است یا نه.
+        public bool IsConnectionInRoom(string connectionId, string roomId)
+        {
+            DedicatedPlayerSession session = GetByConnectionId(connectionId);
+            return session != null && session.IsRoom(roomId);
+        }
+
+        //* این تابع بررسی می کند که دو کانکشن داخل یک روم هستند یا نه.
+        public bool AreConnectionsInSameRoom(string firstConnectionId, string secondConnectionId)
+        {
+            DedicatedPlayerSession first = GetByConnectionId(firstConnectionId);
+            DedicatedPlayerSession second = GetByConnectionId(secondConnectionId);
+            if (first == null || second == null) return false;
+            return first.IsRoom(second.roomId);
+        }
+
+        //* این تابع پلیر را با یوزر آی دی حذف می کند.
+        public bool RemoveByUserId(string userId, string reason)
+        {
+            if (!TryGetConnectionIdByUserId(userId, out string connectionId)) return false;
+            return RemoveByConnectionId(connectionId, reason);
+        }
+
+        //* این تابع پلیر را با پلیر آی دی حذف می کند.
+        public bool RemoveByPlayerId(string playerId, string reason)
+        {
+            DedicatedPlayerSession session = GetByPlayerId(playerId);
+            if (session == null) return false;
+            return RemoveByConnectionId(session.connectionId, reason);
+        }
+
+        //* این تابع خلاصه وضعیت رجیستری را برای تست فاز سی و سه آ برمی گرداند.
+        public string GetMirrorLikeRegistryDebugSummary()
+        {
+            long now = NowUnixMs();
+            List<DedicatedPlayerSession> snapshot = CreateSnapshot();
+            int readyCount = 0;
+            int authenticatedCount = 0;
+
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                DedicatedPlayerSession session = snapshot[i];
+                if (session == null) continue;
+                if (session.isReady) readyCount++;
+                if (session.isAuthenticated) authenticatedCount++;
+            }
+
+            return "phase=33A" +
+                   " | mirrorRoute=PlayerRegistry" +
+                   " | players=" + snapshot.Count +
+                   " | ready=" + readyCount +
+                   " | authenticated=" + authenticatedCount +
+                   " | uniqueUsers=" + UniqueUserCount +
+                   " | primaryRoomId=" + GetPrimaryRoomId() +
+                   " | primaryServerId=" + GetPrimaryServerId() +
+                   " | now=" + now;
         }
 
         //* این تابع هنگام حذف آبجکت، رجیستری پلیرها را پاک می کند.

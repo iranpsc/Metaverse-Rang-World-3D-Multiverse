@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Network_A.Auth;
 using Network_A.Tests.Realtime;
@@ -11,6 +12,7 @@ namespace Network_A.DedicatedGameServer.Client
     {
         [Header("References")]
         [SerializeField] private RealtimeWebSocketG7RoomLobbyTestController realtimeLobbyController;
+        [SerializeField] private RealtimeGrpcStreamingG7RoomLobbyTestController grpcStreamingRealtimeLobbyController;
         [SerializeField] private DedicatedGameTicketClient ticketClient;
         [SerializeField] private DedicatedGameServerAutoConnectController autoConnectController;
         [SerializeField] private DedicatedGameServerWsClient wsClient;
@@ -33,8 +35,7 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private bool logOnlyOnStateChange = true;
 
         private bool isConnectClickRunning;
-        private bool realtimeEventsBound;
-        private bool wsEventsBound;
+        private bool isDisconnectClickRunning;
         private float nextUiRefreshAt;
 
         private string lastSyncedRoomId = string.Empty;
@@ -45,6 +46,21 @@ namespace Network_A.DedicatedGameServer.Client
         private bool lastCanConnect;
         private bool lastCanDisconnect;
         private bool hasButtonStateCache;
+
+        private RealtimeWebSocketG7RoomLobbyTestController boundWebSocketRealtimeLobbyController;
+        private RealtimeGrpcStreamingG7RoomLobbyTestController boundGrpcStreamingRealtimeLobbyController;
+
+        private struct RealtimeRoomSnapshot
+        {
+            public bool hasController;
+            public string controllerKind;
+            public bool ready;
+            public bool joined;
+            public string roomId;
+            public string roomName;
+            public string userId;
+            public string userName;
+        }
 
         //* این تابع رفرنس ها، دکمه ها و ایونت ها را در شروع آبجکت آماده می کند.
         private void Awake()
@@ -75,6 +91,9 @@ namespace Network_A.DedicatedGameServer.Client
             if (Time.realtimeSinceStartup < nextUiRefreshAt) return;
 
             nextUiRefreshAt = Time.realtimeSinceStartup + Mathf.Max(0.05f, uiRefreshIntervalSeconds);
+            EnsureReferences();
+            BindRealtimeEvents();
+            BindWsEvents();
             SyncRoomContextFromRealtime("update", false);
             RefreshUiState(false);
         }
@@ -93,25 +112,125 @@ namespace Network_A.DedicatedGameServer.Client
             await ConnectGameServerAsync();
         }
 
-        //* این تابع کلیک دکمه قطع گیم سرور را اجرا می کند.
-        public void Btn_DisconnectGameServer()
+        //* این تابع کلیک دکمه خروج از گیم سرور و روم ریل تایم را اجرا می کند.
+        public async void Btn_DisconnectGameServer()
         {
-            if (wsClient == null)
+            await DisconnectGameServerAndLeaveRoomAsync("manual_game_server_disconnect");
+        }
+
+        //* این تابع گیم سرور را قطع می کند و از روم ریل تایم همان گیم سرور هم خارج می شود.
+        public async Task<bool> DisconnectGameServerAndLeaveRoomAsync(string reason)
+        {
+            if (isDisconnectClickRunning)
             {
-                SetStatus("Dedicated WS client is missing.", true);
-                RefreshUiState(true);
-                return;
+                Log("Disconnect skipped. Disconnect flow is already running.", true);
+                return false;
             }
 
-            if (!wsClient.IsConnected)
+            EnsureReferences();
+            BindRealtimeEvents();
+            BindWsEvents();
+
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "manual_game_server_disconnect" : reason.Trim();
+
+            bool hasDedicatedConnection = wsClient != null && wsClient.IsConnected;
+            bool hasRealtimeRoom = TryReadRealtimeSnapshot(out RealtimeRoomSnapshot snapshot) &&
+                                   snapshot.joined &&
+                                   !string.IsNullOrWhiteSpace(snapshot.roomId);
+
+            if (!hasDedicatedConnection && !hasRealtimeRoom)
             {
-                SetStatus("Game server is already disconnected.", true);
+                SetStatus("Game server and realtime room are already disconnected.", true);
+                ClearRoomSyncCache();
                 RefreshUiState(true);
-                return;
+                return true;
             }
 
-            wsClient.Disconnect("manual_game_server_disconnect");
+            isDisconnectClickRunning = true;
             RefreshUiState(true);
+
+            try
+            {
+                if (hasDedicatedConnection)
+                {
+                    SetStatus("Disconnecting dedicated server socket...", true);
+                    wsClient.Disconnect(safeReason);
+                }
+                else
+                {
+                    Log("Dedicated socket is already disconnected before room leave.", true);
+                }
+
+                if (hasRealtimeRoom)
+                {
+                    SetStatus("Leaving realtime room...", true);
+                    bool leaveOk = await LeaveRealtimeRoomAfterDedicatedDisconnectAsync(snapshot);
+
+                    if (leaveOk)
+                    {
+                        ClearRoomSyncCache();
+                        SetStatus("Game server disconnected and realtime room left.", true);
+                    }
+                    else
+                    {
+                        SetStatus("Game server disconnected, but realtime room leave failed.", true);
+                    }
+
+                    return leaveOk;
+                }
+
+                ClearRoomSyncCache();
+                SetStatus("Game server disconnected.", true);
+                return true;
+            }
+            finally
+            {
+                isDisconnectClickRunning = false;
+                RefreshUiState(true);
+            }
+        }
+
+        //* این تابع خروج از روم ریل تایم را از کنترلر فعال وب سوکت یا جی آر پی سی انجام می دهد.
+        private async Task<bool> LeaveRealtimeRoomAfterDedicatedDisconnectAsync(RealtimeRoomSnapshot snapshot)
+        {
+            try
+            {
+                if (snapshot.controllerKind == "grpc_streaming" &&
+                    grpcStreamingRealtimeLobbyController != null &&
+                    grpcStreamingRealtimeLobbyController.IsJoinedRoom)
+                {
+                    Log("Leaving realtime room after dedicated disconnect | controller=grpc_streaming | roomId=" + Safe(snapshot.roomId), true);
+                    return await grpcStreamingRealtimeLobbyController.LeaveRoomAsync();
+                }
+
+                if (snapshot.controllerKind == "websocket" &&
+                    realtimeLobbyController != null &&
+                    realtimeLobbyController.IsJoinedRoom)
+                {
+                    Log("Leaving realtime room after dedicated disconnect | controller=websocket | roomId=" + Safe(snapshot.roomId), true);
+                    return await realtimeLobbyController.LeaveRoomAsync();
+                }
+
+                if (grpcStreamingRealtimeLobbyController != null && grpcStreamingRealtimeLobbyController.IsJoinedRoom)
+                {
+                    Log("Leaving realtime room after dedicated disconnect | controller=grpc_streaming_fallback | roomId=" + Safe(grpcStreamingRealtimeLobbyController.CurrentRoomId), true);
+                    return await grpcStreamingRealtimeLobbyController.LeaveRoomAsync();
+                }
+
+                if (realtimeLobbyController != null && realtimeLobbyController.IsJoinedRoom)
+                {
+                    Log("Leaving realtime room after dedicated disconnect | controller=websocket_fallback | roomId=" + Safe(realtimeLobbyController.CurrentRoomId), true);
+                    return await realtimeLobbyController.LeaveRoomAsync();
+                }
+
+                Log("Realtime room leave skipped. No joined realtime room was found.", true);
+                return true;
+            }
+            catch (Exception error)
+            {
+                Log("Realtime room leave failed after dedicated disconnect | error=" + error.Message, true);
+                return false;
+            }
         }
 
         //* این تابع مسیر اتصال تیکت، وب سوکت و احراز ددیکیتد را اجرا می کند.
@@ -124,6 +243,8 @@ namespace Network_A.DedicatedGameServer.Client
             }
 
             EnsureReferences();
+            BindRealtimeEvents();
+            BindWsEvents();
 
             if (!CanStartGameServerConnect(out string reason))
             {
@@ -175,7 +296,7 @@ namespace Network_A.DedicatedGameServer.Client
         //* این تابع کانتکست روم ریل تایم را با کنترل لاگ تکراری همسان می کند.
         public bool SyncRoomContextFromRealtime(string source, bool forceLog)
         {
-            if (realtimeLobbyController == null)
+            if (!TryReadRealtimeSnapshot(out RealtimeRoomSnapshot snapshot))
             {
                 Log("Room sync skipped. Realtime controller is missing. source=" + Safe(source), forceLog);
                 return false;
@@ -187,14 +308,14 @@ namespace Network_A.DedicatedGameServer.Client
                 return false;
             }
 
-            if (!realtimeLobbyController.IsRealtimeReadyState || !realtimeLobbyController.IsJoinedRoom)
+            if (!snapshot.ready || !snapshot.joined)
             {
                 ClearRoomSyncCache();
                 return false;
             }
 
-            string roomId = Safe(realtimeLobbyController.CurrentRoomId);
-            string roomName = Safe(realtimeLobbyController.CurrentRoomName);
+            string roomId = Safe(snapshot.roomId);
+            string roomName = Safe(snapshot.roomName);
 
             if (string.IsNullOrWhiteSpace(roomId)) return false;
 
@@ -207,7 +328,7 @@ namespace Network_A.DedicatedGameServer.Client
             lastSyncedRoomId = roomId;
             lastSyncedRoomName = roomName;
 
-            Log("Room context synced | source=" + Safe(source) + " | roomId=" + roomId + " | roomName=" + roomName, forceLog || changed);
+            Log("Room context synced | source=" + Safe(source) + " | controller=" + Safe(snapshot.controllerKind) + " | roomId=" + roomId + " | roomName=" + roomName, forceLog || changed);
 
             return true;
         }
@@ -218,6 +339,7 @@ namespace Network_A.DedicatedGameServer.Client
             if (!autoFindReferences) return;
 
             if (realtimeLobbyController == null) realtimeLobbyController = FindObjectOfType<RealtimeWebSocketG7RoomLobbyTestController>();
+            if (grpcStreamingRealtimeLobbyController == null) grpcStreamingRealtimeLobbyController = FindObjectOfType<RealtimeGrpcStreamingG7RoomLobbyTestController>();
 
             if (ticketClient == null)
             {
@@ -262,54 +384,90 @@ namespace Network_A.DedicatedGameServer.Client
             if (disconnectGameServerButton != null) disconnectGameServerButton.onClick.RemoveListener(Btn_DisconnectGameServer);
         }
 
-        //* این تابع ایونت های ریل تایم را وصل می کند.
+        //* این تابع ایونت های ریل تایم را برای وب سوکت و جی آر پی سی وصل می کند.
         private void BindRealtimeEvents()
         {
-            if (realtimeEventsBound || realtimeLobbyController == null) return;
+            if (boundWebSocketRealtimeLobbyController != realtimeLobbyController)
+            {
+                UnbindWebSocketRealtimeEvents();
+            }
 
-            realtimeLobbyController.OnRoomJoinedFor3D += HandleRealtimeRoomJoined;
-            realtimeLobbyController.OnRoomLeftFor3D += HandleRealtimeRoomLeft;
-            realtimeLobbyController.OnRealtimeDisconnectedFor3D += HandleRealtimeDisconnected;
+            if (boundGrpcStreamingRealtimeLobbyController != grpcStreamingRealtimeLobbyController)
+            {
+                UnbindGrpcStreamingRealtimeEvents();
+            }
 
-            realtimeEventsBound = true;
+            if (realtimeLobbyController != null && boundWebSocketRealtimeLobbyController == null)
+            {
+                realtimeLobbyController.OnRoomJoinedFor3D += HandleRealtimeRoomJoined;
+                realtimeLobbyController.OnRoomLeftFor3D += HandleRealtimeRoomLeft;
+                realtimeLobbyController.OnRealtimeDisconnectedFor3D += HandleRealtimeDisconnected;
+                boundWebSocketRealtimeLobbyController = realtimeLobbyController;
+            }
+
+            if (grpcStreamingRealtimeLobbyController != null && boundGrpcStreamingRealtimeLobbyController == null)
+            {
+                grpcStreamingRealtimeLobbyController.OnRoomJoinedFor3D += HandleRealtimeRoomJoined;
+                grpcStreamingRealtimeLobbyController.OnRoomLeftFor3D += HandleRealtimeRoomLeft;
+                grpcStreamingRealtimeLobbyController.OnRealtimeDisconnectedFor3D += HandleRealtimeDisconnected;
+                boundGrpcStreamingRealtimeLobbyController = grpcStreamingRealtimeLobbyController;
+            }
         }
 
         //* این تابع ایونت های ریل تایم را قطع می کند.
         private void UnbindRealtimeEvents()
         {
-            if (!realtimeEventsBound || realtimeLobbyController == null) return;
+            UnbindWebSocketRealtimeEvents();
+            UnbindGrpcStreamingRealtimeEvents();
+        }
 
-            realtimeLobbyController.OnRoomJoinedFor3D -= HandleRealtimeRoomJoined;
-            realtimeLobbyController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
-            realtimeLobbyController.OnRealtimeDisconnectedFor3D -= HandleRealtimeDisconnected;
+        //* این تابع ایونت های کنترلر وب سوکت را قطع می کند.
+        private void UnbindWebSocketRealtimeEvents()
+        {
+            if (boundWebSocketRealtimeLobbyController == null) return;
 
-            realtimeEventsBound = false;
+            boundWebSocketRealtimeLobbyController.OnRoomJoinedFor3D -= HandleRealtimeRoomJoined;
+            boundWebSocketRealtimeLobbyController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
+            boundWebSocketRealtimeLobbyController.OnRealtimeDisconnectedFor3D -= HandleRealtimeDisconnected;
+            boundWebSocketRealtimeLobbyController = null;
+        }
+
+        //* این تابع ایونت های کنترلر جی آر پی سی را قطع می کند.
+        private void UnbindGrpcStreamingRealtimeEvents()
+        {
+            if (boundGrpcStreamingRealtimeLobbyController == null) return;
+
+            boundGrpcStreamingRealtimeLobbyController.OnRoomJoinedFor3D -= HandleRealtimeRoomJoined;
+            boundGrpcStreamingRealtimeLobbyController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
+            boundGrpcStreamingRealtimeLobbyController.OnRealtimeDisconnectedFor3D -= HandleRealtimeDisconnected;
+            boundGrpcStreamingRealtimeLobbyController = null;
         }
 
         //* این تابع ایونت های وب سوکت ددیکیتد را وصل می کند.
         private void BindWsEvents()
         {
-            if (wsEventsBound || wsClient == null) return;
-
-            wsClient.Connected += HandleDedicatedConnected;
-            wsClient.Disconnected += HandleDedicatedDisconnected;
-            wsClient.Authenticated += HandleDedicatedAuthenticated;
-            wsClient.AuthFailed += HandleDedicatedAuthFailed;
-
-            wsEventsBound = true;
-        }
-
-        //* این تابع ایونت های وب سوکت ددیکیتد را قطع می کند.
-        private void UnbindWsEvents()
-        {
-            if (!wsEventsBound || wsClient == null) return;
+            if (wsClient == null) return;
 
             wsClient.Connected -= HandleDedicatedConnected;
             wsClient.Disconnected -= HandleDedicatedDisconnected;
             wsClient.Authenticated -= HandleDedicatedAuthenticated;
             wsClient.AuthFailed -= HandleDedicatedAuthFailed;
 
-            wsEventsBound = false;
+            wsClient.Connected += HandleDedicatedConnected;
+            wsClient.Disconnected += HandleDedicatedDisconnected;
+            wsClient.Authenticated += HandleDedicatedAuthenticated;
+            wsClient.AuthFailed += HandleDedicatedAuthFailed;
+        }
+
+        //* این تابع ایونت های وب سوکت ددیکیتد را قطع می کند.
+        private void UnbindWsEvents()
+        {
+            if (wsClient == null) return;
+
+            wsClient.Connected -= HandleDedicatedConnected;
+            wsClient.Disconnected -= HandleDedicatedDisconnected;
+            wsClient.Authenticated -= HandleDedicatedAuthenticated;
+            wsClient.AuthFailed -= HandleDedicatedAuthFailed;
         }
 
         //* این تابع بعد از ورود به روم ریل تایم، کانتکست را برای تیکت آماده می کند.
@@ -375,7 +533,7 @@ namespace Network_A.DedicatedGameServer.Client
         {
             reason = string.Empty;
 
-            if (realtimeLobbyController == null)
+            if (!TryReadRealtimeSnapshot(out RealtimeRoomSnapshot snapshot))
             {
                 reason = "realtime_controller_missing";
                 return false;
@@ -399,27 +557,27 @@ namespace Network_A.DedicatedGameServer.Client
                 return false;
             }
 
-            if (isConnectClickRunning || autoConnectController.IsRunning)
+            if (isConnectClickRunning || isDisconnectClickRunning || autoConnectController.IsRunning)
             {
                 reason = "flow_running";
                 return false;
             }
 
-            if (!realtimeLobbyController.IsRealtimeReadyState)
+            if (!snapshot.ready)
             {
-                reason = "realtime_not_ready";
+                reason = "realtime_not_ready | controller=" + Safe(snapshot.controllerKind);
                 return false;
             }
 
-            if (!realtimeLobbyController.IsJoinedRoom)
+            if (!snapshot.joined)
             {
-                reason = "room_not_joined";
+                reason = "room_not_joined | controller=" + Safe(snapshot.controllerKind);
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(realtimeLobbyController.CurrentRoomId))
+            if (string.IsNullOrWhiteSpace(snapshot.roomId))
             {
-                reason = "room_id_empty";
+                reason = "room_id_empty | controller=" + Safe(snapshot.controllerKind);
                 return false;
             }
 
@@ -435,7 +593,7 @@ namespace Network_A.DedicatedGameServer.Client
                 return false;
             }
 
-            reason = "ready";
+            reason = "ready | controller=" + Safe(snapshot.controllerKind);
             return true;
         }
 
@@ -448,7 +606,12 @@ namespace Network_A.DedicatedGameServer.Client
         private void RefreshUiState(bool forceLog)
         {
             bool canConnect = CanStartGameServerConnect(out string reason);
-            bool canDisconnect = wsClient != null && wsClient.IsConnected;
+            bool hasJoinedRealtimeRoom = TryReadRealtimeSnapshot(out RealtimeRoomSnapshot disconnectSnapshot) &&
+                                         disconnectSnapshot.joined &&
+                                         !string.IsNullOrWhiteSpace(disconnectSnapshot.roomId);
+            bool canDisconnect = isDisconnectClickRunning ||
+                                 (wsClient != null && wsClient.IsConnected) ||
+                                 hasJoinedRealtimeRoom;
 
             if (connectGameServerButton != null) connectGameServerButton.interactable = canConnect;
             if (disconnectGameServerButton != null) disconnectGameServerButton.interactable = canDisconnect;
@@ -472,10 +635,11 @@ namespace Network_A.DedicatedGameServer.Client
         //* این تابع نام یوزر ریل تایم را به مسیر auth_ticket می دهد.
         private void ApplyRealtimeUserNameToAutoConnect()
         {
-            if (autoConnectController == null || realtimeLobbyController == null) return;
+            if (autoConnectController == null) return;
+            if (!TryReadRealtimeSnapshot(out RealtimeRoomSnapshot snapshot)) return;
 
-            string userName = Safe(realtimeLobbyController.CurrentUserName);
-            if (string.IsNullOrWhiteSpace(userName)) userName = Safe(realtimeLobbyController.CurrentUserId);
+            string userName = Safe(snapshot.userName);
+            if (string.IsNullOrWhiteSpace(userName)) userName = Safe(snapshot.userId);
 
             autoConnectController.SetFallbackUserName(userName);
         }
@@ -483,15 +647,91 @@ namespace Network_A.DedicatedGameServer.Client
         //* این تابع کانتکست فعلی را برای دیباگ چاپ می کند.
         private void LogCurrentContext(string source)
         {
-            if (realtimeLobbyController == null) return;
+            if (!TryReadRealtimeSnapshot(out RealtimeRoomSnapshot snapshot)) return;
 
             Log("Context | source=" + Safe(source)
-                + " | roomId=" + Safe(realtimeLobbyController.CurrentRoomId)
-                + " | roomName=" + Safe(realtimeLobbyController.CurrentRoomName)
-                + " | userId=" + Safe(realtimeLobbyController.CurrentUserId)
-                + " | userName=" + Safe(realtimeLobbyController.CurrentUserName)
-                + " | realtimeReady=" + realtimeLobbyController.IsRealtimeReadyState
-                + " | joined=" + realtimeLobbyController.IsJoinedRoom, true);
+                + " | controller=" + Safe(snapshot.controllerKind)
+                + " | roomId=" + Safe(snapshot.roomId)
+                + " | roomName=" + Safe(snapshot.roomName)
+                + " | userId=" + Safe(snapshot.userId)
+                + " | userName=" + Safe(snapshot.userName)
+                + " | realtimeReady=" + snapshot.ready
+                + " | joined=" + snapshot.joined, true);
+        }
+
+        //* این تابع وضعیت فعلی کنترلر ریل تایم فعال را می خواند.
+        private bool TryReadRealtimeSnapshot(out RealtimeRoomSnapshot snapshot)
+        {
+            if (realtimeLobbyController != null && realtimeLobbyController.IsJoinedRoom)
+            {
+                snapshot = CreateWebSocketSnapshot();
+                return true;
+            }
+
+            if (grpcStreamingRealtimeLobbyController != null && grpcStreamingRealtimeLobbyController.IsJoinedRoom)
+            {
+                snapshot = CreateGrpcStreamingSnapshot();
+                return true;
+            }
+
+            if (realtimeLobbyController != null && realtimeLobbyController.IsRealtimeReadyState)
+            {
+                snapshot = CreateWebSocketSnapshot();
+                return true;
+            }
+
+            if (grpcStreamingRealtimeLobbyController != null && grpcStreamingRealtimeLobbyController.IsRealtimeReadyState)
+            {
+                snapshot = CreateGrpcStreamingSnapshot();
+                return true;
+            }
+
+            if (realtimeLobbyController != null)
+            {
+                snapshot = CreateWebSocketSnapshot();
+                return true;
+            }
+
+            if (grpcStreamingRealtimeLobbyController != null)
+            {
+                snapshot = CreateGrpcStreamingSnapshot();
+                return true;
+            }
+
+            snapshot = new RealtimeRoomSnapshot();
+            return false;
+        }
+
+        //* این تابع وضعیت کنترلر وب سوکت ریل تایم را به شکل مشترک آماده می کند.
+        private RealtimeRoomSnapshot CreateWebSocketSnapshot()
+        {
+            return new RealtimeRoomSnapshot
+            {
+                hasController = realtimeLobbyController != null,
+                controllerKind = "websocket",
+                ready = realtimeLobbyController != null && realtimeLobbyController.IsRealtimeReadyState,
+                joined = realtimeLobbyController != null && realtimeLobbyController.IsJoinedRoom,
+                roomId = realtimeLobbyController != null ? Safe(realtimeLobbyController.CurrentRoomId) : string.Empty,
+                roomName = realtimeLobbyController != null ? Safe(realtimeLobbyController.CurrentRoomName) : string.Empty,
+                userId = realtimeLobbyController != null ? Safe(realtimeLobbyController.CurrentUserId) : string.Empty,
+                userName = realtimeLobbyController != null ? Safe(realtimeLobbyController.CurrentUserName) : string.Empty
+            };
+        }
+
+        //* این تابع وضعیت کنترلر جی آر پی سی ریل تایم را به شکل مشترک آماده می کند.
+        private RealtimeRoomSnapshot CreateGrpcStreamingSnapshot()
+        {
+            return new RealtimeRoomSnapshot
+            {
+                hasController = grpcStreamingRealtimeLobbyController != null,
+                controllerKind = "grpc_streaming",
+                ready = grpcStreamingRealtimeLobbyController != null && grpcStreamingRealtimeLobbyController.IsRealtimeReadyState,
+                joined = grpcStreamingRealtimeLobbyController != null && grpcStreamingRealtimeLobbyController.IsJoinedRoom,
+                roomId = grpcStreamingRealtimeLobbyController != null ? Safe(grpcStreamingRealtimeLobbyController.CurrentRoomId) : string.Empty,
+                roomName = grpcStreamingRealtimeLobbyController != null ? Safe(grpcStreamingRealtimeLobbyController.CurrentRoomName) : string.Empty,
+                userId = grpcStreamingRealtimeLobbyController != null ? Safe(grpcStreamingRealtimeLobbyController.CurrentUserId) : string.Empty,
+                userName = grpcStreamingRealtimeLobbyController != null ? Safe(grpcStreamingRealtimeLobbyController.CurrentUserName) : string.Empty
+            };
         }
 
         private void ClearRoomSyncCache()

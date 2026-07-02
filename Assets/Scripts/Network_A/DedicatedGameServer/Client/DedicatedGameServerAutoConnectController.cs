@@ -18,9 +18,12 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private bool waitForAccessToken = true;
         [SerializeField] private float waitForAccessTokenSeconds = 20f;
 
+        [Header("Auth Refresh Gate")]
+        [SerializeField] private int accessTokenRefreshSkewSeconds = 60;
+
         [Header("Connection Address")]
         [SerializeField] private bool useTicketConnectionAddress = true;
-        [SerializeField] private bool overrideAddressInEditor = true;
+        [SerializeField] private bool overrideAddressInEditor = false;
         [SerializeField] private string editorHost = "127.0.0.1";
         [SerializeField] private int editorPort = 7777;
         [SerializeField] private bool editorSecureWebSocket = false;
@@ -154,11 +157,12 @@ namespace Network_A.DedicatedGameServer.Client
 
                 string host = ResolveHost(connection);
                 int port = ResolvePort(connection);
-                bool secure = ResolveSecure();
+                bool secure = ResolveSecure(connection);
+                string path = ResolvePath(connection);
 
-                Log("Connecting to dedicated server | host=" + host + " | port=" + port + " | secure=" + secure);
+                Log("Connecting to dedicated server | host=" + host + " | port=" + port + " | secure=" + secure + " | path=" + path);
 
-                bool connected = await wsClient.ConnectToDedicatedServerAsync(host, port, secure, flowCts.Token);
+                bool connected = await wsClient.ConnectToDedicatedServerAsync(host, port, secure, path, flowCts.Token);
 
                 if (!connected)
                 {
@@ -218,19 +222,36 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
-        //* این تابع منتظر می ماند تا اکسس توکن بعد از لاگین آماده شود.
+        //* این تابع منتظر می ماند تا اکسس توکن آماده شود و اگر لازم بود قبل از تیکت رفرش می زند.
         private async Task<bool> WaitForAccessTokenAsync(CancellationToken cancellationToken)
         {
             float startedAt = Time.realtimeSinceStartup;
+            bool refreshAttempted = false;
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 string accessToken = SecureTokenStorage.GetAccessToken();
 
-                if (!string.IsNullOrWhiteSpace(accessToken))
+                if (!IsAccessTokenRefreshRequired(accessToken))
                 {
                     Log("Access token is ready.");
                     return true;
+                }
+
+                if (!refreshAttempted && !string.IsNullOrWhiteSpace(SecureTokenStorage.GetRefreshToken()))
+                {
+                    refreshAttempted = true;
+                    Log("Access token is missing, expired or near expiry. Refreshing before auto ticket flow.");
+
+                    bool refreshed = await AuthRefreshManager.Refresh();
+
+                    if (refreshed && !IsAccessTokenRefreshRequired(SecureTokenStorage.GetAccessToken()))
+                    {
+                        Log("Access token refresh before auto ticket flow succeeded.");
+                        return true;
+                    }
+
+                    Log("Access token refresh before auto ticket flow failed or token is still not ready.");
                 }
 
                 if (Time.realtimeSinceStartup - startedAt >= Mathf.Max(1f, waitForAccessTokenSeconds))
@@ -244,9 +265,117 @@ namespace Network_A.DedicatedGameServer.Client
             return false;
         }
 
-        //* این تابع هاست اتصال را از تیکت یا مقدار تست ادیتور انتخاب می کند.
+        //* این تابع تشخیص می دهد اکسس توکن خالی، اکسپایر شده یا نزدیک اکسپایر است یا نه.
+        private bool IsAccessTokenRefreshRequired(string accessToken)
+        {
+            if (string.IsNullOrWhiteSpace(accessToken)) return true;
+
+            if (!TryReadJwtExpiryUnixSeconds(accessToken, out long expiresAtUnixSeconds))
+            {
+                return false;
+            }
+
+            long nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            int safeSkewSeconds = Mathf.Clamp(accessTokenRefreshSkewSeconds, 0, 3600);
+
+            return expiresAtUnixSeconds <= nowUnixSeconds + safeSkewSeconds;
+        }
+
+        //* این تابع زمان اکسپایر شدن توکن جی دبلیو تی را از کلیم exp می خواند.
+        private static bool TryReadJwtExpiryUnixSeconds(string token, out long expiresAtUnixSeconds)
+        {
+            expiresAtUnixSeconds = 0;
+
+            string payloadJson = ReadJwtPayloadJson(token);
+            if (string.IsNullOrWhiteSpace(payloadJson)) return false;
+
+            return TryExtractJsonLongValue(payloadJson, "exp", out expiresAtUnixSeconds);
+        }
+
+        //* این تابع پِیلود جی دبلیو تی را بدون وابستگی اضافه می خواند.
+        private static string ReadJwtPayloadJson(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return string.Empty;
+
+            string[] parts = token.Split('.');
+            if (parts == null || parts.Length < 2) return string.Empty;
+
+            return DecodeBase64UrlToString(parts[1]);
+        }
+
+        //* این تابع متن بیس شصت و چهار یو آر ال را دیکود می کند.
+        private static string DecodeBase64UrlToString(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+            string base64 = value.Replace('-', '+').Replace('_', '/');
+            int padding = base64.Length % 4;
+            if (padding == 2) base64 += "==";
+            else if (padding == 3) base64 += "=";
+            else if (padding != 0) return string.Empty;
+
+            try
+            {
+                byte[] bytes = Convert.FromBase64String(base64);
+                return System.Text.Encoding.UTF8.GetString(bytes);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        //* این تابع مقدار عددی یک کلید جیسون را بدون وابستگی اضافه می خواند.
+        private static bool TryExtractJsonLongValue(string json, string key, out long value)
+        {
+            value = 0;
+
+            if (string.IsNullOrWhiteSpace(json) || string.IsNullOrWhiteSpace(key)) return false;
+
+            string pattern = "\"" + key + "\"";
+            int keyIndex = json.IndexOf(pattern, StringComparison.Ordinal);
+            if (keyIndex < 0) return false;
+
+            int colonIndex = json.IndexOf(':', keyIndex + pattern.Length);
+            if (colonIndex < 0) return false;
+
+            int valueStart = colonIndex + 1;
+            while (valueStart < json.Length && char.IsWhiteSpace(json[valueStart])) valueStart++;
+
+            bool quoted = valueStart < json.Length && json[valueStart] == '"';
+            if (quoted) valueStart++;
+
+            int valueEnd = valueStart;
+            while (valueEnd < json.Length)
+            {
+                char c = json[valueEnd];
+
+                if (quoted)
+                {
+                    if (c == '"') break;
+                }
+                else if (c == ',' || c == '}' || c == ']' || char.IsWhiteSpace(c))
+                {
+                    break;
+                }
+
+                valueEnd++;
+            }
+
+            if (valueEnd <= valueStart) return false;
+
+            string rawValue = json.Substring(valueStart, valueEnd - valueStart).Trim();
+            return long.TryParse(rawValue, out value);
+        }
+
+        //* این تابع هاست اتصال را از تیکت می گیرد و فقط اگر تیکت آدرس نداشت سراغ مقدار تست ادیتور می رود.
         private string ResolveHost(DedicatedGameTicketConnectionDto connection)
         {
+            if (useTicketConnectionAddress && connection != null && !string.IsNullOrWhiteSpace(connection.host))
+            {
+                return connection.host.Trim();
+            }
+
 #if UNITY_EDITOR
             if (overrideAddressInEditor && !string.IsNullOrWhiteSpace(editorHost))
             {
@@ -254,17 +383,17 @@ namespace Network_A.DedicatedGameServer.Client
             }
 #endif
 
-            if (useTicketConnectionAddress && connection != null && !string.IsNullOrWhiteSpace(connection.host))
-            {
-                return connection.host.Trim();
-            }
-
             return "127.0.0.1";
         }
 
-        //* این تابع پورت اتصال را از تیکت یا مقدار تست ادیتور انتخاب می کند.
+        //* این تابع پورت اتصال را از تیکت می گیرد و فقط اگر تیکت پورت نداشت سراغ مقدار تست ادیتور می رود.
         private int ResolvePort(DedicatedGameTicketConnectionDto connection)
         {
+            if (useTicketConnectionAddress && connection != null && connection.port > 0)
+            {
+                return connection.port;
+            }
+
 #if UNITY_EDITOR
             if (overrideAddressInEditor)
             {
@@ -272,25 +401,36 @@ namespace Network_A.DedicatedGameServer.Client
             }
 #endif
 
-            if (useTicketConnectionAddress && connection != null && connection.port > 0)
-            {
-                return connection.port;
-            }
-
             return 7777;
         }
 
-        //* این تابع امن بودن وب سوکت را برای تست ادیتور تعیین می کند.
-        private bool ResolveSecure()
+        //* این تابع امن بودن وب سوکت را از تیکت می خواند و فقط برای تست ادیتور سراغ مقدار دستی می رود.
+        private bool ResolveSecure(DedicatedGameTicketConnectionDto connection)
         {
+            if (useTicketConnectionAddress && connection != null)
+            {
+                return connection.secure;
+            }
+
 #if UNITY_EDITOR
-            if (overrideAddressInEditor)
+            if (overrideAddressInEditor && !useTicketConnectionAddress)
             {
                 return editorSecureWebSocket;
             }
 #endif
 
             return false;
+        }
+
+        //* این تابع مسیر وب سوکت را از تیکت می خواند؛ برای نیتیو خالی و برای وب جی ال مثل game-server/7777 است.
+        private string ResolvePath(DedicatedGameTicketConnectionDto connection)
+        {
+            if (useTicketConnectionAddress && connection != null && !string.IsNullOrWhiteSpace(connection.path))
+            {
+                return connection.path.Trim();
+            }
+
+            return string.Empty;
         }
 
         //* این تابع جریان خودکار را کنسل می کند.
@@ -323,6 +463,7 @@ namespace Network_A.DedicatedGameServer.Client
         ابتدا منتظر آماده شدن اکسس توکن کاربر بعد از AuthManager می ماند.
         سپس با DedicatedGameTicketClient از نود جی اس گیم تیکت می گیرد.
         بعد DedicatedGameServerWsClient را به آدرس ددیکیتد سرور وصل می کند.
+        اگر تیکت برای وب جی ال باشد، مسیر امن wss و path را از پاسخ سرور می گیرد.
         در پایان auth_ticket را ارسال می کند و منتظر auth_ok می ماند.
         این اسکریپت با GameServerClient قدیمی تداخل ندارد و فقط در مسیر DedicatedGameServer استفاده می شود.
         */

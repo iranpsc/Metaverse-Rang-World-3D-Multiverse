@@ -12,6 +12,11 @@ namespace Network_A.GameServer.Auth
     {
         [Header("Runtime")]
         [SerializeField] private DedicatedServerRuntime runtime;
+        [SerializeField] private Network_A.GameServer.GameServerControlDedicatedClient controlClient;
+
+        [Header("Service Token")]
+        [SerializeField] private bool renewServiceTokenBeforeVerify = true;
+        [SerializeField] private bool retryVerifyOnceOnTokenExpired = true;
 
         [Header("Http")]
         [SerializeField] private int timeoutSeconds = 15;
@@ -24,6 +29,7 @@ namespace Network_A.GameServer.Auth
         private void Awake()
         {
             EnsureRuntimeReference();
+            EnsureControlClientReference();
         }
 
         //* این تابع رفرنس ران تایم را از همین آبجکت، والد یا سینگلتون پیدا می کند.
@@ -40,6 +46,23 @@ namespace Network_A.GameServer.Auth
             runtime = DedicatedServerRuntime.Instance;
         }
 
+        //* این تابع کلاینت کنترل گیم سرور را پیدا می کند تا سرویس توکن تازه را از همان مسیر مشترک بگیرد.
+        private void EnsureControlClientReference()
+        {
+            if (controlClient != null) return;
+
+            controlClient = GetComponent<Network_A.GameServer.GameServerControlDedicatedClient>();
+            if (controlClient != null) return;
+
+            controlClient = GetComponentInParent<Network_A.GameServer.GameServerControlDedicatedClient>();
+            if (controlClient != null) return;
+
+            controlClient = GetComponentInChildren<Network_A.GameServer.GameServerControlDedicatedClient>(true);
+            if (controlClient != null) return;
+
+            controlClient = FindObjectOfType<Network_A.GameServer.GameServerControlDedicatedClient>();
+        }
+
         //* این تابع تیکت دریافتی از کلاینت را با نود جی اس وریفای می کند.
         public async Task<DedicatedVerifyTicketResult> VerifyTicketAsync(
             DedicatedAuthTicketMessageDto authMessage,
@@ -53,7 +76,8 @@ namespace Network_A.GameServer.Auth
                 return Fail("runtime_config_missing", "Dedicated runtime config is missing.");
             }
 
-            if (string.IsNullOrWhiteSpace(config.serviceToken))
+            string serviceToken = await ResolveServiceTokenForVerifyAsync(config, cancellationToken, false);
+            if (string.IsNullOrWhiteSpace(serviceToken))
             {
                 return Fail("service_token_missing", "Service token is empty.");
             }
@@ -65,7 +89,7 @@ namespace Network_A.GameServer.Auth
 
             DedicatedVerifyTicketRequestDto requestDto = new DedicatedVerifyTicketRequestDto
             {
-                serviceToken = config.serviceToken,
+                serviceToken = serviceToken,
                 serverId = SafeValue(authMessage.serverId, config.serverId),
                 roomId = SafeValue(authMessage.roomId, config.roomId),
                 userId = SafeTrim(authMessage.userId),
@@ -88,6 +112,19 @@ namespace Network_A.GameServer.Auth
             string json = JsonUtility.ToJson(requestDto);
 
             DedicatedVerifyHttpResult httpResult = await SendJsonPostAsync(url, json, cancellationToken);
+
+            if (!httpResult.IsSuccess && retryVerifyOnceOnTokenExpired && IsServiceTokenExpired(httpResult.RawBody, httpResult.ErrorMessage))
+            {
+                string refreshedServiceToken = await ResolveServiceTokenForVerifyAsync(config, cancellationToken, true);
+                if (!string.IsNullOrWhiteSpace(refreshedServiceToken) && refreshedServiceToken != serviceToken)
+                {
+                    requestDto.serviceToken = refreshedServiceToken;
+                    json = JsonUtility.ToJson(requestDto);
+
+                    Debug.LogWarning("[DedicatedTicketVerifier] Verify retry with renewed service token | connectionId=" + connectionId);
+                    httpResult = await SendJsonPostAsync(url, json, cancellationToken);
+                }
+            }
 
             if (!httpResult.IsSuccess)
             {
@@ -114,6 +151,32 @@ namespace Network_A.GameServer.Auth
                       " | connectionId=" + requestDto.connectionId);
 
             return DedicatedVerifyTicketResult.Success(httpResult.StatusCode, httpResult.RawBody, response, requestDto);
+        }
+
+        //* این تابع سرویس توکن مورد استفاده برای وریفای تیکت را از کنترل کلاینت مشترک می گیرد.
+        private async Task<string> ResolveServiceTokenForVerifyAsync(
+            DedicatedServerConfigData config,
+            CancellationToken cancellationToken,
+            bool forceRenew)
+        {
+            EnsureControlClientReference();
+
+            if (controlClient != null && renewServiceTokenBeforeVerify)
+            {
+                string token = await controlClient.GetFreshServiceTokenAsync(cancellationToken, forceRenew);
+                if (!string.IsNullOrWhiteSpace(token)) return SafeTrim(token);
+            }
+
+            return config == null ? string.Empty : SafeTrim(config.serviceToken);
+        }
+
+        //* این تابع از متن پاسخ نود جی اس تشخیص می دهد خطا به خاطر انقضای سرویس توکن بوده یا نه.
+        private bool IsServiceTokenExpired(string rawBody, string errorMessage)
+        {
+            string combined = (SafeTrim(rawBody) + " " + SafeTrim(errorMessage)).ToLowerInvariant();
+            return combined.Contains("token_expired") ||
+                   combined.Contains("service token has expired") ||
+                   combined.Contains("service_token_expired");
         }
 
         //* این تابع کانفیگ فعال ران تایم را امن برمی گرداند.

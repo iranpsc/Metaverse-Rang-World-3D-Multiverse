@@ -138,10 +138,23 @@ namespace Network_A.GameServer
             QueueImmediateHeartbeat("player_registered");
         }
 
-        //* این تابع وقتی پلیر از رجیستری حذف شد، هارت بیت فوری با تعداد جدید صف می کند.
-        private void HandlePlayerRemoved(DedicatedPlayerSession session, string reason)
+        //* این تابع وقتی پلیر از رجیستری حذف شد، ابتدا خروج را گزارش می کند و بعد هارت بیت فوری با تعداد جدید صف می کند.
+        private async void HandlePlayerRemoved(DedicatedPlayerSession session, string reason)
         {
-            QueueImmediateHeartbeat("player_removed_" + SafeReason(reason));
+            if (controlClient == null) EnsureReferences();
+
+            bool playerLeftReported = false;
+
+            if (controlClient != null && session != null)
+            {
+                playerLeftReported = await controlClient.ReportPlayerLeftAsync(session, reason);
+            }
+
+            string heartbeatReason = playerLeftReported
+                ? "player_removed_" + SafeReason(reason)
+                : "player_removed_report_pending_" + SafeReason(reason);
+
+            QueueImmediateHeartbeat(heartbeatReason);
         }
 
         //* این تابع از اینسپکتور برای شروع دستی حلقه هارت بیت استفاده می شود.
@@ -231,6 +244,7 @@ namespace Network_A.GameServer
                     int currentPlayers = ReadCurrentPlayers();
                     LogPlayerCountIfChanged(currentPlayers, "scheduled_heartbeat");
 
+                    await controlClient.RenewServiceTokenIfNeededAsync(cancellationToken);
                     await controlClient.SendHeartbeatAsync(currentPlayers, cancellationToken);
                     await DelaySeconds(config.heartbeatIntervalSeconds, cancellationToken);
                 }
@@ -299,6 +313,7 @@ namespace Network_A.GameServer
                     if (controlClient == null) continue;
                     if (runtime == null || !runtime.IsRunning) continue;
 
+                    await controlClient.RenewServiceTokenIfNeededAsync();
                     await controlClient.SendHeartbeatAsync(item.currentPlayers);
                     Debug.Log("[DedicatedHeartbeatLoop] Immediate heartbeat sent | reason=" +
                               item.reason + " | currentPlayers=" + item.currentPlayers);

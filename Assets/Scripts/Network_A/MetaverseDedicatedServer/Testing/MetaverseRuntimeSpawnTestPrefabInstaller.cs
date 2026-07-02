@@ -20,9 +20,10 @@ public static class MetaverseRuntimeSpawnTestPrefabInstaller
 
         if (registry.TryGetPrefab(TestPrefabId, out GameObject existingPrefab) && existingPrefab != null)
         {
+            EnsureComponents(existingPrefab);
             if (logMessages)
             {
-                Debug.Log("[MetaverseRuntimeSpawnTestPrefabInstaller] Runtime test prefab already registered | prefabId=" + TestPrefabId);
+                Debug.Log("[MetaverseRuntimeSpawnTestPrefabInstaller] Runtime test prefab already registered | phase=33A | prefabId=" + TestPrefabId);
             }
             return existingPrefab;
         }
@@ -37,12 +38,7 @@ public static class MetaverseRuntimeSpawnTestPrefabInstaller
             template.transform.localScale = Vector3.one;
         }
 
-        MetaverseNetworkIdentity identity = template.GetComponent<MetaverseNetworkIdentity>();
-        if (identity == null) identity = template.AddComponent<MetaverseNetworkIdentity>();
-        identity.AssignPrefabId(TestPrefabId);
-        identity.SetServerOwned(true);
-        identity.SetLocalPlayer(false);
-
+        EnsureComponents(template);
         template.SetActive(false);
         Object.DontDestroyOnLoad(template);
 
@@ -51,10 +47,26 @@ public static class MetaverseRuntimeSpawnTestPrefabInstaller
 
         if (logMessages)
         {
-            Debug.Log("[MetaverseRuntimeSpawnTestPrefabInstaller] Runtime test prefab registered | prefabId=" + TestPrefabId +
+            Debug.Log("[MetaverseRuntimeSpawnTestPrefabInstaller] Runtime test prefab registered | phase=33A | mirrorRoute=NetworkServer.SpawnPrefab" +
+                      " | prefabId=" + TestPrefabId +
                       " | registry=" + registry.name);
         }
 
         return template;
+    }
+
+    public static bool IsRuntimeTestPrefabInstalled(MetaverseSpawnManager spawnManager)
+    {
+        return spawnManager != null && spawnManager.PrefabRegistry != null && spawnManager.PrefabRegistry.TryGetPrefab(TestPrefabId, out GameObject prefab) && prefab != null;
+    }
+
+    private static void EnsureComponents(GameObject template)
+    {
+        if (template == null) return;
+        MetaverseNetworkIdentity identity = template.GetComponent<MetaverseNetworkIdentity>();
+        if (identity == null) identity = template.AddComponent<MetaverseNetworkIdentity>();
+        identity.AssignPrefabId(TestPrefabId);
+        identity.SetServerOwned(true);
+        identity.SetLocalPlayer(false);
     }
 }

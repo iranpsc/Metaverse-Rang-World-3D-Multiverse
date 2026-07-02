@@ -113,9 +113,15 @@ namespace Network_A.GameServer
             if (!autoStart) return false;
 
 #if UNITY_EDITOR
-            if (!runtimeServerStartSignalDetected)
+            if (runMode == DedicatedServerRunMode.WindowsEditorTest)
             {
-                Debug.LogWarning("[DedicatedServerConfig] Auto start blocked in Unity Editor. Use the start gate after joining a realtime room, or run the Windows dedicated build with -server and room arguments.");
+                if (verboseLogs) Debug.Log("[DedicatedServerConfig] Auto start allowed for Windows Editor Test. No external server flag is required.");
+                return true;
+            }
+
+            if (autoStartWhenServerFlagExists && !runtimeServerStartSignalDetected)
+            {
+                Debug.LogWarning("[DedicatedServerConfig] Auto start blocked in Unity Editor because a real dedicated server start signal was not detected.");
                 return false;
             }
 #endif

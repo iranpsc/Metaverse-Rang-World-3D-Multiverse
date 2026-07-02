@@ -26,6 +26,9 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private int timeoutSeconds = 15;
         [SerializeField] private bool logRawResponse = true;
 
+        [Header("Auth Refresh Gate")]
+        [SerializeField] private int accessTokenRefreshSkewSeconds = 60;
+
         public DedicatedGameTicketResponseDto LastResponse { get; private set; }
         public string LastError { get; private set; }
         public string LastRawBody { get; private set; }
@@ -44,12 +47,12 @@ namespace Network_A.DedicatedGameServer.Client
             LastError = string.Empty;
             LastRawBody = string.Empty;
 
-            string accessToken = SecureTokenStorage.GetAccessToken();
+            string accessToken = await EnsureFreshAccessTokenBeforeTicketAsync(cancellationToken);
 
             if (string.IsNullOrWhiteSpace(accessToken))
             {
-                LastError = "access_token_missing";
-                Debug.LogError("[DedicatedGameTicketClient] Access token is missing. Login must complete before requesting game ticket.");
+                LastError = "access_token_missing_after_refresh_gate";
+                Debug.LogError("[DedicatedGameTicketClient] Access token is missing after refresh gate. Login must complete before requesting game ticket.");
                 return null;
             }
 
@@ -124,7 +127,9 @@ namespace Network_A.DedicatedGameServer.Client
                       " | roomId=" + response.data.connection.roomId +
                       " | roomName=" + SafeTrim(roomName) +
                       " | host=" + response.data.connection.host +
-                      " | port=" + response.data.connection.port);
+                      " | port=" + response.data.connection.port +
+                      " | secure=" + response.data.connection.secure +
+                      " | path=" + SafeTrim(response.data.connection.path));
 
             return response;
         }
@@ -230,6 +235,152 @@ namespace Network_A.DedicatedGameServer.Client
 
             error = string.Empty;
             return true;
+        }
+
+
+        //* این تابع قبل از گرفتن تیکت، اکسس توکن را تازه می کند تا درخواست با توکن اکسپایر شده ارسال نشود.
+        private async Task<string> EnsureFreshAccessTokenBeforeTicketAsync(CancellationToken cancellationToken)
+        {
+            string accessToken = SecureTokenStorage.GetAccessToken();
+
+            if (!IsAccessTokenRefreshRequired(accessToken))
+            {
+                return string.IsNullOrWhiteSpace(accessToken) ? string.Empty : accessToken.Trim();
+            }
+
+            if (cancellationToken.IsCancellationRequested) return string.Empty;
+
+            if (string.IsNullOrWhiteSpace(SecureTokenStorage.GetRefreshToken()))
+            {
+                Debug.LogWarning("[DedicatedGameTicketClient] Access token refresh is required before ticket request, but refresh token is empty.");
+                return string.Empty;
+            }
+
+            Debug.Log("[DedicatedGameTicketClient] Access token is expired or near expiry. Refreshing before ticket request.");
+
+            bool refreshed = await AuthRefreshManager.Refresh();
+
+            if (!refreshed)
+            {
+                LastError = "refresh_before_ticket_failed";
+                Debug.LogWarning("[DedicatedGameTicketClient] Refresh before ticket request failed.");
+                return string.Empty;
+            }
+
+            string refreshedToken = SecureTokenStorage.GetAccessToken();
+
+            if (string.IsNullOrWhiteSpace(refreshedToken))
+            {
+                LastError = "refresh_before_ticket_empty_access_token";
+                Debug.LogWarning("[DedicatedGameTicketClient] Refresh before ticket request returned empty access token.");
+                return string.Empty;
+            }
+
+            Debug.Log("[DedicatedGameTicketClient] Refresh before ticket request succeeded.");
+            return refreshedToken.Trim();
+        }
+
+        //* این تابع تشخیص می دهد اکسس توکن خالی، اکسپایر شده یا نزدیک اکسپایر است یا نه.
+        private bool IsAccessTokenRefreshRequired(string accessToken)
+        {
+            if (string.IsNullOrWhiteSpace(accessToken)) return true;
+
+            if (!TryReadJwtExpiryUnixSeconds(accessToken, out long expiresAtUnixSeconds))
+            {
+                return false;
+            }
+
+            long nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            int safeSkewSeconds = Mathf.Clamp(accessTokenRefreshSkewSeconds, 0, 3600);
+
+            return expiresAtUnixSeconds <= nowUnixSeconds + safeSkewSeconds;
+        }
+
+        //* این تابع زمان اکسپایر شدن توکن جی دبلیو تی را از کلیم exp می خواند.
+        private static bool TryReadJwtExpiryUnixSeconds(string token, out long expiresAtUnixSeconds)
+        {
+            expiresAtUnixSeconds = 0;
+
+            string payloadJson = ReadJwtPayloadJson(token);
+            if (string.IsNullOrWhiteSpace(payloadJson)) return false;
+
+            return TryExtractJsonLongValue(payloadJson, "exp", out expiresAtUnixSeconds);
+        }
+
+        //* این تابع پِیلود جی دبلیو تی را بدون وابستگی اضافه می خواند.
+        private static string ReadJwtPayloadJson(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return string.Empty;
+
+            string[] parts = token.Split('.');
+            if (parts == null || parts.Length < 2) return string.Empty;
+
+            return DecodeBase64UrlToString(parts[1]);
+        }
+
+        //* این تابع متن بیس شصت و چهار یو آر ال را دیکود می کند.
+        private static string DecodeBase64UrlToString(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+            string base64 = value.Replace('-', '+').Replace('_', '/');
+            int padding = base64.Length % 4;
+            if (padding == 2) base64 += "==";
+            else if (padding == 3) base64 += "=";
+            else if (padding != 0) return string.Empty;
+
+            try
+            {
+                byte[] bytes = Convert.FromBase64String(base64);
+                return Encoding.UTF8.GetString(bytes);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        //* این تابع مقدار عددی یک کلید جیسون را بدون وابستگی اضافه می خواند.
+        private static bool TryExtractJsonLongValue(string json, string key, out long value)
+        {
+            value = 0;
+
+            if (string.IsNullOrWhiteSpace(json) || string.IsNullOrWhiteSpace(key)) return false;
+
+            string pattern = "\"" + key + "\"";
+            int keyIndex = json.IndexOf(pattern, StringComparison.Ordinal);
+            if (keyIndex < 0) return false;
+
+            int colonIndex = json.IndexOf(':', keyIndex + pattern.Length);
+            if (colonIndex < 0) return false;
+
+            int valueStart = colonIndex + 1;
+            while (valueStart < json.Length && char.IsWhiteSpace(json[valueStart])) valueStart++;
+
+            bool quoted = valueStart < json.Length && json[valueStart] == '"';
+            if (quoted) valueStart++;
+
+            int valueEnd = valueStart;
+            while (valueEnd < json.Length)
+            {
+                char c = json[valueEnd];
+
+                if (quoted)
+                {
+                    if (c == '"') break;
+                }
+                else if (c == ',' || c == '}' || c == ']' || char.IsWhiteSpace(c))
+                {
+                    break;
+                }
+
+                valueEnd++;
+            }
+
+            if (valueEnd <= valueStart) return false;
+
+            string rawValue = json.Substring(valueStart, valueEnd - valueStart).Trim();
+            return long.TryParse(rawValue, out value);
         }
 
         //* این تابع درخواست جیسون پست را با Authorization Bearer ارسال می کند.
@@ -389,6 +540,11 @@ namespace Network_A.DedicatedGameServer.Client
         public string serverId;
         public string host;
         public int port;
+        public bool secure;
+        public string path;
+        public string scheme;
+        public string directHost;
+        public int directPort;
         public string roomId;
         public string sessionId;
         public string region;
