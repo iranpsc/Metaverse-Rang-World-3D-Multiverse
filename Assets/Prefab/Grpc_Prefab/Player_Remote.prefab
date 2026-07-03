@@ -182,7 +182,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: eeedec2fc945d2f4f857b7ddfcab9b31, type: 2}
+  - {fileID: 2100000, guid: bece05b6431f38442959f60badc4c3fb, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -287,7 +287,14 @@ MonoBehaviour:
   prefabId: 
   netId: 0
   ownerConnectionId: -1
+  ownerConnectionIdText: 
+  ownerUserId: 
+  ownerPlayerId: 
   serverOwned: 1
   localPlayer: 0
   spawned: 0
+  isServer: 0
+  isClient: 0
+  hasAuthority: 0
   logLifecycle: 0
+  logBehaviourCallbacks: 0
