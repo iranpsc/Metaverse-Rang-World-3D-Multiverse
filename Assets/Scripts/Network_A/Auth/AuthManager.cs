@@ -10,7 +10,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 using Project.UI.MainMenu;
-namespace Network_A.Auth
+namespace Network_A.Auth//22
 {
     public class AuthManager : MonoBehaviour
     {
