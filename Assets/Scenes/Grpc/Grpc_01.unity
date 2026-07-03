@@ -2667,7 +2667,7 @@ MonoBehaviour:
   clearTokensOnStart: 0
   checkNetOnStart: 1
   autoLoginInitAfterHealth: 1
-  showRegisterPanelIfFirstInstall: 0
+  showRegisterPanelIfFirstInstall: 1
   pnl_Reg: {fileID: 1248299304}
   in_RegUserName: {fileID: 179605467}
   in_RegPass: {fileID: 1232940449}
