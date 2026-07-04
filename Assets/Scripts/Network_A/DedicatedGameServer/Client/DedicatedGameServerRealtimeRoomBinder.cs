@@ -16,11 +16,13 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private DedicatedGameTicketClient ticketClient;
         [SerializeField] private DedicatedGameServerAutoConnectController autoConnectController;
         [SerializeField] private DedicatedGameServerWsClient wsClient;
+        [SerializeField] private G7ThreeDModeController threeDModeController;
 
         [Header("UI")]
         [SerializeField] private Button connectGameServerButton;
         [SerializeField] private Button disconnectGameServerButton;
         [SerializeField] private TextMeshProUGUI statusText;
+        [SerializeField] private TextMeshProUGUI gameServerStateText;
 
         [Header("Rules")]
         [SerializeField] private bool autoFindReferences = true;
@@ -29,6 +31,36 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private bool disconnectDedicatedOnRealtimeDisconnected = true;
         [SerializeField] private bool refreshUiInUpdate = true;
         [SerializeField] private float uiRefreshIntervalSeconds = 0.25f;
+
+        [Header("Reconnect UI State")]
+        [SerializeField] private bool disableGameServerConnectButtonWhileRealtimeReconnects = true;
+        [SerializeField] private bool keepInsideGameServerStatusDuringReconnect = true;
+        [SerializeField] private string outsideGameServerStatusMessage = "Outside Game Server";
+        [SerializeField] private string connectingGameServerStatusMessage = "Connecting to Game Server";
+        [SerializeField] private string insideGameServerStatusMessage = "Inside Game Server";
+        [SerializeField] private string reconnectingInsideGameServerStatusMessage = "Inside Game Server - reconnecting";
+
+        [Header("Manual Exit World Cleanup")]
+        [SerializeField] private GameObject sharedWorld3DRoot;
+        [SerializeField] private Transform[] runtimeCloneRoots;
+        [SerializeField] private bool cleanupSharedWorldOnlyOnUserExit = true;
+        [SerializeField] private bool disableSharedWorldRootOnUserExit = true;
+        [SerializeField] private bool destroyRuntimeCloneRootChildrenOnUserExit = true;
+        [SerializeField] private bool neverDestroySharedWorld3DRoot = true;
+        [SerializeField] private bool skipSharedWorldRootWhenUsedAsRuntimeCloneRoot = true;
+        [SerializeField] private bool activateSharedWorldRootOnRoomEntry = false;
+        [SerializeField] private bool activateSharedWorldRootOnDedicatedConnected = false;
+        [SerializeField] private bool activateSharedWorldRootOnDedicatedAuthenticated = true;
+        [SerializeField] private bool requireDedicatedConnectionBeforeSharedWorldRootActivation = true;
+        [SerializeField] private bool activateThreeDModeAfterDedicatedAuthenticated = true;
+        [SerializeField] private bool ensureLocalPlayerAfterDedicatedAuthenticated = true;
+        [SerializeField] private bool useThreeDModeControllerWorldRootFallback = true;
+
+        [Header("Manual Exit Camera Safety")]
+        [SerializeField] private bool detachMainCameraBeforeRuntimeCloneCleanup = true;
+        [SerializeField] private Camera mainCameraOverride;
+        [SerializeField] private Transform mainCameraSafeParent;
+        [SerializeField] private bool keepMainCameraWorldPoseOnDetach = true;
 
         [Header("Debug")]
         [SerializeField] private bool verboseLogs = true;
@@ -42,10 +74,14 @@ namespace Network_A.DedicatedGameServer.Client
         private string lastSyncedRoomName = string.Empty;
         private string lastButtonReason = string.Empty;
         private string lastStatus = string.Empty;
+        private string lastGameServerStateStatus = string.Empty;
 
         private bool lastCanConnect;
         private bool lastCanDisconnect;
         private bool hasButtonStateCache;
+        private bool manualExitWorldCleanupApplied;
+        private bool realtimeReconnectInProgress;
+        private bool wasInsideDedicatedGameServer;
 
         private RealtimeWebSocketG7RoomLobbyTestController boundWebSocketRealtimeLobbyController;
         private RealtimeGrpcStreamingG7RoomLobbyTestController boundGrpcStreamingRealtimeLobbyController;
@@ -140,13 +176,17 @@ namespace Network_A.DedicatedGameServer.Client
 
             if (!hasDedicatedConnection && !hasRealtimeRoom)
             {
+                SetGameServerStateText(outsideGameServerStatusMessage, true);
                 SetStatus("Game server and realtime room are already disconnected.", true);
+                CleanupSharedWorldAfterUserExit("manual_game_server_disconnect_already_disconnected");
                 ClearRoomSyncCache();
                 RefreshUiState(true);
                 return true;
             }
 
             isDisconnectClickRunning = true;
+            realtimeReconnectInProgress = false;
+            wasInsideDedicatedGameServer = false;
             RefreshUiState(true);
 
             try
@@ -168,7 +208,9 @@ namespace Network_A.DedicatedGameServer.Client
 
                     if (leaveOk)
                     {
+                        CleanupSharedWorldAfterUserExit(safeReason + ":room_left");
                         ClearRoomSyncCache();
+                        SetGameServerStateText(outsideGameServerStatusMessage, true);
                         SetStatus("Game server disconnected and realtime room left.", true);
                     }
                     else
@@ -179,7 +221,9 @@ namespace Network_A.DedicatedGameServer.Client
                     return leaveOk;
                 }
 
+                CleanupSharedWorldAfterUserExit(safeReason + ":dedicated_only");
                 ClearRoomSyncCache();
+                SetGameServerStateText(outsideGameServerStatusMessage, true);
                 SetStatus("Game server disconnected.", true);
                 return true;
             }
@@ -270,12 +314,27 @@ namespace Network_A.DedicatedGameServer.Client
 
                 ApplyRealtimeUserNameToAutoConnect();
 
+                SetGameServerStateText(connectingGameServerStatusMessage, true);
                 SetStatus("Connecting to game server...", true);
                 LogCurrentContext("before_auto_flow");
 
                 bool ok = await autoConnectController.RunAutoTicketConnectAndAuthAsync();
 
-                SetStatus(ok ? "Game server connected." : "Game server connect failed.", true);
+                if (ok)
+                {
+                    realtimeReconnectInProgress = false;
+                    wasInsideDedicatedGameServer = true;
+                    EnsureDedicatedWorldActiveAfterAuthenticated("connect_flow_ok");
+                    SetGameServerStateText(insideGameServerStatusMessage, true);
+                    SetStatus(insideGameServerStatusMessage, true);
+                }
+                else
+                {
+                    wasInsideDedicatedGameServer = false;
+                    SetGameServerStateText(outsideGameServerStatusMessage, true);
+                    SetStatus("Game server connect failed.", true);
+                }
+
                 Log("Auto flow result=" + ok, true);
 
                 return ok;
@@ -359,6 +418,13 @@ namespace Network_A.DedicatedGameServer.Client
                 if (wsClient == null) wsClient = DedicatedGameServerWsClient.Instance;
                 if (wsClient == null) wsClient = FindObjectOfType<DedicatedGameServerWsClient>();
             }
+
+            if (threeDModeController == null) threeDModeController = FindObjectOfType<G7ThreeDModeController>(true);
+
+            if (sharedWorld3DRoot == null && useThreeDModeControllerWorldRootFallback && threeDModeController != null && threeDModeController.World3DRoot != null)
+            {
+                sharedWorld3DRoot = threeDModeController.World3DRoot;
+            }
         }
 
         //* این تابع دکمه ها را به تابع های داخلی وصل می کند.
@@ -402,6 +468,8 @@ namespace Network_A.DedicatedGameServer.Client
                 realtimeLobbyController.OnRoomJoinedFor3D += HandleRealtimeRoomJoined;
                 realtimeLobbyController.OnRoomLeftFor3D += HandleRealtimeRoomLeft;
                 realtimeLobbyController.OnRealtimeDisconnectedFor3D += HandleRealtimeDisconnected;
+                realtimeLobbyController.OnRealtimeConnectionLostForReconnectFor3D += HandleRealtimeConnectionLostForReconnect;
+                realtimeLobbyController.OnRealtimeReconnectFailedPermanentlyFor3D += HandleRealtimeReconnectFailedPermanently;
                 boundWebSocketRealtimeLobbyController = realtimeLobbyController;
             }
 
@@ -410,6 +478,8 @@ namespace Network_A.DedicatedGameServer.Client
                 grpcStreamingRealtimeLobbyController.OnRoomJoinedFor3D += HandleRealtimeRoomJoined;
                 grpcStreamingRealtimeLobbyController.OnRoomLeftFor3D += HandleRealtimeRoomLeft;
                 grpcStreamingRealtimeLobbyController.OnRealtimeDisconnectedFor3D += HandleRealtimeDisconnected;
+                grpcStreamingRealtimeLobbyController.OnRealtimeConnectionLostForReconnectFor3D += HandleRealtimeConnectionLostForReconnect;
+                grpcStreamingRealtimeLobbyController.OnRealtimeReconnectFailedPermanentlyFor3D += HandleRealtimeReconnectFailedPermanently;
                 boundGrpcStreamingRealtimeLobbyController = grpcStreamingRealtimeLobbyController;
             }
         }
@@ -429,6 +499,8 @@ namespace Network_A.DedicatedGameServer.Client
             boundWebSocketRealtimeLobbyController.OnRoomJoinedFor3D -= HandleRealtimeRoomJoined;
             boundWebSocketRealtimeLobbyController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
             boundWebSocketRealtimeLobbyController.OnRealtimeDisconnectedFor3D -= HandleRealtimeDisconnected;
+            boundWebSocketRealtimeLobbyController.OnRealtimeConnectionLostForReconnectFor3D -= HandleRealtimeConnectionLostForReconnect;
+            boundWebSocketRealtimeLobbyController.OnRealtimeReconnectFailedPermanentlyFor3D -= HandleRealtimeReconnectFailedPermanently;
             boundWebSocketRealtimeLobbyController = null;
         }
 
@@ -440,6 +512,8 @@ namespace Network_A.DedicatedGameServer.Client
             boundGrpcStreamingRealtimeLobbyController.OnRoomJoinedFor3D -= HandleRealtimeRoomJoined;
             boundGrpcStreamingRealtimeLobbyController.OnRoomLeftFor3D -= HandleRealtimeRoomLeft;
             boundGrpcStreamingRealtimeLobbyController.OnRealtimeDisconnectedFor3D -= HandleRealtimeDisconnected;
+            boundGrpcStreamingRealtimeLobbyController.OnRealtimeConnectionLostForReconnectFor3D -= HandleRealtimeConnectionLostForReconnect;
+            boundGrpcStreamingRealtimeLobbyController.OnRealtimeReconnectFailedPermanentlyFor3D -= HandleRealtimeReconnectFailedPermanently;
             boundGrpcStreamingRealtimeLobbyController = null;
         }
 
@@ -473,7 +547,11 @@ namespace Network_A.DedicatedGameServer.Client
         //* این تابع بعد از ورود به روم ریل تایم، کانتکست را برای تیکت آماده می کند.
         private void HandleRealtimeRoomJoined(string roomId)
         {
+            manualExitWorldCleanupApplied = false;
+            realtimeReconnectInProgress = false;
+            ActivateSharedWorldForRoomEntry("realtime_room_joined:" + Safe(roomId));
             SyncRoomContextFromRealtime("room_joined_event", true);
+            if (!IsInsideGameServer()) SetGameServerStateText(outsideGameServerStatusMessage, true);
             SetStatus("Realtime room joined. Game server is ready to connect.", true);
             RefreshUiState(true);
         }
@@ -486,6 +564,10 @@ namespace Network_A.DedicatedGameServer.Client
                 wsClient.Disconnect("realtime_room_left");
             }
 
+            realtimeReconnectInProgress = false;
+            wasInsideDedicatedGameServer = false;
+            CleanupSharedWorldAfterUserExit("manual_realtime_room_left:" + Safe(roomId));
+            SetGameServerStateText(outsideGameServerStatusMessage, true);
             SetStatus("Realtime room left.", true);
             ClearRoomSyncCache();
             RefreshUiState(true);
@@ -494,36 +576,359 @@ namespace Network_A.DedicatedGameServer.Client
         //* این تابع بعد از قطع ریل تایم، اتصال ددیکیتد را هم تمیز قطع می کند.
         private void HandleRealtimeDisconnected(string reason)
         {
-            if (disconnectDedicatedOnRealtimeDisconnected && wsClient != null && wsClient.IsConnected)
+            bool permanentReconnectFailure = IsPermanentReconnectFailureReason(reason);
+            bool manualExit = isDisconnectClickRunning || IsManualExitReason(reason);
+
+            if (permanentReconnectFailure)
             {
-                wsClient.Disconnect("realtime_disconnected");
+                realtimeReconnectInProgress = false;
+                wasInsideDedicatedGameServer = false;
+                RefreshUiState(true);
+                return;
             }
 
-            SetStatus("Realtime disconnected: " + Safe(reason), true);
-            ClearRoomSyncCache();
+            if (manualExit && disconnectDedicatedOnRealtimeDisconnected && wsClient != null && wsClient.IsConnected)
+            {
+                wsClient.Disconnect("realtime_disconnected_manual_exit");
+            }
+
+            if (manualExit)
+            {
+                realtimeReconnectInProgress = false;
+                wasInsideDedicatedGameServer = false;
+                CleanupSharedWorldAfterUserExit("manual_realtime_disconnected:" + Safe(reason));
+                ClearRoomSyncCache();
+                SetGameServerStateText(outsideGameServerStatusMessage, true);
+                SetStatus("Realtime disconnected after user exit: " + Safe(reason), true);
+            }
+            else
+            {
+                HandleRealtimeConnectionLostForReconnect(reason);
+            }
+
             RefreshUiState(true);
+        }
+
+        private void HandleRealtimeConnectionLostForReconnect(string reason)
+        {
+            realtimeReconnectInProgress = true;
+            if (IsInsideGameServer()) wasInsideDedicatedGameServer = true;
+
+            if (keepInsideGameServerStatusDuringReconnect && wasInsideDedicatedGameServer)
+            {
+                SetGameServerStateText(reconnectingInsideGameServerStatusMessage, true);
+                SetStatus(reconnectingInsideGameServerStatusMessage + ": " + Safe(reason), true);
+            }
+            else
+            {
+                SetStatus("Realtime connection lost. Reconnect is allowed: " + Safe(reason), true);
+            }
+
+            RefreshUiState(true);
+        }
+
+        private void HandleRealtimeReconnectFailedPermanently(string reason)
+        {
+            string safeReason = "permanent_reconnect_failure:" + Safe(reason);
+            realtimeReconnectInProgress = false;
+            wasInsideDedicatedGameServer = false;
+
+            if (disconnectDedicatedOnRealtimeDisconnected && wsClient != null && wsClient.IsConnected)
+            {
+                wsClient.Disconnect("realtime_reconnect_failed_permanently");
+            }
+
+            CleanupSharedWorldAfterUserExit(safeReason);
+            ClearRoomSyncCache();
+            SetGameServerStateText(outsideGameServerStatusMessage, true);
+            SetStatus("Reconnect failed permanently. Game server room was cleared locally: " + Safe(reason), true);
+            RefreshUiState(true);
+        }
+
+        private bool IsManualExitReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            return value.Contains("manual")
+                   || value.Contains("user_exit")
+                   || value.Contains("leave_room")
+                   || value.Contains("realtime_room_left")
+                   || value.Contains("manual_game_server_disconnect");
+        }
+
+        private bool IsPermanentReconnectFailureReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            return value.Contains("permanent_reconnect_failure")
+                   || value.Contains("reconnect_failed_permanently");
+        }
+
+        private bool IsInsideGameServer()
+        {
+            return wsClient != null && (wsClient.IsConnected || wsClient.IsAuthenticated);
+        }
+
+        private void ActivateSharedWorldForRoomEntry(string reason)
+        {
+            manualExitWorldCleanupApplied = false;
+
+            string safeReason = Safe(reason);
+            bool dedicatedActivation = IsDedicatedSharedWorldActivationReason(safeReason);
+
+            if (requireDedicatedConnectionBeforeSharedWorldRootActivation && !dedicatedActivation)
+            {
+                Log("Shared world root activation skipped before dedicated game server connection. reason=" + safeReason, true);
+                return;
+            }
+
+            if (dedicatedActivation)
+            {
+                if (IsDedicatedAuthenticatedSharedWorldActivationReason(safeReason))
+                {
+                    if (!activateSharedWorldRootOnDedicatedAuthenticated) return;
+                }
+                else
+                {
+                    if (!activateSharedWorldRootOnDedicatedConnected) return;
+                }
+            }
+            else
+            {
+                if (!activateSharedWorldRootOnRoomEntry) return;
+            }
+
+            if (sharedWorld3DRoot == null)
+            {
+                Log("Shared world root activation skipped. Reference is missing. reason=" + safeReason, true);
+                return;
+            }
+
+            if (!sharedWorld3DRoot.activeSelf)
+            {
+                sharedWorld3DRoot.SetActive(true);
+                Log("Shared world root activated after dedicated game server connection. reason=" + safeReason, true);
+                return;
+            }
+
+            Log("Shared world root already active after dedicated game server connection. reason=" + safeReason, true);
+        }
+
+        private bool IsDedicatedSharedWorldActivationReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            return value.Contains("dedicated_socket_connected")
+                   || value.Contains("dedicated_connected")
+                   || value.Contains("dedicated_authenticated")
+                   || value.Contains("game_server_connected")
+                   || value.Contains("game_server_authenticated");
+        }
+
+        private bool IsDedicatedAuthenticatedSharedWorldActivationReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            return value.Contains("dedicated_authenticated")
+                   || value.Contains("game_server_authenticated");
+        }
+
+        private void CleanupSharedWorldAfterUserExit(string reason)
+        {
+            if (!cleanupSharedWorldOnlyOnUserExit) return;
+            if (manualExitWorldCleanupApplied) return;
+
+            manualExitWorldCleanupApplied = true;
+            string safeReason = Safe(reason);
+
+            DetachMainCameraBeforeRuntimeCloneCleanup(safeReason);
+
+            if (destroyRuntimeCloneRootChildrenOnUserExit) DestroyRuntimeCloneRootChildren(safeReason);
+
+            if (disableSharedWorldRootOnUserExit && sharedWorld3DRoot != null)
+            {
+                sharedWorld3DRoot.SetActive(false);
+                Log("Shared world root disabled after user exit. reason=" + safeReason, true);
+            }
+        }
+
+        private void DetachMainCameraBeforeRuntimeCloneCleanup(string reason)
+        {
+            if (!detachMainCameraBeforeRuntimeCloneCleanup) return;
+
+            Camera mainCamera = mainCameraOverride != null ? mainCameraOverride : Camera.main;
+            if (mainCamera == null) return;
+
+            Transform cameraTransform = mainCamera.transform;
+            if (cameraTransform == null || cameraTransform.parent == null) return;
+            if (!ShouldDetachMainCameraForRuntimeCleanup(cameraTransform)) return;
+
+            Vector3 worldPosition = cameraTransform.position;
+            Quaternion worldRotation = cameraTransform.rotation;
+            Vector3 worldScale = cameraTransform.lossyScale;
+
+            cameraTransform.SetParent(mainCameraSafeParent, keepMainCameraWorldPoseOnDetach);
+            cameraTransform.position = worldPosition;
+            cameraTransform.rotation = worldRotation;
+
+            if (!keepMainCameraWorldPoseOnDetach) cameraTransform.localScale = worldScale;
+
+            Log("Main camera detached before runtime clone cleanup. reason=" + reason, true);
+        }
+
+        private bool ShouldDetachMainCameraForRuntimeCleanup(Transform cameraTransform)
+        {
+            if (cameraTransform == null) return false;
+
+            if (runtimeCloneRoots != null)
+            {
+                for (int i = 0; i < runtimeCloneRoots.Length; i++)
+                {
+                    Transform root = runtimeCloneRoots[i];
+                    if (root != null && cameraTransform.IsChildOf(root)) return true;
+                }
+            }
+
+            return sharedWorld3DRoot != null && cameraTransform.IsChildOf(sharedWorld3DRoot.transform);
+        }
+
+        private bool IsSharedWorldRootTransform(Transform target)
+        {
+            if (target == null || sharedWorld3DRoot == null) return false;
+            return target == sharedWorld3DRoot.transform;
+        }
+
+        private void DestroyRuntimeCloneRootChildren(string reason)
+        {
+            if (runtimeCloneRoots == null || runtimeCloneRoots.Length == 0) return;
+
+            int destroyedCount = 0;
+            int skippedProtectedRootCount = 0;
+
+            for (int rootIndex = 0; rootIndex < runtimeCloneRoots.Length; rootIndex++)
+            {
+                Transform root = runtimeCloneRoots[rootIndex];
+                if (root == null) continue;
+
+                if (neverDestroySharedWorld3DRoot && skipSharedWorldRootWhenUsedAsRuntimeCloneRoot && IsSharedWorldRootTransform(root))
+                {
+                    skippedProtectedRootCount++;
+                    Log("Shared_World_3D_Root was used as a runtime clone root and was skipped. Use a child Runtime_Clones_Root for cloned objects. reason=" + reason, true);
+                    continue;
+                }
+
+                for (int childIndex = root.childCount - 1; childIndex >= 0; childIndex--)
+                {
+                    Transform child = root.GetChild(childIndex);
+                    if (child == null) continue;
+                    if (neverDestroySharedWorld3DRoot && IsSharedWorldRootTransform(child))
+                    {
+                        skippedProtectedRootCount++;
+                        continue;
+                    }
+
+                    Destroy(child.gameObject);
+                    destroyedCount++;
+                }
+            }
+
+            if (destroyedCount > 0)
+            {
+                Log("Runtime clone children destroyed after user exit. count=" + destroyedCount + " | reason=" + reason, true);
+            }
+
+            if (skippedProtectedRootCount > 0)
+            {
+                Log("Protected Shared_World_3D_Root was not destroyed during runtime cleanup. skipped=" + skippedProtectedRootCount + " | reason=" + reason, true);
+            }
+        }
+
+        private void EnsureDedicatedWorldActiveAfterAuthenticated(string source)
+        {
+            string safeSource = Safe(source);
+
+            if (threeDModeController == null) threeDModeController = FindObjectOfType<G7ThreeDModeController>(true);
+
+            if (sharedWorld3DRoot == null && useThreeDModeControllerWorldRootFallback && threeDModeController != null && threeDModeController.World3DRoot != null)
+            {
+                sharedWorld3DRoot = threeDModeController.World3DRoot;
+            }
+
+            ActivateSharedWorldForRoomEntry("dedicated_authenticated:" + safeSource);
+
+            if (threeDModeController == null)
+            {
+                Log("3D mode activation skipped after dedicated auth. G7ThreeDModeController is missing. source=" + safeSource, true);
+                return;
+            }
+
+            if (activateThreeDModeAfterDedicatedAuthenticated && !threeDModeController.IsThreeDModeActive)
+            {
+                threeDModeController.EnterThreeDMode();
+                Log("3D mode entered after dedicated auth. source=" + safeSource, true);
+                return;
+            }
+
+            if (ensureLocalPlayerAfterDedicatedAuthenticated)
+            {
+                threeDModeController.EnsureLocalPlayerSpawned();
+                Log("Local player ensured after dedicated auth. source=" + safeSource, true);
+            }
         }
 
         private void HandleDedicatedConnected()
         {
+            if (activateSharedWorldRootOnDedicatedConnected) ActivateSharedWorldForRoomEntry("dedicated_socket_connected");
+            SetGameServerStateText(connectingGameServerStatusMessage, true);
             SetStatus("Dedicated server socket connected.", true);
             RefreshUiState(true);
         }
 
         private void HandleDedicatedDisconnected(string reason)
         {
-            SetStatus("Dedicated server disconnected: " + Safe(reason), true);
+            bool manualExit = isDisconnectClickRunning || IsManualExitReason(reason);
+            bool permanentReconnectFailure = IsPermanentReconnectFailureReason(reason);
+
+            if (manualExit || permanentReconnectFailure)
+            {
+                wasInsideDedicatedGameServer = false;
+                if (permanentReconnectFailure) realtimeReconnectInProgress = false;
+                SetGameServerStateText(outsideGameServerStatusMessage, true);
+                SetStatus("Dedicated server disconnected: " + Safe(reason), true);
+            }
+            else if (keepInsideGameServerStatusDuringReconnect && (realtimeReconnectInProgress || wasInsideDedicatedGameServer))
+            {
+                realtimeReconnectInProgress = true;
+                SetGameServerStateText(reconnectingInsideGameServerStatusMessage, true);
+                SetStatus(reconnectingInsideGameServerStatusMessage + ": " + Safe(reason), true);
+            }
+            else
+            {
+                SetGameServerStateText(outsideGameServerStatusMessage, true);
+                SetStatus("Dedicated server disconnected: " + Safe(reason), true);
+            }
+
             RefreshUiState(true);
         }
 
         private void HandleDedicatedAuthenticated()
         {
-            SetStatus("Dedicated server authenticated.", true);
+            realtimeReconnectInProgress = false;
+            wasInsideDedicatedGameServer = true;
+            EnsureDedicatedWorldActiveAfterAuthenticated("dedicated_authenticated_event");
+            SetGameServerStateText(insideGameServerStatusMessage, true);
+            SetStatus(insideGameServerStatusMessage, true);
             RefreshUiState(true);
         }
 
         private void HandleDedicatedAuthFailed(string reason)
         {
+            wasInsideDedicatedGameServer = false;
+            SetGameServerStateText(outsideGameServerStatusMessage, true);
             SetStatus("Dedicated auth failed: " + Safe(reason), true);
             RefreshUiState(true);
         }
@@ -560,6 +965,12 @@ namespace Network_A.DedicatedGameServer.Client
             if (isConnectClickRunning || isDisconnectClickRunning || autoConnectController.IsRunning)
             {
                 reason = "flow_running";
+                return false;
+            }
+
+            if (disableGameServerConnectButtonWhileRealtimeReconnects && realtimeReconnectInProgress)
+            {
+                reason = "realtime_reconnect_in_progress | controller=" + Safe(snapshot.controllerKind);
                 return false;
             }
 
@@ -743,6 +1154,21 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 ticketClient.ClearRoomContext();
             }
+        }
+
+        private void SetGameServerStateText(string value, bool forceLog)
+        {
+            string safeValue = Safe(value);
+            bool changed = safeValue != lastGameServerStateStatus;
+
+            if (gameServerStateText != null) gameServerStateText.text = safeValue;
+
+            if (changed || forceLog)
+            {
+                Log("GameServerState=" + safeValue, forceLog || changed);
+            }
+
+            lastGameServerStateStatus = safeValue;
         }
 
         private void SetStatus(string value, bool forceLog)

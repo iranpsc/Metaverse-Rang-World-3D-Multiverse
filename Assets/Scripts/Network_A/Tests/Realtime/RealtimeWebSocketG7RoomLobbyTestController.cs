@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -67,11 +68,41 @@ namespace Network_A.Tests.Realtime
         [SerializeField] private bool forceTextMeshRefreshAfterUiApply = true;
         [SerializeField] private bool disableSendButtonWhenMessageInputEmpty = true;
         [SerializeField] private int minimumRoomNameCharactersToEnableCreateButton = 8;
+
+        [Header("Server Debug Failure UI")]
+        [SerializeField] private GameObject pnlServerDebug;
+        [SerializeField] private TextMeshProUGUI serverDebugMessageText;
+        [SerializeField] private bool autoFindServerDebugPanelByName = true;
+        [SerializeField] private string serverDebugPanelObjectName = "Pnl_ServerDebug";
+        [SerializeField] private bool openServerDebugPanelOnRealtimeConnectFailure = true;
+        [SerializeField] private bool closeServerDebugPanelOnRealtimeConnectSuccess = false;
+        [SerializeField] private string realtimeConnectFailureDebugMessage = "اتصال به Realtime انجام نشد. لطفاً دوباره تلاش کنید.";
         [Header("Room List UI")]
         [SerializeField] private Transform roomListContent;
         [SerializeField] private RealtimeRoomListItemView roomListItemPrefab;
         [SerializeField] private bool disableRoomListWhileJoining = true;
         [SerializeField] private bool clearRoomListOnJoinSuccess = false;
+
+        [Header("Manual Exit World Cleanup")]
+        [SerializeField] private GameObject sharedWorld3DRoot;
+        [SerializeField] private Transform[] runtimeCloneRoots;
+        [SerializeField] private bool cleanupSharedWorldOnlyOnUserExit = true;
+        [SerializeField] private bool disableSharedWorldRootOnUserExit = true;
+        [SerializeField] private bool destroyRuntimeCloneRootChildrenOnUserExit = true;
+        [SerializeField] private bool activateSharedWorldRootOnRoomEntry = false;
+        [SerializeField] private bool allowSharedWorldRootActivationFromRealtimeRoom = false;
+
+        [Header("Reconnect Failure Cleanup")]
+        [SerializeField] private bool cleanupSharedWorldAfterPermanentReconnectFailure = true;
+        [SerializeField] private float permanentReconnectFailureTimeoutSeconds = 180f;
+        [SerializeField] private bool invokeDisconnectedFor3DAfterPermanentReconnectFailure = true;
+
+        [Header("Manual Exit Camera Safety")]
+        [SerializeField] private bool detachMainCameraBeforeRuntimeCloneCleanup = true;
+        [SerializeField] private Camera mainCameraOverride;
+        [SerializeField] private Transform mainCameraSafeParent;
+        [SerializeField] private bool keepMainCameraWorldPoseOnDetach = true;
+
         private RealtimeClient realtimeClient;
         private RealtimeAuthClient realtimeAuthClient;
         private RealtimeLobbyClient realtimeLobbyClient;
@@ -101,6 +132,11 @@ namespace Network_A.Tests.Realtime
         private bool lastCreateRoomRunningForButtonSync;
         private bool lastCleaningUpForButtonSync;
         private bool transportDropAlreadyHandled;
+        private bool isUserRequestedExitFlow;
+        private bool manualExitWorldCleanupApplied;
+        private bool permanentReconnectFailureCleanupApplied;
+        private Coroutine permanentReconnectFailureCleanupCoroutine;
+        private string activePermanentReconnectFailureReason = string.Empty;
 
         private RealtimeRoomDto[] lastListedRooms = Array.Empty<RealtimeRoomDto>();
         private readonly StringBuilder logBuffer = new StringBuilder(4096);
@@ -152,6 +188,9 @@ namespace Network_A.Tests.Realtime
         public event Action<string, string> OnPlayerLeftFor3D;
         public event Action<RealtimeEnvelope> OnPlayerStateReceivedFor3D;
         public event Action<RealtimeEnvelope> OnRoomMembersSnapshotReceivedFor3D;
+        public event Action<string> OnRealtimeConnectionLostForReconnectFor3D;
+        public event Action<string> OnRealtimeReconnectFailedPermanentlyFor3D;
+        public event Action<string> OnManualWorldCleanupFor3D;
 
         private bool lastSendMessageButtonInteractable;
         private string lastSendMessageButtonStateReason = string.Empty;
@@ -168,6 +207,7 @@ namespace Network_A.Tests.Realtime
             EnsureLifecycleToken();
             activeServerUrl = ResolveRealtimeServerUrl();
             activeRoomName = BuildRoomName();
+            AutoResolveServerDebugReferences("Awake");
             LogUiReferences("Awake");
             UpdateRoomDisplay();
             SetStatus("Ready");
@@ -214,6 +254,7 @@ namespace Network_A.Tests.Realtime
             {
                 UnbindMessageInputEvents();
                 UnbindRoomNameInputEvents();
+                StopPermanentReconnectFailureCleanupWatch("object_destroyed");
                 StopKeepAliveLoop();
                 lifecycleCts?.Cancel();
                 lifecycleCts?.Dispose();
@@ -229,9 +270,25 @@ namespace Network_A.Tests.Realtime
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
 
+            bool connectedAndAuthenticated = false;
+
             try
             {
-                await LoginCheckConnectAndAuthAsync();
+                connectedAndAuthenticated = await LoginCheckConnectAndAuthAsync();
+
+                if (connectedAndAuthenticated)
+                {
+                    HideServerDebugPanelAfterRealtimeConnectSuccess();
+                }
+                else
+                {
+                    ShowServerDebugPanelForRealtimeConnectFailure("connect_button_result_false");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowServerDebugPanelForRealtimeConnectFailure("connect_button_exception: " + ex.Message);
+                throw;
             }
             finally
             {
@@ -344,7 +401,8 @@ namespace Network_A.Tests.Realtime
 
         public async void DisconnectButton()
         {
-            await CleanupAsync("Manual G7 disconnect");
+            isUserRequestedExitFlow = true;
+            await CleanupAsync("Manual G7 disconnect", false, true);
         }
 
         public async void RunFullLobbyTestButton()
@@ -418,6 +476,9 @@ namespace Network_A.Tests.Realtime
 
             bool authenticated = await AuthenticateWithAccessTokenAsync(accessToken);
             if (!authenticated) return Fail("Realtime auth failed. tokenSource=" + SafeTokenSource(tokenSource));
+
+            StopPermanentReconnectFailureCleanupWatch("realtime_reconnect_authenticated");
+            permanentReconnectFailureCleanupApplied = false;
 
             await RefreshCurrentUserCreatedRoomStateAsync();
 
@@ -949,6 +1010,9 @@ namespace Network_A.Tests.Realtime
                 UpdateConnectionButtons();
                 UpdateSendMessageButton();
                 if (string.IsNullOrWhiteSpace(activeRoomName) && joinedRoom != null) activeRoomName = joinedRoom.roomName;
+                manualExitWorldCleanupApplied = false;
+                isUserRequestedExitFlow = false;
+                ActivateSharedWorldForRoomEntry("room_joined:" + SafeText(activeRoomId));
                 OnRoomJoinedFor3D?.Invoke(activeRoomId);
                 return true;
             }
@@ -1072,7 +1136,9 @@ namespace Network_A.Tests.Realtime
                 if (ack)
                 {
                     string leftRoomIdFor3D = activeRoomId;
+                    isUserRequestedExitFlow = true;
                     OnRoomLeftFor3D?.Invoke(leftRoomIdFor3D);
+                    CleanupSharedWorldAfterUserExit("manual_leave_room:" + leftRoomIdFor3D);
 
                     joinedRoom = null;
                     selectedListedRoom = null;
@@ -1280,13 +1346,20 @@ namespace Network_A.Tests.Realtime
         {
             StopKeepAliveLoop();
             transportDropAlreadyHandled = true;
+
+            bool userRequestedExit = isUserRequestedExitFlow || isCleaningUp || IsUserRequestedExitReason(reason);
+
             isConnected = false;
             isAuthenticated = false;
-            isJoined = false;
             isJoinRoomRunning = false;
             isLeaveRoomRunning = false;
             isSendMessageRunning = false;
-            joinedRoom = null;
+
+            if (userRequestedExit)
+            {
+                isJoined = false;
+                joinedRoom = null;
+            }
 
             SetRoomListInteractable(false);
             SetListRoomsButtonInteractable(false);
@@ -1294,11 +1367,20 @@ namespace Network_A.Tests.Realtime
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
 
-            Log("Disconnected: " + reason);
-            ShowRealtimeWarningMessage("Realtime disconnected. You left all rooms.");
-            OnRealtimeDisconnectedFor3D?.Invoke(reason);
-        }
+            Log("Disconnected: " + reason + " | userRequestedExit=" + userRequestedExit);
 
+            if (userRequestedExit)
+            {
+                ShowRealtimeWarningMessage("Realtime disconnected. You left all rooms.");
+                CleanupSharedWorldAfterUserExit("manual_realtime_disconnect:" + SafeText(reason));
+                OnRealtimeDisconnectedFor3D?.Invoke(reason);
+                return;
+            }
+
+            ShowRealtimeWarningMessage("Realtime connection lost. Reconnect is allowed.");
+            StartPermanentReconnectFailureCleanupWatch(reason);
+            OnRealtimeConnectionLostForReconnectFor3D?.Invoke(reason);
+        }
         private void HandleReliableLog(string message)
         {
             Log("Reliable: " + message);
@@ -1311,10 +1393,13 @@ namespace Network_A.Tests.Realtime
 
         private void HandleAuthenticated(string connectionId, string userId)
         {
+            StopPermanentReconnectFailureCleanupWatch("realtime_authenticated_event");
+            permanentReconnectFailureCleanupApplied = false;
             isAuthenticated = true;
             currentRealtimeUserId = string.IsNullOrWhiteSpace(userId) ? currentRealtimeUserId : userId.Trim();
             UpdateCurrentUserIdentityFromStoredToken();
             Log("Authenticated. connectionId=" + connectionId + " userId=" + currentRealtimeUserId + " userName=" + currentRealtimeUserName);
+            if (isJoined && !string.IsNullOrWhiteSpace(activeRoomId)) ActivateSharedWorldForRoomEntry("realtime_reauthenticated:" + SafeText(activeRoomId));
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
@@ -1587,6 +1672,11 @@ namespace Network_A.Tests.Realtime
 
             if (!string.IsNullOrWhiteSpace(tokenUserId)) currentRealtimeUserId = tokenUserId.Trim();
             if (!string.IsNullOrWhiteSpace(tokenUserName)) currentRealtimeUserName = tokenUserName.Trim();
+        }
+
+        private static string SafeText(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "unknown" : value.Trim();
         }
 
         private static string SafeTokenSource(string tokenSource)
@@ -2010,8 +2100,238 @@ namespace Network_A.Tests.Realtime
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
-            ShowRealtimeWarningMessage("Realtime disconnected. Connect/Auth again.");
-            OnRealtimeDisconnectedFor3D?.Invoke(reason);
+            ShowRealtimeWarningMessage("Realtime connection lost. Reconnect is allowed.");
+            StartPermanentReconnectFailureCleanupWatch(reason);
+            OnRealtimeConnectionLostForReconnectFor3D?.Invoke(reason);
+        }
+
+        private void StartPermanentReconnectFailureCleanupWatch(string reason)
+        {
+            if (!cleanupSharedWorldAfterPermanentReconnectFailure) return;
+            if (isUserRequestedExitFlow || isCleaningUp || IsUserRequestedExitReason(reason)) return;
+
+            StopPermanentReconnectFailureCleanupWatch("restart_reconnect_failure_watch");
+
+            activePermanentReconnectFailureReason = SafeText(reason);
+            permanentReconnectFailureCleanupCoroutine = StartCoroutine(PermanentReconnectFailureCleanupRoutine(activePermanentReconnectFailureReason));
+            Log("Permanent reconnect failure watch started. timeoutSeconds=" + GetPermanentReconnectFailureTimeoutSeconds().ToString("F1") + " | reason=" + activePermanentReconnectFailureReason);
+        }
+
+        private void StopPermanentReconnectFailureCleanupWatch(string reason)
+        {
+            if (permanentReconnectFailureCleanupCoroutine == null) return;
+
+            StopCoroutine(permanentReconnectFailureCleanupCoroutine);
+            permanentReconnectFailureCleanupCoroutine = null;
+            activePermanentReconnectFailureReason = string.Empty;
+            Log("Permanent reconnect failure watch stopped. reason=" + SafeText(reason));
+        }
+
+        private IEnumerator PermanentReconnectFailureCleanupRoutine(string reason)
+        {
+            float timeoutSeconds = GetPermanentReconnectFailureTimeoutSeconds();
+            float startTime = Time.realtimeSinceStartup;
+
+            while (Time.realtimeSinceStartup - startTime < timeoutSeconds)
+            {
+                if (ShouldCancelPermanentReconnectFailureCleanupWatch())
+                {
+                    permanentReconnectFailureCleanupCoroutine = null;
+                    activePermanentReconnectFailureReason = string.Empty;
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            permanentReconnectFailureCleanupCoroutine = null;
+            ForceLocalExitAfterPermanentReconnectFailure(reason);
+        }
+
+        private float GetPermanentReconnectFailureTimeoutSeconds()
+        {
+            return Mathf.Clamp(permanentReconnectFailureTimeoutSeconds, 5f, 1800f);
+        }
+
+        private bool ShouldCancelPermanentReconnectFailureCleanupWatch()
+        {
+            if (isCleaningUp || isUserRequestedExitFlow) return true;
+            if (IsRealtimeReady()) return true;
+            if (realtimeClient != null && realtimeClient.IsConnected && isConnected && isAuthenticated) return true;
+            return false;
+        }
+
+        private void ForceLocalExitAfterPermanentReconnectFailure(string reason)
+        {
+            if (!cleanupSharedWorldAfterPermanentReconnectFailure) return;
+            if (permanentReconnectFailureCleanupApplied) return;
+
+            permanentReconnectFailureCleanupApplied = true;
+            string safeReason = "permanent_reconnect_failure:" + SafeText(reason);
+
+            Log("Permanent reconnect failure reached. Running local forced exit. reason=" + safeReason);
+
+            StopKeepAliveLoop();
+            CleanupClientObjectsOnly();
+
+            isConnected = false;
+            isAuthenticated = false;
+            isJoined = false;
+            isConnectAndAuthRunning = false;
+            isCreateRoomRunning = false;
+            isJoinRoomRunning = false;
+            isLeaveRoomRunning = false;
+            isSendMessageRunning = false;
+            transportDropAlreadyHandled = true;
+            isUserRequestedExitFlow = false;
+
+            SetRoomListInteractable(false);
+            SetListRoomsButtonInteractable(false);
+            UpdateConnectionButtons();
+            UpdateCreateRoomButton();
+            UpdateSendMessageButton();
+
+            CleanupSharedWorldAfterUserExit(safeReason);
+            ShowRealtimeWarningMessage("Reconnect failed. You were removed from the room locally.");
+
+            OnRealtimeReconnectFailedPermanentlyFor3D?.Invoke(safeReason);
+            if (invokeDisconnectedFor3DAfterPermanentReconnectFailure) OnRealtimeDisconnectedFor3D?.Invoke(safeReason);
+        }
+
+        private bool IsUserRequestedExitReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            return value.Contains("manual")
+                   || value.Contains("user_exit")
+                   || value.Contains("leave_room")
+                   || value.Contains("client disconnect")
+                   || value.Contains("client disposed")
+                   || value.Contains("manual_game_server_disconnect");
+        }
+
+        private void ActivateSharedWorldForRoomEntry(string reason)
+        {
+            StopPermanentReconnectFailureCleanupWatch("shared_world_entry:" + SafeText(reason));
+            manualExitWorldCleanupApplied = false;
+            permanentReconnectFailureCleanupApplied = false;
+
+            string safeReason = SafeText(reason);
+
+            if (!allowSharedWorldRootActivationFromRealtimeRoom)
+            {
+                Log("Shared world root activation skipped on realtime room entry. Dedicated game server must activate it. reason=" + safeReason);
+                return;
+            }
+
+            if (!activateSharedWorldRootOnRoomEntry) return;
+
+            if (sharedWorld3DRoot == null)
+            {
+                Log("Shared world root activation skipped. Reference is missing. reason=" + safeReason);
+                return;
+            }
+
+            if (!sharedWorld3DRoot.activeSelf)
+            {
+                sharedWorld3DRoot.SetActive(true);
+                Log("Shared world root activated for realtime room entry. reason=" + safeReason);
+                return;
+            }
+
+            Log("Shared world root already active for realtime room entry. reason=" + safeReason);
+        }
+
+        private void CleanupSharedWorldAfterUserExit(string reason)
+        {
+            if (!cleanupSharedWorldOnlyOnUserExit) return;
+            if (manualExitWorldCleanupApplied) return;
+
+            manualExitWorldCleanupApplied = true;
+            string safeReason = SafeText(reason);
+
+            DetachMainCameraBeforeRuntimeCloneCleanup(safeReason);
+
+            if (destroyRuntimeCloneRootChildrenOnUserExit)
+            {
+                DestroyRuntimeCloneRootChildren(safeReason);
+            }
+
+            if (disableSharedWorldRootOnUserExit && sharedWorld3DRoot != null)
+            {
+                sharedWorld3DRoot.SetActive(false);
+                Log("Shared world root disabled after user exit. reason=" + safeReason);
+            }
+
+            OnManualWorldCleanupFor3D?.Invoke(safeReason);
+        }
+
+        private void DetachMainCameraBeforeRuntimeCloneCleanup(string reason)
+        {
+            if (!detachMainCameraBeforeRuntimeCloneCleanup) return;
+
+            Camera mainCamera = mainCameraOverride != null ? mainCameraOverride : Camera.main;
+            if (mainCamera == null) return;
+
+            Transform cameraTransform = mainCamera.transform;
+            if (cameraTransform == null || cameraTransform.parent == null) return;
+            if (!ShouldDetachMainCameraForRuntimeCleanup(cameraTransform)) return;
+
+            Vector3 worldPosition = cameraTransform.position;
+            Quaternion worldRotation = cameraTransform.rotation;
+            Vector3 worldScale = cameraTransform.lossyScale;
+
+            cameraTransform.SetParent(mainCameraSafeParent, keepMainCameraWorldPoseOnDetach);
+            cameraTransform.position = worldPosition;
+            cameraTransform.rotation = worldRotation;
+
+            if (!keepMainCameraWorldPoseOnDetach) cameraTransform.localScale = worldScale;
+
+            Log("Main camera detached before runtime clone cleanup. reason=" + reason);
+        }
+
+        private bool ShouldDetachMainCameraForRuntimeCleanup(Transform cameraTransform)
+        {
+            if (cameraTransform == null) return false;
+
+            if (runtimeCloneRoots != null)
+            {
+                for (int i = 0; i < runtimeCloneRoots.Length; i++)
+                {
+                    Transform root = runtimeCloneRoots[i];
+                    if (root != null && cameraTransform.IsChildOf(root)) return true;
+                }
+            }
+
+            return sharedWorld3DRoot != null && cameraTransform.IsChildOf(sharedWorld3DRoot.transform);
+        }
+
+        private void DestroyRuntimeCloneRootChildren(string reason)
+        {
+            if (runtimeCloneRoots == null || runtimeCloneRoots.Length == 0) return;
+
+            int destroyedCount = 0;
+
+            for (int rootIndex = 0; rootIndex < runtimeCloneRoots.Length; rootIndex++)
+            {
+                Transform root = runtimeCloneRoots[rootIndex];
+                if (root == null) continue;
+
+                for (int childIndex = root.childCount - 1; childIndex >= 0; childIndex--)
+                {
+                    Transform child = root.GetChild(childIndex);
+                    if (child == null) continue;
+
+                    Destroy(child.gameObject);
+                    destroyedCount++;
+                }
+            }
+
+            if (destroyedCount > 0)
+            {
+                Log("Runtime clone children destroyed after user exit. count=" + destroyedCount + " | reason=" + reason);
+            }
         }
 
         private void StartKeepAliveLoop()
@@ -2076,12 +2396,14 @@ namespace Network_A.Tests.Realtime
             keepAliveCts = null;
         }
 
-        private async Task CleanupAsync(string reason, bool objectDestroy = false)
+        private async Task CleanupAsync(string reason, bool objectDestroy = false, bool userRequestedExit = false)
         {
             if (isCleaningUp) return;
 
             isCleaningUp = true;
-            Log("Cleanup started: " + reason + " | objectDestroy=" + objectDestroy);
+            StopPermanentReconnectFailureCleanupWatch("cleanup_started:" + SafeText(reason));
+            if (userRequestedExit) isUserRequestedExitFlow = true;
+            Log("Cleanup started: " + reason + " | objectDestroy=" + objectDestroy + " | userRequestedExit=" + userRequestedExit);
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
@@ -2117,6 +2439,8 @@ namespace Network_A.Tests.Realtime
                 }
 
                 CleanupClientObjectsOnly();
+
+                if (userRequestedExit && !objectDestroy) CleanupSharedWorldAfterUserExit("manual_disconnect:" + SafeText(reason));
 
                 isConnected = false;
                 isAuthenticated = false;
@@ -2361,6 +2685,72 @@ namespace Network_A.Tests.Realtime
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
             return false;
+        }
+
+        private void AutoResolveServerDebugReferences(string source)
+        {
+            if (!autoFindServerDebugPanelByName) return;
+
+            if (pnlServerDebug == null && !string.IsNullOrWhiteSpace(serverDebugPanelObjectName))
+            {
+                GameObject foundPanel = FindSceneGameObjectByName(serverDebugPanelObjectName.Trim());
+                if (foundPanel != null) pnlServerDebug = foundPanel;
+            }
+
+            if (serverDebugMessageText == null && pnlServerDebug != null)
+            {
+                serverDebugMessageText = pnlServerDebug.GetComponentInChildren<TextMeshProUGUI>(true);
+            }
+
+            if (pnlServerDebug != null || serverDebugMessageText != null)
+            {
+                Log("Server debug UI refs resolved | source=" + SafeText(source) + " | panel=" + (pnlServerDebug != null) + " | text=" + (serverDebugMessageText != null));
+            }
+        }
+
+        private static GameObject FindSceneGameObjectByName(string objectName)
+        {
+            if (string.IsNullOrWhiteSpace(objectName)) return null;
+
+            GameObject activeObject = GameObject.Find(objectName);
+            if (activeObject != null) return activeObject;
+
+            GameObject[] allObjects = Resources.FindObjectsOfTypeAll<GameObject>();
+            for (int i = 0; i < allObjects.Length; i++)
+            {
+                GameObject candidate = allObjects[i];
+                if (candidate == null) continue;
+                if (!string.Equals(candidate.name, objectName, StringComparison.Ordinal)) continue;
+                if (!candidate.scene.IsValid()) continue;
+                return candidate;
+            }
+
+            return null;
+        }
+
+        private void ShowServerDebugPanelForRealtimeConnectFailure(string reason)
+        {
+            if (!openServerDebugPanelOnRealtimeConnectFailure) return;
+
+            AutoResolveServerDebugReferences("connect_failure");
+
+            string message = string.IsNullOrWhiteSpace(realtimeConnectFailureDebugMessage)
+                ? "Realtime connection failed. Please try again."
+                : realtimeConnectFailureDebugMessage.Trim();
+
+            if (pnlServerDebug != null && !pnlServerDebug.activeSelf) pnlServerDebug.SetActive(true);
+            if (serverDebugMessageText != null) ApplyTextMeshValue(serverDebugMessageText, message);
+
+            SetStatus(message);
+            Log("Realtime connect failure debug panel requested | reason=" + SafeText(reason) + " | panel=" + (pnlServerDebug != null) + " | text=" + (serverDebugMessageText != null));
+        }
+
+        private void HideServerDebugPanelAfterRealtimeConnectSuccess()
+        {
+            if (!closeServerDebugPanelOnRealtimeConnectSuccess) return;
+
+            AutoResolveServerDebugReferences("connect_success");
+            if (pnlServerDebug != null && pnlServerDebug.activeSelf) pnlServerDebug.SetActive(false);
         }
 
         private void ShowRealtimeInfoMessage(string message)

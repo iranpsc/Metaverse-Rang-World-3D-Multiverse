@@ -52,6 +52,15 @@ public class G7ThreeDModeController : MonoBehaviour
     [SerializeField] private bool resetLocalPlayerOnEnter = true;
     [SerializeField] private bool hideCursorIn3DMode;
 
+    [Header("Confirmed Exit Cleanup")]
+    [SerializeField] private bool destroyLocalPlayerOnConfirmedExit = true;
+    [SerializeField] private bool clearRemotePlayersOnConfirmedExit = true;
+    [SerializeField] private bool destroyRuntimePlayerRootChildrenOnConfirmedExit = true;
+    [SerializeField] private bool destroyAllChildrenUnderPlayersRootOnCleanup = true;
+    [SerializeField] private bool disableWorldRootOnConfirmedExit = true;
+    [SerializeField] private bool restoreUiObjectsOnConfirmedExit = true;
+    [SerializeField] private bool invokeThreeDModeExitedOnConfirmedExit = true;
+
     private bool isThreeDModeActive;
     private GameObject localPlayerInstance;
     private Transform originalCameraParent;
@@ -66,6 +75,8 @@ public class G7ThreeDModeController : MonoBehaviour
 
     public bool IsThreeDModeActive => isThreeDModeActive;
     public GameObject LocalPlayerInstance => localPlayerInstance;
+    public GameObject World3DRoot => world3DRoot;
+    public Transform PlayersRoot => playersRoot;
 
     public event Action OnThreeDModeEntered;
     public event Action OnThreeDModeExited;
@@ -135,6 +146,34 @@ public class G7ThreeDModeController : MonoBehaviour
     {
         localPlayerDisplayName = BuildSafePlayerName(displayName, fallbackLocalPlayerName);
         EnsureLocalPlayerNameText();
+    }
+
+    //* این تابع در خروج قطعی از روم یا گیم سرور، کلون های زمان اجرا را پاک می کند و ریشه دنیا را فقط غیرفعال می کند.
+    public void CleanupRuntimeWorldAfterConfirmedExit(string reason)
+    {
+        string safeReason = string.IsNullOrWhiteSpace(reason) ? "confirmed_exit" : reason.Trim();
+
+        DetachThirdPersonCameraBeforeRuntimeCleanup(safeReason);
+
+        if (destroyLocalPlayerOnConfirmedExit) DestroyLocalPlayerInstanceForConfirmedExit(safeReason);
+        if (clearRemotePlayersOnConfirmedExit) ClearRemotePlayers();
+        if (destroyRuntimePlayerRootChildrenOnConfirmedExit) DestroyRuntimePlayerRootChildrenForConfirmedExit(safeReason);
+
+        isThreeDModeActive = false;
+        localPlayerNameText = null;
+
+        if (disableWorldRootOnConfirmedExit && world3DRoot != null) world3DRoot.SetActive(false);
+
+        if (restoreUiObjectsOnConfirmedExit)
+        {
+            SetObjectsActive(objectsToDisableWhen3DStarts, true);
+            SetObjectsActive(objectsToEnableWhen3DStarts, false);
+        }
+
+        ApplyCursorState();
+        if (invokeThreeDModeExitedOnConfirmedExit) OnThreeDModeExited?.Invoke();
+
+        Debug.Log("[G7-3D] Runtime world cleaned after confirmed exit | reason=" + safeReason);
     }
 
     //* این تابع وضعیت فعال بودن ریشه های UI و دنیای سه بعدی را اعمال می کند.
@@ -528,6 +567,106 @@ public class G7ThreeDModeController : MonoBehaviour
     {
         string safeValue = BuildSafePlayerName(value, "Player");
         return safeValue.Replace("/", "_").Replace("\\", "_").Replace(":", "_").Replace("*", "_").Replace("?", "_").Replace("\"", "_").Replace("<", "_").Replace(">", "_").Replace("|", "_");
+    }
+
+    //* این تابع قبل از حذف پلیر لوکال، دوربین را از زیر کلون ها بیرون می آورد.
+    private void DetachThirdPersonCameraBeforeRuntimeCleanup(string reason)
+    {
+        ResolveThirdPersonCamera();
+        if (thirdPersonCamera == null) return;
+
+        Transform cameraTransform = thirdPersonCamera.transform;
+        if (cameraTransform == null || cameraTransform.parent == null) return;
+        if (!IsTransformInsideRuntimePlayers(cameraTransform)) return;
+
+        if (hasOriginalCameraState)
+        {
+            RestoreOriginalCameraState();
+            Debug.Log("[G7-3D] Camera restored before runtime cleanup | reason=" + reason);
+            return;
+        }
+
+        Vector3 worldPosition = cameraTransform.position;
+        Quaternion worldRotation = cameraTransform.rotation;
+        cameraTransform.SetParent(null, true);
+        cameraTransform.SetPositionAndRotation(worldPosition, worldRotation);
+        thirdPersonCamera.gameObject.SetActive(true);
+        Debug.Log("[G7-3D] Camera detached before runtime cleanup | reason=" + reason);
+    }
+
+    //* این تابع بررسی می کند ترنسفورم داخل پلیرهای زمان اجرا قرار دارد یا نه.
+    private bool IsTransformInsideRuntimePlayers(Transform target)
+    {
+        if (target == null) return false;
+        if (localPlayerInstance != null && target.IsChildOf(localPlayerInstance.transform)) return true;
+        if (playersRoot != null && target.IsChildOf(playersRoot)) return true;
+
+        foreach (KeyValuePair<string, GameObject> pair in dict_RemotePlayersByUserId)
+        {
+            if (pair.Value != null && target.IsChildOf(pair.Value.transform)) return true;
+        }
+
+        return false;
+    }
+
+    //* این تابع کلون پلیر لوکال را حذف می کند و رفرنس داخلی را پاک می کند.
+    private void DestroyLocalPlayerInstanceForConfirmedExit(string reason)
+    {
+        if (localPlayerInstance == null) return;
+
+        GameObject target = localPlayerInstance;
+        localPlayerInstance = null;
+        localPlayerNameText = null;
+
+        Destroy(target);
+        Debug.Log("[G7-3D] Local player clone destroyed after confirmed exit | reason=" + reason);
+    }
+
+    //* این تابع بچه های ریشه پلیرها را پاک می کند، ولی خود ریشه پلیرها و ریشه دنیا را حذف نمی کند.
+    private void DestroyRuntimePlayerRootChildrenForConfirmedExit(string reason)
+    {
+        if (playersRoot == null) return;
+
+        bool playersRootIsWorldRoot = world3DRoot != null && playersRoot == world3DRoot.transform;
+        int destroyedCount = 0;
+        int skippedCount = 0;
+
+        for (int i = playersRoot.childCount - 1; i >= 0; i--)
+        {
+            Transform child = playersRoot.GetChild(i);
+            if (child == null) continue;
+
+            if (!ShouldDestroyRuntimePlayerChild(child, playersRootIsWorldRoot))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            Destroy(child.gameObject);
+            destroyedCount++;
+        }
+
+        if (destroyedCount > 0 || skippedCount > 0)
+        {
+            Debug.Log("[G7-3D] Runtime player root children cleanup | destroyed=" + destroyedCount + " | skipped=" + skippedCount + " | reason=" + reason);
+        }
+    }
+
+    //* این تابع تعیین می کند کدام بچه های ریشه پلیرها، کلون زمان اجرا هستند.
+    private bool ShouldDestroyRuntimePlayerChild(Transform child, bool playersRootIsWorldRoot)
+    {
+        if (child == null) return false;
+        if (world3DRoot != null && child == world3DRoot.transform) return false;
+        if (thirdPersonCamera != null && child == thirdPersonCamera.transform) return false;
+
+        if (!playersRootIsWorldRoot && destroyAllChildrenUnderPlayersRootOnCleanup) return true;
+
+        string childName = child.name ?? string.Empty;
+        if (childName.StartsWith("Local_Player", StringComparison.OrdinalIgnoreCase)) return true;
+        if (childName.StartsWith("Remote_Player", StringComparison.OrdinalIgnoreCase)) return true;
+        if (child.GetComponent<G7RemotePlayerView>() != null) return true;
+        if (child.GetComponent<G7SimpleCylinderCharacterController>() != null) return true;
+        return false;
     }
 
     //* این تابع وضعیت نشانگر موس را بر اساس حالت سه بعدی اعمال می کند.

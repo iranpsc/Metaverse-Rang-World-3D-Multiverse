@@ -18,6 +18,10 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private bool logStateAccepted = false;
         [SerializeField] private bool logMessageFormat = true;
 
+        [Header("Disconnect Cache Safety")]
+        [SerializeField] private bool preserveRemoteStateSnapshotOnTransientDisconnect = true;
+        [SerializeField] private bool clearSequenceCacheOnTransientDisconnect = true;
+
         private readonly Dictionary<string, DedicatedRemotePlayerState> dict_remoteStatesByPlayerId =
             new Dictionary<string, DedicatedRemotePlayerState>();
 
@@ -315,6 +319,19 @@ namespace Network_A.DedicatedGameServer.Client
         {
             int previousCount = dict_remoteStatesByPlayerId.Count;
 
+            if (ShouldPreserveSnapshotOnDisconnect(reason))
+            {
+                set_leftNotifiedPlayerIds.Clear();
+                if (clearSequenceCacheOnTransientDisconnect) dict_lastSequenceByPlayerId.Clear();
+
+                if (previousCount > 0)
+                {
+                    Debug.Log("[DedicatedRemotePlayerStateReceiver] Preserved remote states during transient disconnect | disconnectReason=" + reason + " | remoteCount=" + previousCount);
+                }
+
+                return;
+            }
+
             dict_remoteStatesByPlayerId.Clear();
             set_leftNotifiedPlayerIds.Clear();
             dict_lastSequenceByPlayerId.Clear();
@@ -323,6 +340,33 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 Debug.Log("[DedicatedRemotePlayerStateReceiver] Cleared remote states | disconnectReason=" + reason);
             }
+        }
+
+        private bool ShouldPreserveSnapshotOnDisconnect(string reason)
+        {
+            if (!preserveRemoteStateSnapshotOnTransientDisconnect) return false;
+            return IsTransientDisconnectReason(reason);
+        }
+
+        private bool IsTransientDisconnectReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            if (value.Contains("reconnect")) return true;
+            if (value.Contains("timeout")) return true;
+            if (value.Contains("transport")) return true;
+            if (value.Contains("network")) return true;
+            if (value.Contains("receive failed")) return true;
+            if (value.Contains("send failed")) return true;
+            if (value.Contains("connection lost")) return true;
+            if (value.Contains("unexpected")) return true;
+            if (value.Contains("abnormal")) return true;
+            if (value.Contains("ping")) return true;
+            if (value.Contains("pong")) return true;
+            if (value.Contains("socket error")) return true;
+            if (value.Contains("grpc")) return true;
+            return false;
         }
 
         private bool ShouldDropDuplicateOrOldPlayerState(string playerId, long sequence)

@@ -2647,7 +2647,7 @@ MonoBehaviour:
       m_Calls: []
   m_text: "\uFE91\uFE8E\uFEB7\uFEEA"
   m_isRightToLeft: 1
-  m_fontAsset: {fileID: 11400000, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: d9d4d4333d8858d498a4693be066c0c1, type: 2}
   m_sharedMaterial: {fileID: -6949820610600499109, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
@@ -2713,7 +2713,7 @@ MonoBehaviour:
   m_margin: {x: 0, y: 3.5, z: 0, w: 4.5}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 0
+  m_hasFontAssetChanged: 1
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
@@ -3677,10 +3677,35 @@ MonoBehaviour:
   forceTextMeshRefreshAfterUiApply: 1
   disableSendButtonWhenMessageInputEmpty: 1
   minimumRoomNameCharactersToEnableCreateButton: 8
+  pnlServerDebug: {fileID: 0}
+  serverDebugMessageText: {fileID: 0}
+  autoFindServerDebugPanelByName: 1
+  serverDebugPanelObjectName: Pnl_ServerDebug
+  openServerDebugPanelOnRealtimeConnectFailure: 1
+  closeServerDebugPanelOnRealtimeConnectSuccess: 0
+  realtimeConnectFailureDebugMessage: "\u0627\u062A\u0635\u0627\u0644 \u0628\u0647
+    Realtime \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u0644\u0637\u0641\u0627\u064B
+    \u062F\u0648\u0628\u0627\u0631\u0647 \u062A\u0644\u0627\u0634 \u06A9\u0646\u06CC\u062F."
   roomListContent: {fileID: 1288924903}
   roomListItemPrefab: {fileID: -8573300936416691389, guid: 5d6fd8fc0e8c0f34eae3a52286964655, type: 3}
   disableRoomListWhileJoining: 1
   clearRoomListOnJoinSuccess: 0
+  sharedWorld3DRoot: {fileID: 1491476256}
+  runtimeCloneRoots:
+  - {fileID: 1652905657}
+  - {fileID: 975924492}
+  cleanupSharedWorldOnlyOnUserExit: 1
+  disableSharedWorldRootOnUserExit: 1
+  destroyRuntimeCloneRootChildrenOnUserExit: 1
+  activateSharedWorldRootOnRoomEntry: 1
+  allowSharedWorldRootActivationFromRealtimeRoom: 0
+  cleanupSharedWorldAfterPermanentReconnectFailure: 1
+  permanentReconnectFailureTimeoutSeconds: 180
+  invokeDisconnectedFor3DAfterPermanentReconnectFailure: 1
+  detachMainCameraBeforeRuntimeCloneCleanup: 1
+  mainCameraOverride: {fileID: 0}
+  mainCameraSafeParent: {fileID: 0}
+  keepMainCameraWorldPoseOnDetach: 1
 --- !u!114 &548850780
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3722,6 +3747,13 @@ MonoBehaviour:
   startIn3DMode: 0
   resetLocalPlayerOnEnter: 1
   hideCursorIn3DMode: 0
+  destroyLocalPlayerOnConfirmedExit: 1
+  clearRemotePlayersOnConfirmedExit: 1
+  destroyRuntimePlayerRootChildrenOnConfirmedExit: 1
+  destroyAllChildrenUnderPlayersRootOnCleanup: 1
+  disableWorldRootOnConfirmedExit: 1
+  restoreUiObjectsOnConfirmedExit: 1
+  invokeThreeDModeExitedOnConfirmedExit: 1
 --- !u!1 &559094790
 GameObject:
   m_ObjectHideFlags: 0
@@ -4038,7 +4070,7 @@ MonoBehaviour:
       m_Calls: []
   m_text: "\uFE91\uFE8E\uFEB7\uFEEA"
   m_isRightToLeft: 1
-  m_fontAsset: {fileID: 11400000, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: d9d4d4333d8858d498a4693be066c0c1, type: 2}
   m_sharedMaterial: {fileID: -6949820610600499109, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
@@ -4104,7 +4136,7 @@ MonoBehaviour:
   m_margin: {x: 0, y: 3.5, z: 0, w: 4.5}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 0
+  m_hasFontAssetChanged: 1
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
@@ -4814,7 +4846,7 @@ MonoBehaviour:
 
     Waiting for server data...'
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: d9d4d4333d8858d498a4693be066c0c1, type: 2}
   m_sharedMaterial: {fileID: -6949820610600499109, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
@@ -4880,7 +4912,7 @@ MonoBehaviour:
   m_margin: {x: 29.982666, y: 0, z: 0, w: 0}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 0
+  m_hasFontAssetChanged: 1
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
@@ -6639,7 +6671,7 @@ MonoBehaviour:
       m_Calls: []
   m_text: New Text
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: d9d4d4333d8858d498a4693be066c0c1, type: 2}
   m_sharedMaterial: {fileID: -6949820610600499109, guid: 3fbde2e562e333d488bc46986fc6f4f1, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
@@ -6705,7 +6737,7 @@ MonoBehaviour:
   m_margin: {x: 0, y: 0, z: 0, w: 0}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 0
+  m_hasFontAssetChanged: 1
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
   preserveNumbers: 0
@@ -8891,8 +8923,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: Status Text
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: d9d4d4333d8858d498a4693be066c0c1, type: 2}
+  m_sharedMaterial: {fileID: -6949820610600499109, guid: d9d4d4333d8858d498a4693be066c0c1, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -13082,15 +13114,41 @@ MonoBehaviour:
   ticketClient: {fileID: 4423885472396907408}
   autoConnectController: {fileID: 735544377777482992}
   wsClient: {fileID: 156311291210522065}
+  threeDModeController: {fileID: 0}
   connectGameServerButton: {fileID: 1122431390}
   disconnectGameServerButton: {fileID: 885617531}
   statusText: {fileID: 1414544931}
+  gameServerStateText: {fileID: 0}
   autoFindReferences: 1
   requireAccessToken: 1
   disconnectDedicatedOnRealtimeRoomLeft: 0
   disconnectDedicatedOnRealtimeDisconnected: 1
   refreshUiInUpdate: 1
   uiRefreshIntervalSeconds: 0.25
+  disableGameServerConnectButtonWhileRealtimeReconnects: 1
+  keepInsideGameServerStatusDuringReconnect: 1
+  outsideGameServerStatusMessage: Outside Game Server
+  connectingGameServerStatusMessage: Connecting to Game Server
+  insideGameServerStatusMessage: Inside Game Server
+  reconnectingInsideGameServerStatusMessage: Inside Game Server - reconnecting
+  sharedWorld3DRoot: {fileID: 0}
+  runtimeCloneRoots: []
+  cleanupSharedWorldOnlyOnUserExit: 1
+  disableSharedWorldRootOnUserExit: 1
+  destroyRuntimeCloneRootChildrenOnUserExit: 1
+  neverDestroySharedWorld3DRoot: 1
+  skipSharedWorldRootWhenUsedAsRuntimeCloneRoot: 1
+  activateSharedWorldRootOnRoomEntry: 1
+  activateSharedWorldRootOnDedicatedConnected: 1
+  activateSharedWorldRootOnDedicatedAuthenticated: 1
+  requireDedicatedConnectionBeforeSharedWorldRootActivation: 1
+  activateThreeDModeAfterDedicatedAuthenticated: 1
+  ensureLocalPlayerAfterDedicatedAuthenticated: 1
+  useThreeDModeControllerWorldRootFallback: 1
+  detachMainCameraBeforeRuntimeCloneCleanup: 1
+  mainCameraOverride: {fileID: 0}
+  mainCameraSafeParent: {fileID: 0}
+  keepMainCameraWorldPoseOnDetach: 1
   verboseLogs: 1
   logOnlyOnStateChange: 1
 --- !u!114 &4423885472396907408
@@ -13149,6 +13207,19 @@ MonoBehaviour:
   removeRemotePlayersWhenStateTimeout: 1
   remotePlayerStateTimeoutSeconds: 8
   remoteTimeoutCheckIntervalSeconds: 1
+  useServerLeaveAsPrimaryRemoteRemoval: 1
+  preserveRemotePlayersDuringRealtimeReconnect: 1
+  preserveRemotePlayersOnTransientDedicatedDisconnect: 1
+  clearRemotePlayersAfterPermanentReconnectFailure: 1
+  refreshRemoteTimeoutWindowAfterReconnect: 1
+  forceSceneSweepRemoteViewsOnManualDedicatedDisconnect: 1
+  forceSceneSweepRemoteViewsOnRealtimeRoomLeft: 1
+  neverDestroySharedWorld3DRootDuringSceneSweep: 1
+  autoProtectSharedWorld3DRootByName: 1
+  sharedWorld3DRootName: Shared_World_3D_Root
+  sharedWorld3DRoot: {fileID: 0}
+  protectedSceneRoots: []
+  remoteTimeoutStaleLogIntervalSeconds: 5
   disconnectDedicatedOnRealtimeRoomLeft: 1
   stopLocalStateOnRealtimeRoomLeft: 1
   clearRemotePlayersOnRealtimeRoomLeft: 1
@@ -13177,6 +13248,8 @@ MonoBehaviour:
   logRemotePlayerState: 1
   logStateAccepted: 0
   logMessageFormat: 1
+  preserveRemoteStateSnapshotOnTransientDisconnect: 1
+  clearSequenceCacheOnTransientDisconnect: 1
 --- !u!1 &7380804635911545807
 GameObject:
   m_ObjectHideFlags: 0
