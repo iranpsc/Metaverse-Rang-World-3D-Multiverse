@@ -1,0 +1,113 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bbb281ee3bf0b054c82ac2347e9e782c, type: 3}
+  m_Name: Remote Content
+  m_EditorClassIdentifier: Unity.Addressables.Editor::UnityEditor.AddressableAssets.Settings.AddressableAssetGroup
+  m_GroupName: Remote Content
+  m_GUID: e7ebc1d2777614a468d8bf9b0eb137dc
+  m_SerializeEntries:
+  - m_GUID: 0227e7ac74b88d14fb10e4ebaf3a1e48
+    m_Address: Bubble
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Bubble
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 0a331ff13aef58347b06d54f11c1e3a2
+    m_Address: Bubble Model
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Bubble
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 193caca88b482d346a0879d48f4d838f
+    m_Address: Login
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Scene
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 28cefcccd3954d74b9df0b65bf7a6956
+    m_Address: Car
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Vehicle
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 29ab025fc95b80d40948aeca5e3f3b06
+    m_Address: Avatar Selector
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Scene
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 2ab34027ebc55da4db8e469c1b3fc757
+    m_Address: Vehicle
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Vehicle
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 2f33f7b830b0e0f46806f1f3d1a1686a
+    m_Address: Namayeshgah
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Environment
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 6626add92d7730b4e80a62e0ec2afa11
+    m_Address: Mazar
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Environment
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 6b9909658950ce64d90fdaf138cc248f
+    m_Address: Pedal_Boat
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Vehicle
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 6c264005b5ea31a4697439367f7c75cb
+    m_Address: Motorcycle_Sport
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Vehicle
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 7bd99cc85300e8f46a09efb194027d15
+    m_Address: Helecopter
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Vehicle
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: b55e13f2ec0a16c49b2a5c8a8ede7fd8
+    m_Address: JetPack
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Vehicle
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: bb00c6df144615f45a56d79ae8f125ff
+    m_Address: Lobby
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Scene
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: d9b859d5b4119c04c96fc703eed51a27
+    m_Address: Bus
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Vehicle
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: eee70fc319ce89e4c883d140c972c2ab
+    m_Address: Stand
+    m_ReadOnly: 0
+    m_SerializedLabels:
+    - Environment
+    FlaggedDuringContentUpdateRestriction: 0
+  m_ReadOnly: 0
+  m_Settings: {fileID: 11400000, guid: 51e44f7fff558404b831c8e147e86e0f, type: 2}
+  m_SchemaSet:
+    m_Schemas:
+    - {fileID: 11400000, guid: 9192d89aea2608e43b840dc0604dbc19, type: 2}
+    - {fileID: 11400000, guid: 0d66c37883a6f0042922fb01db9e670f, type: 2}

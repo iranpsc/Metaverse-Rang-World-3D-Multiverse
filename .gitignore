@@ -46,6 +46,14 @@ Thumbs.db
 *.opendb
 *.VC.db
 
+# ========== #
+# Model-Objects
+# ========== #
+*.fbx
+*.glb
+*.gltf
+*.obj
+
 # Crash / profiler reports
 sysinfo.txt
 

@@ -1,0 +1,11 @@
+TODO:
+[✔️] photo camera (zoom, effect preview, image resize)
+[✔️] player movement sound (walk, run, jump)
+[✔️] player spawn randomly in the area with no obstacles
+[✔️] command line need permission
+[✔️] input field for webgl in android need force keyboard popup
+[✔️] mini map camera need to be 2D + zoom in and zoom out must use orthograph size + lower resolution
+[✔️] remove duplicated day & night cycle
+[✔️] VR movement test
+[❌] Android movement
+[✔️] remove lens flare
