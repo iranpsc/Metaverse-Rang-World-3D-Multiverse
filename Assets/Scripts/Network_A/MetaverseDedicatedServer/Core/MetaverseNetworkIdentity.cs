@@ -11,6 +11,7 @@ public class MetaverseNetworkIdentity : MonoBehaviour
     [SerializeField] private string ownerConnectionIdText = string.Empty;
     [SerializeField] private string ownerUserId = string.Empty;
     [SerializeField] private string ownerPlayerId = string.Empty;
+    [SerializeField] private string roomId = string.Empty;
     [SerializeField] private bool serverOwned = true;
     [SerializeField] private bool localPlayer;
     [SerializeField] private bool spawned;
@@ -35,6 +36,7 @@ public class MetaverseNetworkIdentity : MonoBehaviour
     public string OwnerConnectionIdText => ownerConnectionIdText;
     public string OwnerUserId => ownerUserId;
     public string OwnerPlayerId => ownerPlayerId;
+    public string RoomId => roomId;
     public bool IsServerOwned => serverOwned;
     public bool IsLocalPlayer => localPlayer;
     public bool IsSpawned => spawned;
@@ -57,7 +59,7 @@ public class MetaverseNetworkIdentity : MonoBehaviour
 
     public void AssignSpawnData(string newPrefabId, int newNetId, int newOwnerConnectionId, bool newServerOwned, bool newLocalPlayer)
     {
-        AssignSpawnData(newPrefabId, newNetId, newOwnerConnectionId, string.Empty, string.Empty, string.Empty, newServerOwned, newLocalPlayer);
+        AssignSpawnData(newPrefabId, newNetId, newOwnerConnectionId, string.Empty, string.Empty, string.Empty, string.Empty, newServerOwned, newLocalPlayer);
     }
 
     public void AssignSpawnData(
@@ -70,6 +72,20 @@ public class MetaverseNetworkIdentity : MonoBehaviour
         bool newServerOwned,
         bool newLocalPlayer)
     {
+        AssignSpawnData(newPrefabId, newNetId, newOwnerConnectionId, newOwnerConnectionIdText, newOwnerUserId, newOwnerPlayerId, string.Empty, newServerOwned, newLocalPlayer);
+    }
+
+    public void AssignSpawnData(
+        string newPrefabId,
+        int newNetId,
+        int newOwnerConnectionId,
+        string newOwnerConnectionIdText,
+        string newOwnerUserId,
+        string newOwnerPlayerId,
+        string newRoomId,
+        bool newServerOwned,
+        bool newLocalPlayer)
+    {
         prefabId = SafeTrim(newPrefabId);
         netId = Mathf.Max(0, newNetId);
         ownerConnectionId = newOwnerConnectionId;
@@ -77,6 +93,7 @@ public class MetaverseNetworkIdentity : MonoBehaviour
         if (ownerConnectionId < 0) ownerConnectionId = ParseConnectionId(ownerConnectionIdText);
         ownerUserId = SafeTrim(newOwnerUserId);
         ownerPlayerId = SafeTrim(newOwnerPlayerId);
+        roomId = SafeTrim(newRoomId);
         serverOwned = newServerOwned;
         bool resolvedLocalPlayer = newLocalPlayer || IsLocalClientOwner(ownerConnectionIdText, ownerUserId, ownerPlayerId);
         ApplyDefaultRuntimeRole(resolvedLocalPlayer);
@@ -132,6 +149,18 @@ public class MetaverseNetworkIdentity : MonoBehaviour
     public void ClearOwnerInfo(bool makeServerOwned = true)
     {
         SetOwnerInfo(string.Empty, string.Empty, string.Empty, makeServerOwned);
+    }
+
+    public void SetRoomId(string newRoomId)
+    {
+        roomId = SafeTrim(newRoomId);
+    }
+
+    public bool IsRoom(string targetRoomId)
+    {
+        string safeTargetRoomId = SafeTrim(targetRoomId);
+        if (string.IsNullOrWhiteSpace(safeTargetRoomId)) return false;
+        return string.Equals(roomId, safeTargetRoomId, StringComparison.Ordinal);
     }
 
     public void SetServerOwned(bool value)
@@ -253,6 +282,7 @@ public class MetaverseNetworkIdentity : MonoBehaviour
         ownerConnectionIdText = string.Empty;
         ownerUserId = string.Empty;
         ownerPlayerId = string.Empty;
+        roomId = string.Empty;
         serverOwned = true;
         localPlayer = false;
         isServer = false;

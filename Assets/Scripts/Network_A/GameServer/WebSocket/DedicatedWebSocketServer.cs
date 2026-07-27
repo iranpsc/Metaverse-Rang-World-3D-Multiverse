@@ -19,6 +19,11 @@ namespace Network_A.GameServer.WebSocket
         [SerializeField] private bool echoTestMessages = true;
         [SerializeField] private int maxConnections = 20;
 
+        [Header("Connection Liveness")]
+        [SerializeField] private bool enableConnectionLivenessCheck = true;
+        [SerializeField, Min(1f)] private float connectionPingIntervalSeconds = 5f;
+        [SerializeField, Min(2f)] private float connectionLivenessTimeoutSeconds = 15f;
+
         [Header("Debug")]
         [SerializeField] private bool logTextMessages = true;
         [SerializeField] private bool logFullTextMessages = false;
@@ -144,7 +149,13 @@ namespace Network_A.GameServer.WebSocket
                 serverCts = new CancellationTokenSource();
                 IsListening = true;
 
-                Debug.Log("[DedicatedWebSocketServer] Listening | ws://" + config.listenHost + ":" + config.listenPort);
+                float safePingIntervalSeconds = ResolveConnectionPingIntervalSeconds();
+                float safeLivenessTimeoutSeconds = ResolveConnectionLivenessTimeoutSeconds(safePingIntervalSeconds);
+
+                Debug.Log("[DedicatedWebSocketServer] Listening | ws://" + config.listenHost + ":" + config.listenPort +
+                          " | livenessEnabled=" + enableConnectionLivenessCheck +
+                          " | pingIntervalSeconds=" + safePingIntervalSeconds.ToString("F1") +
+                          " | livenessTimeoutSeconds=" + safeLivenessTimeoutSeconds.ToString("F1"));
 
                 _ = AcceptLoopAsync(serverCts.Token);
             }
@@ -198,6 +209,30 @@ namespace Network_A.GameServer.WebSocket
             Debug.Log("[DedicatedWebSocketServer] Stopped.");
         }
 
+        //* این تابع یک کانکشن مشخص را با کانکشن آی دی از سمت سرور می بندد.
+        public bool CloseConnectionById(string connectionId, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(connectionId)) return false;
+
+            string safeConnectionId = connectionId.Trim();
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "server_closed_connection" : reason.Trim();
+
+            if (!connections.TryRemove(safeConnectionId, out DedicatedWebSocketConnection connection))
+            {
+                Debug.LogWarning("[DedicatedWebSocketServer] Close connection skipped | connectionId=" +
+                                 safeConnectionId + " | reason=connection_not_found");
+                return false;
+            }
+
+            Debug.Log("[DedicatedWebSocketServer] Closing connection by id | connectionId=" +
+                      safeConnectionId + " | reason=" + safeReason +
+                      " | count=" + connections.Count);
+
+            _ = connection.CloseAsync(safeReason);
+
+            return true;
+        }
+
         //* این تابع حلقه پذیرش کانکشن های جدید وب سوکت را اجرا می کند.
         private async Task AcceptLoopAsync(CancellationToken cancellationToken)
         {
@@ -214,8 +249,16 @@ namespace Network_A.GameServer.WebSocket
                         continue;
                     }
 
-                    DedicatedWebSocketConnection connection =
-                        new DedicatedWebSocketConnection(tcpClient, cancellationToken);
+                    float safePingIntervalSeconds = ResolveConnectionPingIntervalSeconds();
+                    float safeLivenessTimeoutSeconds = ResolveConnectionLivenessTimeoutSeconds(safePingIntervalSeconds);
+
+                    DedicatedWebSocketConnection connection = new DedicatedWebSocketConnection(
+                        tcpClient,
+                        cancellationToken,
+                        enableConnectionLivenessCheck,
+                        safePingIntervalSeconds,
+                        safeLivenessTimeoutSeconds
+                    );
 
                     WireConnectionEvents(connection);
 
@@ -323,6 +366,20 @@ namespace Network_A.GameServer.WebSocket
             if (valueEnd <= valueStart) return "unknown";
 
             return text.Substring(valueStart + 1, valueEnd - valueStart - 1);
+        }
+
+
+        //* این تابع فاصله پینگ را حتی اگر مقدار قدیمی صحنه صفر باشد روی مقدار امن پنج ثانیه نگه می دارد.
+        private float ResolveConnectionPingIntervalSeconds()
+        {
+            return connectionPingIntervalSeconds > 0f ? Mathf.Max(1f, connectionPingIntervalSeconds) : 5f;
+        }
+
+        //* این تابع مهلت زنده بودن را حتی اگر مقدار قدیمی صحنه صفر باشد روی مقدار امن پانزده ثانیه نگه می دارد.
+        private float ResolveConnectionLivenessTimeoutSeconds(float safePingIntervalSeconds)
+        {
+            float configuredTimeoutSeconds = connectionLivenessTimeoutSeconds > 0f ? connectionLivenessTimeoutSeconds : 15f;
+            return Mathf.Max(safePingIntervalSeconds + 1f, configuredTimeoutSeconds);
         }
 
         //* این تابع آی پی لیسن را از متن کانفیگ می خواند.

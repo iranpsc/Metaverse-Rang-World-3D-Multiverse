@@ -72,6 +72,7 @@ public class G7ThreeDModeController : MonoBehaviour
     private TMP_Text localPlayerNameText;
     private readonly Dictionary<string, GameObject> dict_RemotePlayersByUserId = new Dictionary<string, GameObject>();
     private readonly Dictionary<string, TMP_Text> dict_RemoteNameTextsByUserId = new Dictionary<string, TMP_Text>();
+    private readonly HashSet<string> set_TemporarilyInactiveRemoteUserIds = new HashSet<string>();
 
     public bool IsThreeDModeActive => isThreeDModeActive;
     public GameObject LocalPlayerInstance => localPlayerInstance;
@@ -103,6 +104,12 @@ public class G7ThreeDModeController : MonoBehaviour
         RotateNameTextsToCamera();
     }
 
+    //* این تابع در پایان هر فریم قفل غیرفعال بودن موقت پلیرهای ریموت را اعمال می کند.
+    private void LateUpdate()
+    {
+        EnforceTemporarilyInactiveRemotePlayers();
+    }
+
     //* این تابع دکمه سه بعدی را به مسیر ورود سه بعدی وصل می کند.
     private void BindButtons()
     {
@@ -114,7 +121,16 @@ public class G7ThreeDModeController : MonoBehaviour
     {
         if (button3D != null) button3D.onClick.RemoveListener(EnterThreeDMode);
     }
+    //* این تابع حالت سه بعدی را برای ریکانکت فعال می کند، بدون اینکه موقعیت پلیر موجود ریست شود.
+    public void EnterThreeDModePreservingLocalPlayer()
+    {
+        SetThreeDMode(true);
+        SpawnOrResetLocalPlayer(false);
+        ApplyCursorState();
+        OnThreeDModeEntered?.Invoke();
 
+        Debug.Log("[G7-3D] 3D mode entered | preserveLocalPlayerTransform=True");
+    }
     //* این تابع حالت سه بعدی را فعال می کند، منوها را مخفی می کند و پلیر لوکال را می سازد.
     public void EnterThreeDMode()
     {
@@ -136,9 +152,47 @@ public class G7ThreeDModeController : MonoBehaviour
     }
 
     //* این تابع مطمئن می شود پلیر لوکال برای ارسال وضعیت شبکه ساخته شده است.
+    //* این تابع فقط وجود پلیر لوکال را تضمین می کند و پلیر موجود را به نقطه اسپاون برنمی گرداند.
     public void EnsureLocalPlayerSpawned()
     {
-        SpawnOrResetLocalPlayer();
+        SpawnOrResetLocalPlayer(false);
+    }
+
+    //* این تابع وضعیت معتبر دریافتی از گیم سرور را روی پلیر لوکال اعمال می کند.
+    public bool ApplyLocalPlayerAuthoritativeTransform(
+        Vector3 position,
+        Quaternion rotation)
+    {
+        EnsureLocalPlayerSpawned();
+
+        if (localPlayerInstance == null)
+        {
+            Debug.LogError(
+                "[G7-3D] Authoritative local player transform apply failed. Local player is missing."
+            );
+
+            return false;
+        }
+
+        ResetCharacterControllerPosition(
+            localPlayerInstance,
+            position,
+            rotation
+        );
+
+        localPlayerInstance.SetActive(true);
+        SetLocalPlayerControl(localPlayerInstance, true);
+        EnsureLocalPlayerNameText();
+        AttachThirdPersonCameraToLocalPlayer();
+
+        Debug.Log(
+            "[G7-3D] Authoritative local player transform applied | position=" +
+            localPlayerInstance.transform.position +
+            " | rotationY=" +
+            localPlayerInstance.transform.rotation.eulerAngles.y.ToString("F1")
+        );
+
+        return true;
     }
 
     //* این تابع نام پلیر لوکال را یک بار از سیستم لاگین می گیرد و روی تکست بالای سر پلیر اعمال می کند.
@@ -176,7 +230,7 @@ public class G7ThreeDModeController : MonoBehaviour
         Debug.Log("[G7-3D] Runtime world cleaned after confirmed exit | reason=" + safeReason);
     }
 
-    //* این تابع وضعیت فعال بودن ریشه های UI و دنیای سه بعدی را اعمال می کند.
+    //* این تابع وضعیت فعال بودن ریشه های یو ای و دنیای سه بعدی را اعمال می کند.
     private void SetThreeDMode(bool active)
     {
         isThreeDModeActive = active;
@@ -203,8 +257,8 @@ public class G7ThreeDModeController : MonoBehaviour
         }
     }
 
-    //* این تابع پلیر لوکال را یک بار می سازد یا در زمان ورود دوباره به نقطه اسپاون برمی گرداند.
-    private void SpawnOrResetLocalPlayer()
+    //* این تابع پلیر لوکال را می سازد و فقط در مسیرهای مجاز، پلیر موجود را به نقطه اسپاون برمی گرداند.
+    private void SpawnOrResetLocalPlayer(bool allowResetExistingPlayer = true)
     {
         if (localPlayerPrefab == null)
         {
@@ -220,25 +274,60 @@ public class G7ThreeDModeController : MonoBehaviour
 
         if (localPlayerInstance == null)
         {
-            Transform parent = playersRoot != null ? playersRoot : world3DRoot != null ? world3DRoot.transform : null;
-            localPlayerInstance = Instantiate(localPlayerPrefab, localPlayerSpawnPoint.position, localPlayerSpawnPoint.rotation, parent);
+            Transform parent =
+                playersRoot != null
+                    ? playersRoot
+                    : world3DRoot != null
+                        ? world3DRoot.transform
+                        : null;
+
+            localPlayerInstance = Instantiate(
+                localPlayerPrefab,
+                localPlayerSpawnPoint.position,
+                localPlayerSpawnPoint.rotation,
+                parent
+            );
+
             localPlayerInstance.name = "Local_Player_Cylinder";
             SetLocalPlayerControl(localPlayerInstance, true);
             EnsureLocalPlayerNameText();
             AttachThirdPersonCameraToLocalPlayer();
+
+            Debug.Log(
+                "[G7-3D] Local player created | position=" +
+                localPlayerInstance.transform.position
+            );
+
             return;
         }
 
-        if (!resetLocalPlayerOnEnter)
+        bool shouldResetExistingPlayer =
+            allowResetExistingPlayer &&
+            resetLocalPlayerOnEnter;
+
+        if (shouldResetExistingPlayer)
         {
-            localPlayerInstance.SetActive(true);
-            EnsureLocalPlayerNameText();
-            AttachThirdPersonCameraToLocalPlayer();
-            return;
+            ResetCharacterControllerPosition(
+                localPlayerInstance,
+                localPlayerSpawnPoint.position,
+                localPlayerSpawnPoint.rotation
+            );
+
+            Debug.Log(
+                "[G7-3D] Existing local player reset to spawn | position=" +
+                localPlayerInstance.transform.position
+            );
+        }
+        else
+        {
+            Debug.Log(
+                "[G7-3D] Existing local player transform preserved | position=" +
+                localPlayerInstance.transform.position
+            );
         }
 
-        ResetCharacterControllerPosition(localPlayerInstance, localPlayerSpawnPoint.position, localPlayerSpawnPoint.rotation);
         localPlayerInstance.SetActive(true);
+        SetLocalPlayerControl(localPlayerInstance, true);
         EnsureLocalPlayerNameText();
         AttachThirdPersonCameraToLocalPlayer();
     }
@@ -335,14 +424,20 @@ public class G7ThreeDModeController : MonoBehaviour
     }
 
     //* این تابع یک کلون ریموت را می سازد یا وضعیت هدف آن را برای حرکت نرم آپدیت می کند.
+    //* اگر پلیر به علت قطع جریان استیت موقتاً غیرفعال باشد، آپدیت قدیمی اجازه فعال کردن دوباره آن را ندارد.
     public void SpawnOrUpdateRemotePlayer(string userId, string userName, Vector3 position, Quaternion rotation)
     {
         if (string.IsNullOrWhiteSpace(userId)) return;
 
-        if (dict_RemotePlayersByUserId.TryGetValue(userId, out GameObject existingPlayer) && existingPlayer != null)
+        string safeUserId = userId.Trim();
+        bool shouldBeActive =
+            isThreeDModeActive &&
+            !set_TemporarilyInactiveRemoteUserIds.Contains(safeUserId);
+
+        if (dict_RemotePlayersByUserId.TryGetValue(safeUserId, out GameObject existingPlayer) && existingPlayer != null)
         {
-            existingPlayer.SetActive(isThreeDModeActive);
-            ApplyRemotePlayerNameIfBetter(existingPlayer, userId, userName);
+            existingPlayer.SetActive(shouldBeActive);
+            ApplyRemotePlayerNameIfBetter(existingPlayer, safeUserId, userName);
             ApplyRemotePlayerTarget(existingPlayer, position, rotation, false);
             return;
         }
@@ -356,16 +451,16 @@ public class G7ThreeDModeController : MonoBehaviour
 
         Transform parent = playersRoot != null ? playersRoot : world3DRoot != null ? world3DRoot.transform : null;
         GameObject remotePlayer = Instantiate(prefab, position, rotation, parent);
-        string safeUserName = BuildSafePlayerName(userName, userId);
+        string safeUserName = BuildSafePlayerName(userName, safeUserId);
         remotePlayer.name = "Remote_Player_" + SanitizeObjectName(safeUserName);
-        remotePlayer.SetActive(isThreeDModeActive);
+        remotePlayer.SetActive(shouldBeActive);
         SetLocalPlayerControl(remotePlayer, false);
         TMP_Text nameText = EnsurePlayerNameText(remotePlayer, safeUserName, false);
         ApplyRemotePlayerTarget(remotePlayer, position, rotation, true);
 
-        dict_RemotePlayersByUserId[userId] = remotePlayer;
-        dict_RemoteNameTextsByUserId[userId] = nameText;
-        Debug.Log($"[G7-3D] Remote player spawned | userId={userId} | userName={userName}");
+        dict_RemotePlayersByUserId[safeUserId] = remotePlayer;
+        dict_RemoteNameTextsByUserId[safeUserId] = nameText;
+        Debug.Log($"[G7-3D] Remote player spawned | userId={safeUserId} | userName={userName}");
     }
 
     //* این تابع روی کلون ریموت، اسکریپت حرکت نرم را پیدا یا اضافه می کند و هدف جدید را تنظیم می کند.
@@ -384,13 +479,17 @@ public class G7ThreeDModeController : MonoBehaviour
     public void RemoveRemotePlayer(string userId)
     {
         if (string.IsNullOrWhiteSpace(userId)) return;
-        if (!dict_RemotePlayersByUserId.TryGetValue(userId, out GameObject remotePlayer)) return;
 
-        dict_RemotePlayersByUserId.Remove(userId);
-        dict_RemoteNameTextsByUserId.Remove(userId);
+        string safeUserId = userId.Trim();
+        set_TemporarilyInactiveRemoteUserIds.Remove(safeUserId);
+
+        if (!dict_RemotePlayersByUserId.TryGetValue(safeUserId, out GameObject remotePlayer)) return;
+
+        dict_RemotePlayersByUserId.Remove(safeUserId);
+        dict_RemoteNameTextsByUserId.Remove(safeUserId);
         if (remotePlayer != null) Destroy(remotePlayer);
 
-        Debug.Log($"[G7-3D] Remote player removed | userId={userId}");
+        Debug.Log($"[G7-3D] Remote player removed | userId={safeUserId}");
     }
 
     //* این تابع همه کلون های ریموت را هنگام خروج از روم یا دیسکانکت پاک می کند.
@@ -403,14 +502,79 @@ public class G7ThreeDModeController : MonoBehaviour
 
         dict_RemotePlayersByUserId.Clear();
         dict_RemoteNameTextsByUserId.Clear();
+        set_TemporarilyInactiveRemoteUserIds.Clear();
     }
 
     //* این تابع همه کلون های ریموت را با وضعیت حالت سه بعدی روشن یا خاموش می کند.
+    //* این تابع کلون یک پلیر ریموت را بدون حذف آبجکت و دیتای آن موقتاً فعال یا غیرفعال می کند.
+    public bool SetRemotePlayerActive(string userId, bool active)
+    {
+        if (string.IsNullOrWhiteSpace(userId)) return false;
+
+        string safeUserId = userId.Trim();
+        if (!dict_RemotePlayersByUserId.TryGetValue(safeUserId, out GameObject remotePlayer) || remotePlayer == null)
+        {
+            return false;
+        }
+
+        if (active)
+        {
+            set_TemporarilyInactiveRemoteUserIds.Remove(safeUserId);
+        }
+        else
+        {
+            set_TemporarilyInactiveRemoteUserIds.Add(safeUserId);
+        }
+
+        bool targetActive = active && isThreeDModeActive;
+        if (remotePlayer.activeSelf == targetActive) return false;
+
+        remotePlayer.SetActive(targetActive);
+
+        Debug.Log(
+            "[G7-3D] Remote player active state changed | userId=" +
+            safeUserId +
+            " | active=" +
+            targetActive
+        );
+
+        return true;
+    }
+
+    //* این تابع اجازه نمی دهد هیچ مسیر قدیمی یا موازی پلیر موقتاً غیرفعال را دوباره روشن کند.
+    private void EnforceTemporarilyInactiveRemotePlayers()
+    {
+        if (set_TemporarilyInactiveRemoteUserIds.Count <= 0) return;
+
+        foreach (string userId in set_TemporarilyInactiveRemoteUserIds)
+        {
+            if (string.IsNullOrWhiteSpace(userId)) continue;
+
+            if (!dict_RemotePlayersByUserId.TryGetValue(userId, out GameObject remotePlayer) ||
+                remotePlayer == null)
+            {
+                continue;
+            }
+
+            if (remotePlayer.activeSelf)
+            {
+                remotePlayer.SetActive(false);
+            }
+        }
+    }
+
+    //* این تابع همه کلون های ریموت را با وضعیت حالت سه بعدی و غیرفعال سازی موقت همسان می کند.
     private void SetRemotePlayersActive(bool active)
     {
         foreach (KeyValuePair<string, GameObject> pair in dict_RemotePlayersByUserId)
         {
-            if (pair.Value != null) pair.Value.SetActive(active);
+            if (pair.Value == null) continue;
+
+            bool shouldBeActive =
+                active &&
+                !set_TemporarilyInactiveRemoteUserIds.Contains(pair.Key);
+
+            pair.Value.SetActive(shouldBeActive);
         }
     }
 
@@ -424,7 +588,7 @@ public class G7ThreeDModeController : MonoBehaviour
         localPlayerNameText = EnsurePlayerNameText(localPlayerInstance, safeName, true);
     }
 
-    //* این تابع برای هر پلیر یک TextMeshPro سه بعدی بالای سر می سازد یا نمونه موجود را تنظیم می کند.
+    //* این تابع برای هر پلیر یک تکست مش پرو سه بعدی بالای سر می سازد یا نمونه موجود را تنظیم می کند.
     private TMP_Text EnsurePlayerNameText(GameObject playerObject, string displayName, bool isLocalPlayer)
     {
         if (!showPlayerNameTexts || playerObject == null) return null;
