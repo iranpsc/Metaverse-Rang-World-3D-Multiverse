@@ -15,13 +15,29 @@ namespace Network_A.Auth//22
     public class AuthManager : MonoBehaviour
     {
         public static AuthManager Instance { get; private set; }
-
+        public static event Action<AuthUserDto> OnLoginReady;
         #region <ENUM>
         public enum ServerType
         {
             Local,
             Dedicated,
             Custom
+        }
+
+        public enum AutoLoginFailureReason
+        {
+            None,
+            NoInternet,
+            ServerUnavailable,
+            Timeout,
+            NotLoggedIn,
+            AccessTokenExpired,
+            RefreshTokenExpired,
+            RefreshTokenRevoked,
+            InvalidToken,
+            Unauthorized,
+            UserDataFailed,
+            Unknown
         }
 
         [Header("Server Select")]
@@ -82,9 +98,49 @@ namespace Network_A.Auth//22
         #region <Server Debug UI>
         [Header("Server Debug UI")]
         [SerializeField] private GameObject pnl_ServerDebug;
-        [SerializeField] private RTLTextMeshPro txt_ServerDebug;
         [SerializeField] private Button btn_ServerDebugClose;
+        [SerializeField] private TMP_Text txt_ServerDebugTitle;
+        [SerializeField] private TMP_Text txt_ServerDebugMessage;
+        [SerializeField] private TMP_Text txt_ServerDebugTechnical;
+        [SerializeField] private Button btn_ServerDebugRelogin;
+        [SerializeField] private Button btn_ServerDebugRetry;
         [SerializeField] private bool showServerDebugPanelOnServerMessage = true;
+        [SerializeField] private bool autoFindServerDebugUiByName = true;
+        [SerializeField] private bool autoOpenServerDebugOnAutoLoginFailure = true;
+        [SerializeField] private bool showServerDebugTechnicalDetails = true;
+        [SerializeField] private bool hideServerDebugCloseDuringAutoLoginProgress = true;
+        [SerializeField] private bool hideServerDebugCloseUntilAuthenticated = true;
+        [SerializeField] private bool allowServerDebugCloseWhenManualLoginRequired = true;
+        [SerializeField] private string serverDebugCloseBlockedDuringAuthMessage = "تا زمان مشخص شدن نتیجه ورود، امکان بستن این پنل وجود ندارد.";
+        [SerializeField] private string autoLoginFailureTitle = "ورود خودکار انجام نشد";
+        [SerializeField] private string noInternetAutoLoginMessage = "اینترنت در دسترس نیست. اتصال خود را بررسی کنید و دوباره تلاش کنید.";
+        [SerializeField] private string serverUnavailableAutoLoginMessage = "اتصال به سرور برقرار نشد. چند لحظه دیگر دوباره تلاش کنید.";
+        [SerializeField] private string timeoutAutoLoginMessage = "پاسخ سرور طولانی شد. دوباره تلاش کنید.";
+        [SerializeField] private string notLoggedInAutoLoginMessage = "کاربر وارد حساب نشده است. برای ادامه دوباره وارد شوید.";
+        [SerializeField] private string sessionExpiredAutoLoginMessage = "نشست شما منقضی شده است. لطفاً دوباره وارد شوید.";
+        [SerializeField] private string userDataFailedAutoLoginMessage = "دریافت اطلاعات کاربر انجام نشد. دوباره تلاش کنید یا وارد شوید.";
+        [SerializeField] private string unknownAutoLoginMessage = "ورود خودکار انجام نشد. دوباره تلاش کنید یا وارد شوید.";
+        [SerializeField] private bool autoOpenServerDebugOnStartupFlow = true;
+        [SerializeField] private bool autoCloseServerDebugOnAutoLoginSuccess;
+        [SerializeField] private float autoCloseServerDebugOnAutoLoginSuccessDelaySeconds = 1.5f;
+        [SerializeField] private string autoLoginProgressTitle = "بررسی ورود و اتصال";
+        [SerializeField] private string autoLoginPreparingMessage = "در حال آماده‌سازی اتصال به سرور...";
+        [SerializeField] private string autoLoginCheckingServerMessage = "در حال بررسی دسترسی به سرور...";
+        [SerializeField] private string autoLoginServerReachableMessage = "سرور در دسترس است. در حال بررسی نشست کاربر...";
+        [SerializeField] private string autoLoginNoLocalSessionMessage = "نشست ذخیره‌شده پیدا نشد. لطفاً وارد شوید.";
+        [SerializeField] private string autoLoginGettingUserDataMessage = "در حال دریافت اطلاعات کاربر...";
+        [SerializeField] private string autoLoginRefreshingSessionMessage = "نشست کاربری در حال تمدید است...";
+        [SerializeField] private string autoLoginRetryGettingUserDataMessage = "تمدید نشست موفق بود. در حال دریافت دوباره اطلاعات کاربر...";
+        [SerializeField] private string autoLoginSuccessMessage = "ورود خودکار انجام شد.";
+        [SerializeField] private bool clearTokensWhenManualLoginRequired = true;
+        [SerializeField] private bool openLoginPanelWhenSessionRefreshFails = true;
+        [SerializeField] private bool closeServerDebugWhenManualLoginRequired = true;
+        private string lastAuthStartupStage = string.Empty;
+        private bool isAutoLoginResultPending;
+        private AutoLoginFailureReason lastAutoLoginFailureReason = AutoLoginFailureReason.None;
+        private string lastAutoLoginFailureTechnicalDetails = string.Empty;
+        private AutoLoginFailureReason lastRefreshFailureReason = AutoLoginFailureReason.None;
+        private string lastRefreshFailureTechnicalDetails = string.Empty;
         #endregion
 
         #region <Login State>
@@ -137,8 +193,10 @@ namespace Network_A.Auth//22
         {
             isLogin = false;
             SetupServerDebugPanel();
+            ShowAutoLoginProgress(autoLoginPreparingMessage, "AUTH_STARTUP_STARTED", "AuthManager.Start initialized startup auth flow.");
             if (clearTokensOnStart)
             {
+                ShowAutoLoginProgress("در حال پاک کردن توکن‌های ذخیره‌شده...", "CLEAR_TOKENS_ON_START", "clearTokensOnStart=true");
                 bool cleared = await ClearTokensOnStartAsync();
 
                 if (!cleared)
@@ -264,33 +322,72 @@ namespace Network_A.Auth//22
         {
             EnsureAuthServerConfig();
 
+            lastAutoLoginFailureReason = AutoLoginFailureReason.None;
+            lastAutoLoginFailureTechnicalDetails = string.Empty;
+
             NetworkFileLogger.Auth("LOGIN_INIT_START", true, "Login_Init started.", string.Empty, HasAccessToken(), HasRefreshToken());
+            ShowAutoLoginProgress(autoLoginGettingUserDataMessage, "GET_USER_DATA_START", "Request=GetUserData | Function=Login_Init");
             ShowInfoMessage("در حال دریافت اطلاعات کاربر | Request: GetUserData | Function: Login_Init");
+
+            if (!HasAccessToken() && !HasRefreshToken())
+            {
+                isLogin = false;
+                ShowAutoLoginFailure(AutoLoginFailureReason.NotLoggedIn, "Login_Init blocked because accessToken and refreshToken are empty.");
+                ShowLoginRequired(false);
+                NetworkFileLogger.Auth("LOGIN_INIT_NOT_LOGGED_IN", false, "No local tokens found.", string.Empty, HasAccessToken(), HasRefreshToken());
+                return;
+            }
 
             ApiResult<GetUserDataResponseDto> res = await GetUserDataAsync();
 
             if (res != null && !res.IsSuccess && IsUnauthorizedOrExpired(res.StatusCode, res.ErrorMessage) && HasRefreshToken())
             {
                 NetworkFileLogger.Warning("LOGIN_INIT_REFRESH", "GetUserData failed with expired or unauthenticated token. Trying refresh before showing login UI. status=" + res.StatusCode + " error=" + res.ErrorMessage);
+                ShowAutoLoginProgress(autoLoginRefreshingSessionMessage, "REFRESH_TOKEN_START", "GetUserData unauthorized or expired | status=" + res.StatusCode + " | error=" + res.ErrorMessage);
                 ShowInfoMessage("نشست کاربری در حال تمدید است...");
 
-                bool refreshed = await RefreshInternalAsync();
+                lastRefreshFailureReason = AutoLoginFailureReason.None;
+                lastRefreshFailureTechnicalDetails = string.Empty;
+
+                bool refreshed = await AuthRefreshManager.Refresh();
 
                 if (refreshed)
                 {
                     NetworkFileLogger.Info("LOGIN_INIT_REFRESH", "Refresh succeeded. Retrying GetUserData.");
+                    ShowAutoLoginProgress(autoLoginRetryGettingUserDataMessage, "REFRESH_TOKEN_SUCCESS", "Refresh succeeded. Retrying GetUserData.");
                     res = await GetUserDataAsync();
                 }
                 else
                 {
-                    NetworkFileLogger.Warning("LOGIN_INIT_REFRESH", "Refresh failed. Login UI is required.");
+                    AutoLoginFailureReason refreshReason = lastRefreshFailureReason == AutoLoginFailureReason.None ? AutoLoginFailureReason.Unauthorized : lastRefreshFailureReason;
+                    string refreshTechnical = string.IsNullOrEmpty(lastRefreshFailureTechnicalDetails)
+                        ? CombineErrorParts(res.ErrorMessage, res.RawBody, ReadKnownAuthErrorFromBytes(res.RawBytes))
+                        : lastRefreshFailureTechnicalDetails;
+
+                    string manualLoginTechnical = "Refresh failed during Login_Init | " + refreshTechnical;
+                    AutoLoginFailureReason manualLoginReason = ResolveManualLoginReasonAfterRefreshFailure(refreshReason, manualLoginTechnical, res);
+
+                    isLogin = false;
+
+                    if (openLoginPanelWhenSessionRefreshFails && ShouldRequireManualLoginAfterRefreshFailure(manualLoginReason, manualLoginTechnical, res))
+                    {
+                        RequireManualLoginAfterAuthFailure(manualLoginReason, manualLoginTechnical);
+                    }
+                    else
+                    {
+                        ShowAutoLoginFailure(refreshReason, manualLoginTechnical);
+                        if (ShouldShowReloginButton(refreshReason)) ShowLoginRequired(false);
+                    }
+
+                    NetworkFileLogger.Auth("LOGIN_INIT_REFRESH_FAILED", false, refreshTechnical, string.Empty, HasAccessToken(), HasRefreshToken());
+                    return;
                 }
             }
 
             if (res == null)
             {
                 isLogin = false;
-                ShowErrorMessage("خطا در دریافت اطلاعات کاربر");
+                ShowAutoLoginFailure(AutoLoginFailureReason.Unknown, "GetUserData result is null.");
                 NetworkFileLogger.Auth("LOGIN_INIT_NULL", false, "GetUserData result is null.", string.Empty, HasAccessToken(), HasRefreshToken());
                 return;
             }
@@ -298,14 +395,18 @@ namespace Network_A.Auth//22
             if (!res.IsSuccess)
             {
                 isLogin = false;
+
+                string technical = CombineErrorParts(res.ErrorMessage, res.RawBody, ReadKnownAuthErrorFromBytes(res.RawBytes));
+                AutoLoginFailureReason reason = ClassifyAutoLoginFailure(technical, res.StatusCode, res.IsNetworkError);
+
                 if (IsUnauthorizedOrExpired(res.StatusCode, res.ErrorMessage))
                 {
-                    ShowWarningMessage("نشست کاربری منقضی شده است. لطفاً دوباره وارد شوید.");
-                    ShowLoginRequired();
+                    ShowAutoLoginFailure(reason == AutoLoginFailureReason.Unknown ? AutoLoginFailureReason.Unauthorized : reason, technical);
+                    ShowLoginRequired(false);
                 }
                 else
                 {
-                    ShowErrorMessage(BuildUserMessage("LOGIN_INIT", res));
+                    ShowAutoLoginFailure(reason == AutoLoginFailureReason.None ? AutoLoginFailureReason.UserDataFailed : reason, technical);
                 }
 
                 NetworkFileLogger.Auth("LOGIN_INIT_FAILED", false, res.ErrorMessage, string.Empty, HasAccessToken(), HasRefreshToken());
@@ -315,19 +416,25 @@ namespace Network_A.Auth//22
             if (res.Data == null || res.Data.user == null)
             {
                 isLogin = false;
-                ShowErrorMessage("اطلاعات کاربر از سرور دریافت نشد");
+                ShowAutoLoginFailure(AutoLoginFailureReason.UserDataFailed, "GetUserData success response had empty user data.");
                 NetworkFileLogger.Auth("LOGIN_INIT_EMPTY_USER", false, "User data is empty.", string.Empty, HasAccessToken(), HasRefreshToken());
                 return;
             }
 
             isLogin = true;
+            DH_Pnl_Login(false);
+            DH_Pnl_Reg(false);
             CurrentUser = res.Data.user;
             GetUserData_For_Menu_Base(res.Data);
 
             if (is_First_Reg) is_First_Reg = false;
 
+            HideAuthActionButtonsInServerDebug();
+            ShowAutoLoginProgress(autoLoginSuccessMessage, "AUTO_LOGIN_SUCCESS", "User=" + SafeText(CurrentUser.emailOrUsername) + " | Request=GetUserData");
+            CloseServerDebugPanelAfterAutoLoginSuccessIfNeeded();
             ShowSuccessMessage("اطلاعات کاربر دریافت شد | User: " + CurrentUser.emailOrUsername + " | Request: GetUserData");
             NetworkFileLogger.Auth("LOGIN_INIT_SUCCESS", true, res.Data.message, CurrentUser.emailOrUsername, HasAccessToken(), HasRefreshToken());
+            NotifyLoginReady("login_init_success");
         }
 
         //* Keeps MindReader-style wait wrapper for external callers.
@@ -378,10 +485,10 @@ namespace Network_A.Auth//22
             byte[] message = AuthProtoMapper.EncodeEmptyRequest();
             return SendGetMicroserviceUserDataUnaryAsync(ServerConfig.GetMicroserviceUserDataUrl, message, true, "GET_MICROSERVICE_USER_DATA", ct);
         }
-        //* Refreshes tokens using AuthRefreshManager-compatible internal flow.
+        //* Refreshes tokens through the shared refresh gate so every caller waits for the same refresh task.
         public async Task<ApiResult<AuthResponseDto>> RefreshAsync(CancellationToken ct = default(CancellationToken))
         {
-            bool ok = await RefreshInternalAsync();
+            bool ok = await AuthRefreshManager.Refresh();
             if (!ok) return ApiResult<AuthResponseDto>.Failure("Refresh failed", 401, false, string.Empty, new byte[0]);
 
             var dto = new AuthResponseDto
@@ -522,6 +629,7 @@ namespace Network_A.Auth//22
 
             isCheckingNet = true;
             NetworkFileLogger.Info("CHECK_NET", "Health check started. transport=" + ServerConfig.CurrentTransportKind);
+            ShowAutoLoginProgress(autoLoginCheckingServerMessage, "HEALTH_CHECK_START", "transport=" + ServerConfig.CurrentTransportKind + " | endpoint=" + ServerConfig.CurrentEndpoint);
 
             try
             {
@@ -547,9 +655,14 @@ namespace Network_A.Auth//22
                     netWarning_Disabled = false;
                     SetStatus("سرور در دسترس است");
                     NetworkFileLogger.Info("CHECK_NET", "Server reachable. transport=" + ServerConfig.CurrentTransportKind);
+                    ShowAutoLoginProgress(autoLoginServerReachableMessage, "HEALTH_CHECK_SUCCESS", "Server reachable. transport=" + ServerConfig.CurrentTransportKind);
 
                     if (autoLoginInitAfterHealth && !IsFirstTimeInstallation()) await Login_Init();
-                    else if (showRegisterPanelIfFirstInstall) DH_Pnl_Reg(true);
+                    else
+                    {
+                        ShowAutoLoginProgress(autoLoginNoLocalSessionMessage, "NO_LOCAL_SESSION", "Refresh token is empty. Showing register/login UI.");
+                        if (showRegisterPanelIfFirstInstall) DH_Pnl_Reg(true);
+                    }
 
                     return;
                 }
@@ -559,7 +672,9 @@ namespace Network_A.Auth//22
                 if (!netWarning_Disabled)
                 {
                     netWarning_Disabled = true;
-                    ShowErrorMessage("ارتباط با سرور برقرار نشد");
+                    string technical = res != null ? CombineErrorParts(res.ErrorMessage, res.RawBody, ReadKnownAuthErrorFromBytes(res.RawBytes)) : "Health result is null.";
+                    AutoLoginFailureReason reason = res != null ? ClassifyAutoLoginFailure(technical, res.StatusCode, res.IsNetworkError) : AutoLoginFailureReason.ServerUnavailable;
+                    ShowAutoLoginFailure(reason == AutoLoginFailureReason.None ? AutoLoginFailureReason.ServerUnavailable : reason, "Health check failed | " + technical);
                 }
 
                 NetworkFileLogger.Warning("CHECK_NET", "Health check failed. " + (res != null ? res.ErrorMessage : "Result is null."));
@@ -571,7 +686,8 @@ namespace Network_A.Auth//22
                 if (!netWarning_Disabled)
                 {
                     netWarning_Disabled = true;
-                    ShowErrorMessage("ارتباط با سرور برقرار نشد");
+                    AutoLoginFailureReason reason = ClassifyAutoLoginFailure(ex.Message, 0, true);
+                    ShowAutoLoginFailure(reason == AutoLoginFailureReason.None ? AutoLoginFailureReason.ServerUnavailable : reason, "Health check exception | " + ex.Message);
                 }
 
                 NetworkFileLogger.Exception("CHECK_NET", ex);
@@ -601,6 +717,88 @@ namespace Network_A.Auth//22
         }
         #endregion
 
+        public async Task<bool> CheckNetFastSilentAsync(int timeoutMs = 2500, CancellationToken externalToken = default(CancellationToken))
+        {
+            EnsureAuthServerConfig();
+
+            int safeTimeoutMs = Mathf.Clamp(timeoutMs, 700, 5000);
+
+            using (CancellationTokenSource timeoutCts = new CancellationTokenSource(safeTimeoutMs))
+            using (CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, externalToken))
+            {
+                try
+                {
+                    ApiResult<byte[]> res;
+
+                    if (ServerConfig.IsGrpcNative())
+                    {
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_ANDROID
+                        res = await GrpcNativeUnaryClient.SendAsync(
+                            ServerConfig.HealthServiceName,
+                            "Check",
+                            AuthProtoMapper.EncodeEmptyRequest(),
+                            false,
+                            null,
+                            linkedCts.Token,
+                            "HEALTH_FAST_NATIVE"
+                        );
+#else
+                        return false;
+#endif
+                    }
+                    else
+                    {
+                        byte[] frame = AuthProtoMapper.EncodeGrpcWebUnaryRequest(AuthProtoMapper.EncodeEmptyRequest());
+
+                        res = await RequestManager.Send<byte[]>(
+                            ServerConfig.HealthUrl,
+                            UnityWebRequest.kHttpVerbPOST,
+                            frame,
+                            false,
+                            BuildGrpcWebHeaders(),
+                            linkedCts.Token,
+                            "HEALTH_FAST"
+                        );
+                    }
+
+                    bool ok = res != null && res.IsSuccess;
+
+                    NetworkFileLogger.Info(
+                        "CHECK_NET_FAST",
+                        "silent=" + ok +
+                        " | transport=" + ServerConfig.CurrentTransportKind +
+                        " | endpoint=" + ServerConfig.CurrentEndpoint +
+                        " | timeoutMs=" + safeTimeoutMs
+                    );
+
+                    return ok;
+                }
+                catch (OperationCanceledException)
+                {
+                    NetworkFileLogger.Warning(
+                        "CHECK_NET_FAST",
+                        "silent=false | timeout/cancel | transport=" + ServerConfig.CurrentTransportKind +
+                        " | endpoint=" + ServerConfig.CurrentEndpoint +
+                        " | timeoutMs=" + safeTimeoutMs
+                    );
+
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    NetworkFileLogger.Warning(
+                        "CHECK_NET_FAST",
+                        "silent=false | exception=" + ex.Message +
+                        " | transport=" + ServerConfig.CurrentTransportKind +
+                        " | endpoint=" + ServerConfig.CurrentEndpoint +
+                        " | timeoutMs=" + safeTimeoutMs
+                    );
+
+                    return false;
+                }
+            }
+        }
+
         #region <Panels>
         //* Shows or hides register panel.
         public void DH_Pnl_Reg(bool state)
@@ -621,17 +819,40 @@ namespace Network_A.Auth//22
 
         private void SetupServerDebugPanel()
         {
+            AutoBindServerDebugUi();
+
             if (btn_ServerDebugClose != null)
             {
                 btn_ServerDebugClose.onClick.RemoveListener(HideServerDebugPanel);
                 btn_ServerDebugClose.onClick.AddListener(HideServerDebugPanel);
             }
 
+            if (btn_ServerDebugRelogin != null)
+            {
+                btn_ServerDebugRelogin.onClick.RemoveListener(ReLogin);
+                btn_ServerDebugRelogin.onClick.AddListener(ReLogin);
+            }
+
+            if (btn_ServerDebugRetry != null)
+            {
+                btn_ServerDebugRetry.onClick.RemoveListener(RetryAutoLoginFromServerDebug);
+                btn_ServerDebugRetry.onClick.AddListener(RetryAutoLoginFromServerDebug);
+            }
+
+            HideAuthActionButtonsInServerDebug();
+            SetServerDebugCloseButtonVisible(!ShouldHideServerDebugCloseButton("SETUP"));
             DH_Pnl_ServerDebug(false);
         }
 
         private void HideServerDebugPanel()
         {
+            if (IsServerDebugCloseBlocked())
+            {
+                SetStatus(serverDebugCloseBlockedDuringAuthMessage);
+                ShowServerDebugCloseBlockedMessage();
+                return;
+            }
+
             DH_Pnl_ServerDebug(false);
         }
         #endregion
@@ -825,13 +1046,16 @@ namespace Network_A.Auth//22
         {
             EnsureAuthServerConfig();
 
+            lastRefreshFailureReason = AutoLoginFailureReason.None;
+            lastRefreshFailureTechnicalDetails = string.Empty;
+
             string refreshToken = SecureTokenStorage.GetRefreshToken();
             NetworkFileLogger.TokenState("REFRESH_BEFORE_SEND", SecureTokenStorage.GetAccessToken(), refreshToken);
 
             if (string.IsNullOrEmpty(refreshToken))
             {
                 NetworkFileLogger.Warning("REFRESH", "Refresh token is empty.");
-                return false;
+                return SetLastRefreshFailure(AutoLoginFailureReason.NotLoggedIn, "Refresh token is empty.");
             }
 
             byte[] message = AuthProtoMapper.EncodeRefreshRequest(refreshToken);
@@ -852,13 +1076,13 @@ namespace Network_A.Auth//22
                 if (raw == null)
                 {
                     NetworkFileLogger.Warning("REFRESH", "Native refresh result is null.");
-                    return false;
+                    return SetLastRefreshFailure(AutoLoginFailureReason.ServerUnavailable, "Native refresh result is null.");
                 }
 
                 if (!raw.IsSuccess)
                 {
                     NetworkFileLogger.Warning("REFRESH", "Native refresh failed. status=" + raw.StatusCode + " error=" + raw.ErrorMessage);
-                    return false;
+                    return SetLastRefreshFailure(ClassifyAutoLoginFailure(raw.ErrorMessage, raw.StatusCode, raw.IsNetworkError), "Native refresh failed | status=" + raw.StatusCode + " | error=" + raw.ErrorMessage);
                 }
 
                 byte[] protoBytes = ReadNativeBytes(raw);
@@ -867,7 +1091,7 @@ namespace Network_A.Auth//22
                 return SaveRefreshDto(dto, refreshToken);
 #else
                 NetworkFileLogger.Warning("REFRESH", "Native gRPC is enabled in ServerConfig, but this platform is not enabled for Native refresh.");
-                return false;
+                return SetLastRefreshFailure(AutoLoginFailureReason.Unknown, "Native gRPC refresh is not enabled for this platform.");
 #endif
             }
 
@@ -889,7 +1113,7 @@ namespace Network_A.Auth//22
                 catch (Exception ex)
                 {
                     NetworkFileLogger.Exception("REFRESH", ex);
-                    return false;
+                    return SetLastRefreshFailure(ClassifyAutoLoginFailure(ex.Message, 0, true), "Refresh exception | " + ex.Message);
                 }
 
                 byte[] rawBytes = req.downloadHandler != null && req.downloadHandler.data != null ? req.downloadHandler.data : new byte[0];
@@ -906,14 +1130,21 @@ namespace Network_A.Auth//22
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
-                    NetworkFileLogger.Warning("REFRESH", "UnityWebRequest failed. status=" + req.responseCode + " result=" + req.result + " error=" + req.error + " body=" + bodyText);
-                    return false;
+                    string knownAuthError = ReadKnownAuthErrorFromBytes(rawBytes);
+                    string refreshError = CombineErrorParts(req.error, bodyText, knownAuthError);
+                    bool refreshNetworkError =
+                        req.responseCode <= 0 ||
+                        req.result == UnityWebRequest.Result.ConnectionError ||
+                        req.result == UnityWebRequest.Result.DataProcessingError;
+
+                    NetworkFileLogger.Warning("REFRESH", "UnityWebRequest failed. status=" + req.responseCode + " result=" + req.result + " error=" + req.error + " body=" + bodyText + " knownAuthError=" + knownAuthError);
+                    return SetLastRefreshFailure(ClassifyAutoLoginFailure(refreshError, (int)req.responseCode, refreshNetworkError), "UnityWebRequest refresh failed | status=" + req.responseCode + " | result=" + req.result + " | error=" + req.error + " | body=" + bodyText + " | knownAuthError=" + knownAuthError);
                 }
 
                 if (rawBytes.Length == 0)
                 {
                     NetworkFileLogger.Warning("REFRESH", "Empty gRPC-Web refresh response. status=" + req.responseCode + " body=" + bodyText);
-                    return false;
+                    return SetLastRefreshFailure(ClassifyAutoLoginFailure(bodyText, (int)req.responseCode, req.responseCode <= 0), "Empty gRPC-Web refresh response | status=" + req.responseCode + " | body=" + bodyText);
                 }
 
                 byte[] protoBytes;
@@ -921,8 +1152,11 @@ namespace Network_A.Auth//22
 
                 if (!AuthProtoMapper.TryDecodeGrpcWebUnaryResponse(rawBytes, out protoBytes, out trailers))
                 {
-                    NetworkFileLogger.Warning("REFRESH", "Invalid gRPC-Web refresh response. rawBytes=" + rawBytes.Length + " body=" + bodyText);
-                    return false;
+                    string knownAuthError = ReadKnownAuthErrorFromBytes(rawBytes);
+                    string refreshError = CombineErrorParts(bodyText, knownAuthError);
+
+                    NetworkFileLogger.Warning("REFRESH", "Invalid gRPC-Web refresh response. rawBytes=" + rawBytes.Length + " body=" + bodyText + " knownAuthError=" + knownAuthError);
+                    return SetLastRefreshFailure(ClassifyAutoLoginFailure(refreshError, (int)req.responseCode, req.responseCode <= 0), "Invalid gRPC-Web refresh response | rawBytes=" + rawBytes.Length + " | body=" + bodyText + " | knownAuthError=" + knownAuthError);
                 }
 
                 string grpcStatus = ReadTrailer(trailers, "grpc-status");
@@ -931,7 +1165,9 @@ namespace Network_A.Auth//22
                 if (!string.IsNullOrEmpty(grpcStatus) && grpcStatus != "0")
                 {
                     NetworkFileLogger.Warning("REFRESH", "gRPC refresh failed. grpcStatus=" + grpcStatus + " grpcMessage=" + grpcMessage);
-                    return false;
+                    int parsedGrpcStatus;
+                    int refreshStatusCode = int.TryParse(grpcStatus, out parsedGrpcStatus) ? parsedGrpcStatus : 0;
+                    return SetLastRefreshFailure(ClassifyAutoLoginFailure(grpcMessage, refreshStatusCode, false), "gRPC refresh failed | grpcStatus=" + grpcStatus + " | grpcMessage=" + grpcMessage);
                 }
 
                 AuthResponseDto dto = AuthProtoMapper.DecodeAuthResponse(protoBytes);
@@ -963,19 +1199,19 @@ namespace Network_A.Auth//22
             if (dto == null)
             {
                 NetworkFileLogger.Warning("REFRESH", "Decoded refresh dto is null.");
-                return false;
+                return SetLastRefreshFailure(AutoLoginFailureReason.ServerUnavailable, "Decoded refresh dto is null.");
             }
 
             if (!dto.success)
             {
                 NetworkFileLogger.Warning("REFRESH", "Refresh dto success=false message=" + dto.message);
-                return false;
+                return SetLastRefreshFailure(ClassifyAutoLoginFailure(dto.message, 401, false), "Refresh dto success=false | message=" + dto.message);
             }
 
             if (string.IsNullOrEmpty(dto.accessToken))
             {
                 NetworkFileLogger.Warning("REFRESH", "Refresh dto accessToken is empty. message=" + dto.message);
-                return false;
+                return SetLastRefreshFailure(AutoLoginFailureReason.InvalidToken, "Refresh dto accessToken is empty | message=" + dto.message);
             }
 
             SecureTokenStorage.SaveTokens(dto.accessToken, string.IsNullOrEmpty(dto.refreshToken) ? previousRefreshToken : dto.refreshToken);
@@ -1001,11 +1237,421 @@ namespace Network_A.Auth//22
 
         #region <Helpers>
 
+        private void AutoBindServerDebugUi()
+        {
+            if (!autoFindServerDebugUiByName || pnl_ServerDebug == null) return;
+
+            if (txt_ServerDebugTitle == null) txt_ServerDebugTitle = FindServerDebugText("Txt_ServerDebugTitle");
+            if (txt_ServerDebugMessage == null) txt_ServerDebugMessage = FindServerDebugText("Txt_ServerDebugMessage");
+            if (txt_ServerDebugTechnical == null) txt_ServerDebugTechnical = FindServerDebugText("Txt_ServerDebugTechnical");
+            if (btn_ServerDebugClose == null) btn_ServerDebugClose = FindServerDebugButton("Btn_Close");
+            if (btn_ServerDebugRelogin == null) btn_ServerDebugRelogin = FindServerDebugButton("Btn_Relogin");
+            if (btn_ServerDebugRetry == null) btn_ServerDebugRetry = FindServerDebugButton("Btn_Retry");
+        }
+
+        private TMP_Text FindServerDebugText(string objectName)
+        {
+            if (pnl_ServerDebug == null || string.IsNullOrEmpty(objectName)) return null;
+
+            Transform target = FindChildByName(pnl_ServerDebug.transform, objectName);
+            return target != null ? target.GetComponent<TMP_Text>() : null;
+        }
+
+        private Button FindServerDebugButton(string objectName)
+        {
+            if (pnl_ServerDebug == null || string.IsNullOrEmpty(objectName)) return null;
+
+            Transform target = FindChildByName(pnl_ServerDebug.transform, objectName);
+            return target != null ? target.GetComponent<Button>() : null;
+        }
+
+        private Transform FindChildByName(Transform root, string objectName)
+        {
+            if (root == null || string.IsNullOrEmpty(objectName)) return null;
+
+            Transform[] children = root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < children.Length; i++)
+            {
+                if (children[i] != null && children[i].name == objectName) return children[i];
+            }
+
+            return null;
+        }
+
+        public void ReLogin()
+        {
+            isAutoLoginResultPending = false;
+            NetworkFileLogger.Auth("RELOGIN_BUTTON", true, "User requested manual relogin from server debug panel.", string.Empty, HasAccessToken(), HasRefreshToken());
+
+            SecureTokenStorage.ClearTokens();
+            isLogin = false;
+            CurrentUser = null;
+            emailOrUsername = string.Empty;
+            password = string.Empty;
+
+            DH_Pnl_Reg(false);
+            DH_Pnl_Login(true);
+
+            HideAuthActionButtonsInServerDebug();
+            SetStatus("لطفاً دوباره وارد شوید.");
+            ShowServerDebugPanel("ورود دوباره", "لطفاً نام کاربری و رمز عبور را وارد کنید.", "User clicked ReLogin. Local tokens were cleared.", false, false, "RELOGIN");
+        }
+
+        public void RetryAutoLoginFromServerDebug()
+        {
+            RunSafely(RetryAutoLoginFromServerDebugAsync, "AUTO_LOGIN_RETRY_BUTTON");
+        }
+
+        private async Task RetryAutoLoginFromServerDebugAsync()
+        {
+            if (isCheckingNet)
+            {
+                SetStatus("بررسی اتصال در حال انجام است...");
+                return;
+            }
+
+            NetworkFileLogger.Auth("AUTO_LOGIN_RETRY", true, "User requested auto-login retry.", string.Empty, HasAccessToken(), HasRefreshToken());
+
+            if (!HasAccessToken() && !HasRefreshToken())
+            {
+                ShowAutoLoginFailure(AutoLoginFailureReason.NotLoggedIn, "Retry blocked because local tokens are empty.");
+                ShowLoginRequired(false);
+                return;
+            }
+
+            ShowAutoLoginProgress("در حال تلاش دوباره برای ورود خودکار...", "AUTO_LOGIN_RETRY_START", "User clicked retry button.");
+            ShowInfoMessage("در حال تلاش دوباره برای ورود خودکار...");
+            await Login_Init();
+        }
+
+        private void ShowAutoLoginProgress(string message, string stage, string technicalDetails = "")
+        {
+            if (!autoOpenServerDebugOnStartupFlow) return;
+
+            lastAuthStartupStage = string.IsNullOrEmpty(stage) ? "AUTH_PROGRESS" : stage;
+            isAutoLoginResultPending = !IsAutoLoginTerminalStage(lastAuthStartupStage);
+            string safeMessage = string.IsNullOrEmpty(message) ? autoLoginPreparingMessage : message;
+            SetStatus(safeMessage);
+            ShowServerDebugPanel(autoLoginProgressTitle, safeMessage, BuildAutoLoginProgressTechnicalDetails(lastAuthStartupStage, technicalDetails), false, false, lastAuthStartupStage);
+            NetworkFileLogger.Auth("AUTO_LOGIN_PROGRESS", true, lastAuthStartupStage + " | " + (technicalDetails ?? string.Empty), string.Empty, HasAccessToken(), HasRefreshToken());
+        }
+
+        private string BuildAutoLoginProgressTechnicalDetails(string stage, string details)
+        {
+            return
+                RtlLine("مرحله", string.IsNullOrEmpty(stage) ? "AUTH_PROGRESS" : stage) +
+                RtlLine("توضیح", string.IsNullOrEmpty(details) ? "-" : details) +
+                RtlLine("حالت سرور", serverType.ToString()) +
+                RtlLine("نوع ارتباط", ServerConfig.CurrentTransportKind.ToString()) +
+                RtlLine("آدرس سرور", ServerConfig.CurrentEndpoint.ToString()) +
+                RtlLine("وضعیت اینترنت", Application.internetReachability.ToString()) +
+                RtlLine("وضعیت سلامت", hasPing ? "Connected" : "Not Connected") +
+                RtlLine("اکسس توکن", HasAccessToken() ? "Exists" : "Empty") +
+                RtlLine("رفرش توکن", HasRefreshToken() ? "Exists" : "Empty") +
+                RtlLine("زمان کلاینت", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        }
+
+        private async void CloseServerDebugPanelAfterAutoLoginSuccessIfNeeded()
+        {
+            if (!autoCloseServerDebugOnAutoLoginSuccess) return;
+
+            float delay = Mathf.Max(0f, autoCloseServerDebugOnAutoLoginSuccessDelaySeconds);
+            if (delay > 0f) await Task.Delay(Mathf.RoundToInt(delay * 1000f));
+            if (isLogin && lastAuthStartupStage == "AUTO_LOGIN_SUCCESS") DH_Pnl_ServerDebug(false);
+        }
+
+        private void ShowAutoLoginFailure(AutoLoginFailureReason reason, string technicalDetails)
+        {
+            isAutoLoginResultPending = false;
+            lastAutoLoginFailureReason = reason == AutoLoginFailureReason.None ? AutoLoginFailureReason.Unknown : reason;
+            lastAutoLoginFailureTechnicalDetails = technicalDetails ?? string.Empty;
+
+            string message = GetAutoLoginFailureMessage(lastAutoLoginFailureReason);
+            bool showRetry = ShouldShowRetryButton(lastAutoLoginFailureReason);
+            bool showRelogin = ShouldShowReloginButton(lastAutoLoginFailureReason);
+
+            if (ShouldClearTokensForAutoLoginFailure(lastAutoLoginFailureReason))
+            {
+                SecureTokenStorage.ClearTokens();
+                isLogin = false;
+                CurrentUser = null;
+            }
+
+            if (showRelogin) DH_Pnl_Login(true);
+
+            SetStatus(message);
+            ShowServerDebugPanel(autoLoginFailureTitle, message, BuildAutoLoginTechnicalDetails(lastAutoLoginFailureReason, lastAutoLoginFailureTechnicalDetails), showRetry, showRelogin, "AUTO_LOGIN_FAILED");
+            MainMenuMessageManager.Warning(message);
+
+            NetworkFileLogger.Auth("AUTO_LOGIN_FAILED", false, lastAutoLoginFailureReason + " | " + lastAutoLoginFailureTechnicalDetails, string.Empty, HasAccessToken(), HasRefreshToken());
+        }
+
+        private void ShowServerDebugPanel(string title, string message, string technical, bool showRetry, bool showRelogin, string stage)
+        {
+            AutoBindServerDebugUi();
+
+            string safeTitle = string.IsNullOrEmpty(title) ? "گزارش سرور" : title;
+            string safeMessage = string.IsNullOrEmpty(message) ? "-" : message;
+            string safeTechnical = string.IsNullOrEmpty(technical) ? "-" : technical;
+
+            if (txt_ServerDebugTitle != null) txt_ServerDebugTitle.text = safeTitle;
+            if (txt_ServerDebugMessage != null) txt_ServerDebugMessage.text = safeMessage;
+            if (txt_ServerDebugTechnical != null) txt_ServerDebugTechnical.text = showServerDebugTechnicalDetails ? safeTechnical : string.Empty;
+
+
+            SetServerDebugActionButton(btn_ServerDebugRetry, showRetry);
+            SetServerDebugActionButton(btn_ServerDebugRelogin, showRelogin);
+            SetServerDebugCloseButtonVisible(!ShouldHideServerDebugCloseButton(stage));
+
+            if (autoOpenServerDebugOnAutoLoginFailure || stage != "AUTO_LOGIN_FAILED") DH_Pnl_ServerDebug(true);
+        }
+
+        private void SetServerDebugActionButton(Button button, bool visible)
+        {
+            if (button == null) return;
+            button.gameObject.SetActive(visible);
+            button.interactable = visible;
+        }
+
+        private void HideAuthActionButtonsInServerDebug()
+        {
+            SetServerDebugActionButton(btn_ServerDebugRetry, false);
+            SetServerDebugActionButton(btn_ServerDebugRelogin, false);
+        }
+
+        private void SetServerDebugCloseButtonVisible(bool visible)
+        {
+            if (btn_ServerDebugClose == null) return;
+            btn_ServerDebugClose.gameObject.SetActive(visible);
+            btn_ServerDebugClose.interactable = visible;
+        }
+
+        private bool ShouldHideServerDebugCloseButton(string stage)
+        {
+            if (CanCloseServerDebugForManualLogin(stage)) return false;
+            if (hideServerDebugCloseUntilAuthenticated && !isLogin) return true;
+            if (!hideServerDebugCloseDuringAutoLoginProgress) return false;
+            if (!isAutoLoginResultPending) return false;
+            if (IsAutoLoginTerminalStage(stage)) return false;
+            return true;
+        }
+
+        private bool IsServerDebugCloseBlocked()
+        {
+            if (CanCloseServerDebugForManualLogin(lastAuthStartupStage)) return false;
+            if (hideServerDebugCloseUntilAuthenticated && !isLogin) return true;
+            return hideServerDebugCloseDuringAutoLoginProgress && isAutoLoginResultPending;
+        }
+
+        private bool CanCloseServerDebugForManualLogin(string stage)
+        {
+            if (!allowServerDebugCloseWhenManualLoginRequired) return false;
+            if (string.IsNullOrEmpty(stage)) return false;
+
+            return string.Equals(stage, "NO_LOCAL_SESSION", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ShowServerDebugCloseBlockedMessage()
+        {
+            if (txt_ServerDebugMessage != null) txt_ServerDebugMessage.text = serverDebugCloseBlockedDuringAuthMessage;
+            if (txt_ServerDebugTitle != null && string.IsNullOrWhiteSpace(txt_ServerDebugTitle.text)) txt_ServerDebugTitle.text = autoLoginProgressTitle;
+        }
+
+        private bool IsAutoLoginTerminalStage(string stage)
+        {
+            if (string.IsNullOrEmpty(stage)) return false;
+            return string.Equals(stage, "AUTO_LOGIN_SUCCESS", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(stage, "AUTO_LOGIN_FAILED", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(stage, "RELOGIN", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(stage, "NO_LOCAL_SESSION", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string BuildAutoLoginTechnicalDetails(AutoLoginFailureReason reason, string details)
+        {
+            return
+                RtlLine("علت", reason.ToString()) +
+                RtlLine("جزئیات", string.IsNullOrEmpty(details) ? "-" : details) +
+                RtlLine("حالت سرور", serverType.ToString()) +
+                RtlLine("نوع ارتباط", ServerConfig.CurrentTransportKind.ToString()) +
+                RtlLine("آدرس سرور", ServerConfig.CurrentEndpoint.ToString()) +
+                RtlLine("وضعیت سلامت", hasPing ? "Connected" : "Not Connected") +
+                RtlLine("اکسس توکن", HasAccessToken() ? "Exists" : "Empty") +
+                RtlLine("رفرش توکن", HasRefreshToken() ? "Exists" : "Empty") +
+                RtlLine("زمان کلاینت", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        }
+
+        private string GetAutoLoginFailureMessage(AutoLoginFailureReason reason)
+        {
+            switch (reason)
+            {
+                case AutoLoginFailureReason.NoInternet:
+                    return noInternetAutoLoginMessage;
+                case AutoLoginFailureReason.ServerUnavailable:
+                    return serverUnavailableAutoLoginMessage;
+                case AutoLoginFailureReason.Timeout:
+                    return timeoutAutoLoginMessage;
+                case AutoLoginFailureReason.NotLoggedIn:
+                    return notLoggedInAutoLoginMessage;
+                case AutoLoginFailureReason.AccessTokenExpired:
+                case AutoLoginFailureReason.RefreshTokenExpired:
+                case AutoLoginFailureReason.RefreshTokenRevoked:
+                case AutoLoginFailureReason.InvalidToken:
+                case AutoLoginFailureReason.Unauthorized:
+                    return sessionExpiredAutoLoginMessage;
+                case AutoLoginFailureReason.UserDataFailed:
+                    return userDataFailedAutoLoginMessage;
+                default:
+                    return unknownAutoLoginMessage;
+            }
+        }
+
+        private bool ShouldShowRetryButton(AutoLoginFailureReason reason)
+        {
+            return reason == AutoLoginFailureReason.NoInternet ||
+                   reason == AutoLoginFailureReason.ServerUnavailable ||
+                   reason == AutoLoginFailureReason.Timeout ||
+                   reason == AutoLoginFailureReason.UserDataFailed ||
+                   reason == AutoLoginFailureReason.Unknown;
+        }
+
+        private bool ShouldShowReloginButton(AutoLoginFailureReason reason)
+        {
+            return reason == AutoLoginFailureReason.NotLoggedIn ||
+                   reason == AutoLoginFailureReason.AccessTokenExpired ||
+                   reason == AutoLoginFailureReason.RefreshTokenExpired ||
+                   reason == AutoLoginFailureReason.RefreshTokenRevoked ||
+                   reason == AutoLoginFailureReason.InvalidToken ||
+                   reason == AutoLoginFailureReason.Unauthorized ||
+                   reason == AutoLoginFailureReason.Unknown;
+        }
+
+        private bool ShouldClearTokensForAutoLoginFailure(AutoLoginFailureReason reason)
+        {
+            return reason == AutoLoginFailureReason.NotLoggedIn ||
+                   reason == AutoLoginFailureReason.AccessTokenExpired ||
+                   reason == AutoLoginFailureReason.RefreshTokenExpired ||
+                   reason == AutoLoginFailureReason.RefreshTokenRevoked ||
+                   reason == AutoLoginFailureReason.InvalidToken ||
+                   reason == AutoLoginFailureReason.Unauthorized;
+        }
+
+        private AutoLoginFailureReason ClassifyAutoLoginFailure(string rawError, int statusCode, bool isNetworkError)
+        {
+            string decoded = DecodeGrpcErrorMessage(rawError);
+            string error = string.IsNullOrEmpty(decoded) ? string.Empty : decoded.ToLowerInvariant();
+
+            if (Application.internetReachability == NetworkReachability.NotReachable) return AutoLoginFailureReason.NoInternet;
+
+            if (error.Contains("deadline") || error.Contains("timeout") || error.Contains("timed out")) return AutoLoginFailureReason.Timeout;
+
+            if (error.Contains("refresh_token_revoked") || error.Contains("refresh token revoked")) return AutoLoginFailureReason.RefreshTokenRevoked;
+            if (error.Contains("refresh_token_expired") || error.Contains("refresh token expired")) return AutoLoginFailureReason.RefreshTokenExpired;
+            if (error.Contains("refresh token") && error.Contains("expired")) return AutoLoginFailureReason.RefreshTokenExpired;
+
+            if (error.Contains("access token expired") ||
+                error.Contains("jwt expired") ||
+                error.Contains("jwt is expired") ||
+                error.Contains("jwt has expired") ||
+                error.Contains("token_expired") ||
+                error.Contains("token expired") ||
+                error.Contains("token is expired"))
+            {
+                return AutoLoginFailureReason.AccessTokenExpired;
+            }
+
+            if (error.Contains("invalid token") || error.Contains("invalid_token")) return AutoLoginFailureReason.InvalidToken;
+
+            if (statusCode == 401 || statusCode == 16 || error.Contains("unauth") || error.Contains("missing authorization") || error.Contains("authentication failed")) return AutoLoginFailureReason.Unauthorized;
+
+            if (statusCode == 0 || isNetworkError || error.Contains("cannot connect") || error.Contains("failed to connect") || error.Contains("connection refused") || error.Contains("name resolution") || error.Contains("dns")) return AutoLoginFailureReason.ServerUnavailable;
+
+            if (error.Contains("empty user") || error.Contains("user data") || error.Contains("invalid grpc-web response")) return AutoLoginFailureReason.UserDataFailed;
+
+            return AutoLoginFailureReason.Unknown;
+        }
+
+        private bool SetLastRefreshFailure(AutoLoginFailureReason reason, string technicalDetails)
+        {
+            lastRefreshFailureReason = reason == AutoLoginFailureReason.None ? AutoLoginFailureReason.Unknown : reason;
+            lastRefreshFailureTechnicalDetails = technicalDetails ?? string.Empty;
+            return false;
+        }
+
+        private AutoLoginFailureReason ResolveManualLoginReasonAfterRefreshFailure(
+            AutoLoginFailureReason refreshReason,
+            string technicalDetails,
+            ApiResult<GetUserDataResponseDto> originalUserDataResult
+        )
+        {
+            if (ShouldShowReloginButton(refreshReason)) return refreshReason;
+
+            string originalTechnical = originalUserDataResult != null
+                ? CombineErrorParts(originalUserDataResult.ErrorMessage, originalUserDataResult.RawBody, ReadKnownAuthErrorFromBytes(originalUserDataResult.RawBytes))
+                : string.Empty;
+
+            AutoLoginFailureReason originalReason = originalUserDataResult != null
+                ? ClassifyAutoLoginFailure(originalTechnical, originalUserDataResult.StatusCode, originalUserDataResult.IsNetworkError)
+                : AutoLoginFailureReason.Unknown;
+
+            if (ShouldShowReloginButton(originalReason)) return originalReason;
+
+            AutoLoginFailureReason technicalReason = ClassifyAutoLoginFailure(technicalDetails, originalUserDataResult != null ? originalUserDataResult.StatusCode : 0, false);
+            return ShouldShowReloginButton(technicalReason) ? technicalReason : refreshReason;
+        }
+
+        private bool ShouldRequireManualLoginAfterRefreshFailure(
+            AutoLoginFailureReason reason,
+            string technicalDetails,
+            ApiResult<GetUserDataResponseDto> originalUserDataResult
+        )
+        {
+            if (ShouldShowReloginButton(reason)) return true;
+            if (originalUserDataResult != null && IsUnauthorizedOrExpired(originalUserDataResult.StatusCode, CombineErrorParts(originalUserDataResult.ErrorMessage, originalUserDataResult.RawBody, ReadKnownAuthErrorFromBytes(originalUserDataResult.RawBytes)))) return true;
+
+            AutoLoginFailureReason technicalReason = ClassifyAutoLoginFailure(technicalDetails, originalUserDataResult != null ? originalUserDataResult.StatusCode : 0, false);
+            return ShouldShowReloginButton(technicalReason);
+        }
+
+        private void RequireManualLoginAfterAuthFailure(AutoLoginFailureReason reason, string technicalDetails)
+        {
+            AutoLoginFailureReason safeReason = ShouldShowReloginButton(reason)
+                ? reason
+                : AutoLoginFailureReason.Unauthorized;
+
+            isAutoLoginResultPending = false;
+
+            if (clearTokensWhenManualLoginRequired)
+            {
+                SecureTokenStorage.ClearTokens();
+            }
+
+            isLogin = false;
+            CurrentUser = null;
+
+            DH_Pnl_Reg(false);
+            DH_Pnl_Login(true);
+
+            ShowAutoLoginFailure(safeReason, technicalDetails);
+            ShowLoginRequired(false);
+
+            NetworkFileLogger.Auth(
+                "AUTH_MANUAL_LOGIN_REQUIRED",
+                false,
+                safeReason + " | " + (technicalDetails ?? string.Empty),
+                string.Empty,
+                HasAccessToken(),
+                HasRefreshToken()
+            );
+        }
+
         private void UpdateServerDebugText(string stage, string detail)
         {
-            if (txt_ServerDebug == null) return;
+            string technical = BuildServerDebugText(stage, detail);
 
-            txt_ServerDebug.text = BuildServerDebugText(stage, detail);
+            if (txt_ServerDebugTitle != null) txt_ServerDebugTitle.text = string.IsNullOrEmpty(stage) ? "گزارش سرور" : stage;
+            if (txt_ServerDebugMessage != null) txt_ServerDebugMessage.text = string.IsNullOrEmpty(detail) ? "-" : detail;
+            if (txt_ServerDebugTechnical != null) txt_ServerDebugTechnical.text = showServerDebugTechnicalDetails ? technical : string.Empty;
+            SetServerDebugCloseButtonVisible(!IsServerDebugCloseBlocked());
 
             if (showServerDebugPanelOnServerMessage) DH_Pnl_ServerDebug(true);
         }
@@ -1129,8 +1775,33 @@ namespace Network_A.Auth//22
         //* Shows login panel when token refresh fails.
         private void ShowLoginRequired()
         {
+            ShowLoginRequired(true);
+        }
+
+        private void ShowLoginRequired(bool showWarningMessage)
+        {
+            isAutoLoginResultPending = false;
+
+            if (clearTokensWhenManualLoginRequired)
+            {
+                SecureTokenStorage.ClearTokens();
+            }
+
+            isLogin = false;
+            CurrentUser = null;
+
+            DH_Pnl_Reg(false);
             DH_Pnl_Login(true);
-            ShowWarningMessage("ورود شما منقضی شده است. لطفاً دوباره وارد شوید.");
+
+            if (closeServerDebugWhenManualLoginRequired)
+            {
+                DH_Pnl_ServerDebug(false);
+            }
+
+            if (showWarningMessage) ShowWarningMessage("ورود شما منقضی شده است. لطفاً دوباره وارد شوید.");
+            else SetStatus("ورود شما منقضی شده است. لطفاً دوباره وارد شوید.");
+
+            NetworkFileLogger.Auth("LOGIN_REQUIRED_UI_OPENED", false, "Manual login UI opened because auth session is not usable.", string.Empty, HasAccessToken(), HasRefreshToken());
         }
 
         //* Reads TMP input safely.
@@ -1273,6 +1944,14 @@ namespace Network_A.Auth//22
                 if (upper.Contains("USERNAME_ALREADY_EXISTS")) return "USERNAME_ALREADY_EXISTS";
                 if (upper.Contains("INVALID_CREDENTIALS")) return "INVALID_CREDENTIALS";
                 if (upper.Contains("TOKEN_EXPIRED")) return "TOKEN_EXPIRED";
+                if (upper.Contains("JWT IS EXPIRED")) return "TOKEN_EXPIRED";
+                if (upper.Contains("JWT EXPIRED")) return "TOKEN_EXPIRED";
+                if (upper.Contains("JWT HAS EXPIRED")) return "TOKEN_EXPIRED";
+                if (upper.Contains("ACCESS TOKEN EXPIRED")) return "TOKEN_EXPIRED";
+                if (upper.Contains("ACCESS TOKEN IS EXPIRED")) return "TOKEN_EXPIRED";
+                if (upper.Contains("REFRESH_TOKEN_EXPIRED")) return "REFRESH_TOKEN_EXPIRED";
+                if (upper.Contains("REFRESH TOKEN EXPIRED")) return "REFRESH_TOKEN_EXPIRED";
+                if (upper.Contains("REFRESH TOKEN IS EXPIRED")) return "REFRESH_TOKEN_EXPIRED";
                 if (upper.Contains("AUTHENTICATION_FAILED")) return "AUTHENTICATION_FAILED";
             }
 
@@ -1512,6 +2191,25 @@ namespace Network_A.Auth//22
                 "\nنام: " + SafeText(profile.name) +
                 "\nکد: " + SafeText(profile.code) +
                 "\nشناسه: " + SafeText(profile.microserviceId);
+        }
+
+
+        private void NotifyLoginReady(string source)
+        {
+            string safeSource = string.IsNullOrWhiteSpace(source) ? "unknown" : source.Trim();
+            string userId = CurrentUser != null ? CurrentUser.id : string.Empty;
+
+            NetworkFileLogger.Auth(
+                "AUTH_LOGIN_READY_EVENT",
+                true,
+                "source=" + safeSource,
+                userId,
+                HasAccessToken(),
+                HasRefreshToken()
+            );
+
+            Action<AuthUserDto> handler = OnLoginReady;
+            if (handler != null) handler(CurrentUser);
         }
 
 

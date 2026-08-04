@@ -21,8 +21,14 @@ namespace Network_A.Auth
             NetworkFileLogger.Info("AUTH_REFRESH_MANAGER", "Refresh action configured=" + (_refreshAction != null));
         }
 
-        //* Runs refresh once and shares the same refresh task between concurrent 401 requests.
-        public static async Task<bool> Refresh()
+        //* Runs refresh once and keeps the existing behavior of opening login UI after failure.
+        public static Task<bool> Refresh()
+        {
+            return Refresh(true);
+        }
+
+        //* Runs refresh once and lets reconnect callers preserve the current session on temporary server failures.
+        public static async Task<bool> Refresh(bool requireLoginUiOnFailure)
         {
             Task<bool> task;
 
@@ -31,37 +37,64 @@ namespace Network_A.Auth
                 if (_isRefreshing)
                 {
                     task = _refreshTask;
-                    NetworkFileLogger.Info("AUTH_REFRESH_MANAGER", "Refresh already running. Waiting for current task.");
+                    NetworkFileLogger.Info(
+                        "AUTH_REFRESH_MANAGER",
+                        "Refresh already running. Waiting for current task. requireLoginUiOnFailure=" +
+                        requireLoginUiOnFailure
+                    );
                 }
                 else
                 {
                     if (_refreshAction == null)
                     {
                         Debug.Log("[AuthRefreshManager] Refresh action is not configured.");
-                        NetworkFileLogger.Warning("AUTH_REFRESH_MANAGER", "Refresh action is not configured.");
-                        OnRequireLoginUI?.Invoke();
+                        NetworkFileLogger.Warning(
+                            "AUTH_REFRESH_MANAGER",
+                            "Refresh action is not configured. requireLoginUiOnFailure=" +
+                            requireLoginUiOnFailure
+                        );
+
+                        if (requireLoginUiOnFailure) OnRequireLoginUI?.Invoke();
                         return false;
                     }
 
                     _isRefreshing = true;
                     _refreshTask = _refreshAction();
                     task = _refreshTask;
-                    NetworkFileLogger.Info("AUTH_REFRESH_MANAGER", "Refresh task started.");
+
+                    NetworkFileLogger.Info(
+                        "AUTH_REFRESH_MANAGER",
+                        "Refresh task started. requireLoginUiOnFailure=" +
+                        requireLoginUiOnFailure
+                    );
                 }
             }
 
             try
             {
                 bool ok = await task;
-                NetworkFileLogger.Auth("REFRESH_RESULT", ok, ok ? "refresh_success" : "refresh_failed", string.Empty, HasAccessToken(), HasRefreshToken());
-                if (!ok) OnRequireLoginUI?.Invoke();
+
+                NetworkFileLogger.Auth(
+                    "REFRESH_RESULT",
+                    ok,
+                    ok
+                        ? "refresh_success"
+                        : "refresh_failed | requireLoginUiOnFailure=" +
+                          requireLoginUiOnFailure,
+                    string.Empty,
+                    HasAccessToken(),
+                    HasRefreshToken()
+                );
+
+                if (!ok && requireLoginUiOnFailure) OnRequireLoginUI?.Invoke();
                 return ok;
             }
             catch (Exception ex)
             {
                 Debug.LogError("[AuthRefreshManager] Refresh exception: " + ex);
                 NetworkFileLogger.Exception("AUTH_REFRESH_MANAGER", ex);
-                OnRequireLoginUI?.Invoke();
+
+                if (requireLoginUiOnFailure) OnRequireLoginUI?.Invoke();
                 return false;
             }
             finally

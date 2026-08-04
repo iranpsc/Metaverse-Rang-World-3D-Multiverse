@@ -134,6 +134,12 @@ namespace Network_A.GameServer.WebSocket
             return BuildFrame(DedicatedWebSocketOpcode.Text, payload);
         }
 
+        //* این تابع یک فریم پینگ برای بررسی زنده بودن اتصال از سمت سرور می سازد.
+        public static byte[] BuildPingFrame(byte[] payload)
+        {
+            return BuildFrame(DedicatedWebSocketOpcode.Ping, payload ?? new byte[0]);
+        }
+
         //* این تابع یک فریم پانگ برای پاسخ به پینگ کلاینت می سازد.
         public static byte[] BuildPongFrame(byte[] payload)
         {
@@ -216,8 +222,8 @@ namespace Network_A.GameServer.WebSocket
         توضیح مکتوب فایل:
         این فایل کدک ساده فریم های وب سوکت است.
         پیام های کلاینت را از حالت ماسک شده می خواند و پیام های سرور را بدون ماسک می فرستد.
-        فعلاً فقط پیام متنی، پینگ، پانگ و کلوز پشتیبانی می شود.
-        فریم های چند تکه هنوز پشتیبانی نمی شوند چون برای فاز اول نیاز نداریم.
+        پیام متنی، پینگ، پانگ و کلوز پشتیبانی می شوند.
+        فریم پینگ خروجی برای کنترل زنده بودن اتصال ددیکیتد سرور اضافه شده است.
         */
     }
 }

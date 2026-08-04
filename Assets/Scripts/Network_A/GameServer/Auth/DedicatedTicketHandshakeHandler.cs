@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Network_A.GameServer;
+using Network_A.GameServer.Gameplay;
 using Network_A.GameServer.Players;
 using Network_A.GameServer.Protocol;
 using Network_A.Realtime.Protocol;
@@ -15,6 +18,7 @@ namespace Network_A.GameServer.Auth
         [SerializeField] private DedicatedWebSocketServer webSocketServer;
         [SerializeField] private DedicatedTicketVerifier ticketVerifier;
         [SerializeField] private DedicatedPlayerRegistry playerRegistry;
+        [SerializeField] private DedicatedPlayerStateStore playerStateStore;
         [SerializeField] private DedicatedServerRuntime runtime;
 
         [Header("Rules")]
@@ -22,8 +26,18 @@ namespace Network_A.GameServer.Auth
         [SerializeField] private bool ignoreNonAuthMessagesBeforeAuth = true;
         [SerializeField] private bool rejectSecondAuthTicket = true;
 
+        [Header("Reconnect Grace")]
+        [SerializeField] private bool preserveUnexpectedDisconnectForReconnect = true;
+        [SerializeField] private float reconnectGraceSeconds = 210f;
+
         [Header("Debug")]
         [SerializeField] private bool logMessageFormat = true;
+
+        private const string PlayerResumeStateMessageType = "player_resume_state";
+
+        private readonly object reconnectGraceLock = new object();
+        private readonly Dictionary<string, CancellationTokenSource> dict_reconnectGraceCtsByRoomUserKey =
+            new Dictionary<string, CancellationTokenSource>();
 
         private bool eventsSubscribed;
 
@@ -40,10 +54,11 @@ namespace Network_A.GameServer.Auth
             SubscribeEvents();
         }
 
-        //* این تابع هنگام غیرفعال شدن آبجکت، رویدادها را پاک می کند.
+        //* این تابع هنگام غیرفعال شدن آبجکت، رویدادها و تایمرهای گریس ریکانکت را پاک می کند.
         private void OnDisable()
         {
             UnsubscribeEvents();
+            CancelAllPendingReconnectGrace("handshake_handler_disabled");
         }
 
         //* این تابع رویدادهای وب سوکت را فقط یک بار وصل می کند.
@@ -95,6 +110,18 @@ namespace Network_A.GameServer.Auth
                 playerRegistry = GetComponent<DedicatedPlayerRegistry>();
                 if (playerRegistry == null) playerRegistry = GetComponentInParent<DedicatedPlayerRegistry>();
                 if (playerRegistry == null) playerRegistry = GetComponentInChildren<DedicatedPlayerRegistry>(true);
+            }
+
+            if (playerStateStore == null)
+            {
+                playerStateStore = GetComponent<DedicatedPlayerStateStore>();
+                if (playerStateStore == null) playerStateStore = GetComponentInParent<DedicatedPlayerStateStore>();
+                if (playerStateStore == null) playerStateStore = GetComponentInChildren<DedicatedPlayerStateStore>(true);
+#if UNITY_2023_1_OR_NEWER
+                if (playerStateStore == null) playerStateStore = FindFirstObjectByType<DedicatedPlayerStateStore>();
+#else
+                if (playerStateStore == null) playerStateStore = FindObjectOfType<DedicatedPlayerStateStore>();
+#endif
             }
 
             if (runtime == null)
@@ -228,6 +255,13 @@ namespace Network_A.GameServer.Auth
                 return;
             }
 
+            CancelPendingReconnectGrace(
+                session.roomId,
+                session.userId,
+                "player_reauthenticated"
+            );
+
+            await SendPlayerResumeStateIfAvailableAsync(connection, session);
             await SendAuthOkAsync(connection, result, session);
         }
 
@@ -265,6 +299,75 @@ namespace Network_A.GameServer.Auth
             }
 
             return ok;
+        }
+
+        //* این تابع قبل از auth_ok آخرین وضعیت معتبر پلیر را برای بازیابی ریکانکت ارسال می کند.
+        private async Task<bool> SendPlayerResumeStateIfAvailableAsync(
+            DedicatedWebSocketConnection connection,
+            DedicatedPlayerSession session)
+        {
+            if (connection == null || session == null) return false;
+
+            EnsureReferences();
+
+            if (playerStateStore == null)
+            {
+                Debug.LogWarning("[DedicatedTicketHandshakeHandler] Player resume skipped. DedicatedPlayerStateStore is missing.");
+                return false;
+            }
+
+            DedicatedPlayerStateRecord record =
+                playerStateStore.GetByUserIdInRoom(session.roomId, session.userId);
+
+            if (record == null || record.sequence <= 0)
+            {
+                Debug.Log("[DedicatedTicketHandshakeHandler] Player resume state not found | userId=" +
+                          session.userId + " | roomId=" + session.roomId);
+
+                return false;
+            }
+
+            bool rebound = playerStateStore.RebindConnectionForUser(
+                session,
+                "auth_ticket_verified_resume"
+            );
+
+            if (!rebound)
+            {
+                Debug.LogWarning("[DedicatedTicketHandshakeHandler] Player resume rebind failed | userId=" +
+                                 session.userId + " | roomId=" + session.roomId);
+
+                return false;
+            }
+
+            record = playerStateStore.GetByUserIdInRoom(
+                session.roomId,
+                session.userId
+            );
+
+            if (record == null) return false;
+
+            DedicatedPlayerStateBroadcastDto message =
+                DedicatedPlayerStateBroadcastDto.FromRecord(record);
+
+            message.type = PlayerResumeStateMessageType;
+
+            string envelopeJson = DedicatedRealtimeEnvelopeCodec.WrapPresencePayload(
+                PlayerResumeStateMessageType,
+                JsonUtility.ToJson(message),
+                session.roomId
+            );
+
+            await connection.SendTextAsync(envelopeJson);
+
+            Debug.Log("[DedicatedTicketHandshakeHandler] Player resume state sent before auth_ok | userId=" +
+                      session.userId + " | playerId=" + session.playerId +
+                      " | roomId=" + session.roomId +
+                      " | sequence=" + record.sequence +
+                      " | position=" + record.Position +
+                      " | route=" + RealtimeChannels.Presence + "/" + PlayerResumeStateMessageType);
+
+            return true;
         }
 
         //* این تابع بعد از وریفای و ثبت موفق، پیام auth_ok را به کلاینت ارسال می کند.
@@ -365,20 +468,362 @@ namespace Network_A.GameServer.Auth
             }
         }
 
-        //* این تابع هنگام قطع کانکشن، پلیر مربوط به آن را از رجیستری حذف می کند.
+        //* این تابع قطع عمدی را فوری حذف می کند و قطع غیرمنتظره را برای ریکانکت وارد گریس ۲۱۰ ثانیه ای می کند.
         private void HandleClientDisconnected(DedicatedWebSocketConnection connection, string reason)
         {
             if (connection == null) return;
 
             EnsureReferences();
 
-            if (playerRegistry != null)
+            if (playerRegistry == null)
             {
-                playerRegistry.RemoveByConnectionId(connection.ConnectionId, reason);
+                Debug.LogWarning(
+                    "[DedicatedTicketHandshakeHandler] Client disconnect ignored. Player registry is missing | connectionId=" +
+                    connection.ConnectionId + " | reason=" + NormalizeText(reason)
+                );
+
+                return;
             }
 
-            Debug.Log("[DedicatedTicketHandshakeHandler] Client disconnected | connectionId=" +
-                      connection.ConnectionId + " | reason=" + reason);
+            DedicatedPlayerSession session =
+                playerRegistry.GetByConnectionId(connection.ConnectionId);
+
+            if (session == null)
+            {
+                Debug.Log(
+                    "[DedicatedTicketHandshakeHandler] Client disconnect has no active registry session | connectionId=" +
+                    connection.ConnectionId + " | reason=" + NormalizeText(reason)
+                );
+
+                return;
+            }
+
+            if (!preserveUnexpectedDisconnectForReconnect ||
+                ShouldRemoveDisconnectedPlayerImmediately(reason))
+            {
+                CancelPendingReconnectGrace(
+                    session.roomId,
+                    session.userId,
+                    "immediate_disconnect_cleanup"
+                );
+
+                playerRegistry.RemoveByConnectionId(
+                    connection.ConnectionId,
+                    NormalizeText(reason)
+                );
+
+                Debug.Log(
+                    "[DedicatedTicketHandshakeHandler] Client disconnected and removed immediately | connectionId=" +
+                    connection.ConnectionId + " | userId=" + session.userId +
+                    " | roomId=" + session.roomId + " | reason=" + NormalizeText(reason)
+                );
+
+                return;
+            }
+
+            ScheduleReconnectGraceRemoval(session, reason, connection.InactiveSeconds);
+        }
+
+        //* این تابع حذف قطعی پلیر قطع شده را تا پایان گریس عقب می اندازد.
+        private void ScheduleReconnectGraceRemoval(
+            DedicatedPlayerSession session,
+            string disconnectReason,
+            float inactiveBeforeDisconnectSeconds)
+        {
+            if (session == null) return;
+
+            string roomUserKey = BuildRoomUserKey(session.roomId, session.userId);
+            if (string.IsNullOrWhiteSpace(roomUserKey)) return;
+
+            CancellationTokenSource graceCts = new CancellationTokenSource();
+            CancellationTokenSource previousCts = null;
+
+            lock (reconnectGraceLock)
+            {
+                if (dict_reconnectGraceCtsByRoomUserKey.TryGetValue(
+                        roomUserKey,
+                        out previousCts))
+                {
+                    dict_reconnectGraceCtsByRoomUserKey.Remove(roomUserKey);
+                }
+
+                dict_reconnectGraceCtsByRoomUserKey[roomUserKey] = graceCts;
+            }
+
+            CancelAndDispose(previousCts);
+
+            float contractGraceSeconds = Mathf.Max(1f, reconnectGraceSeconds);
+            float safeInactiveBeforeDisconnectSeconds = Mathf.Clamp(inactiveBeforeDisconnectSeconds, 0f, contractGraceSeconds);
+            float remainingGraceSeconds = Mathf.Max(1f, contractGraceSeconds - safeInactiveBeforeDisconnectSeconds);
+            string safeDisconnectReason = NormalizeText(disconnectReason);
+
+            Debug.Log(
+                "[DedicatedTicketHandshakeHandler] Reconnect grace started | userId=" +
+                session.userId + " | roomId=" + session.roomId +
+                " | connectionId=" + session.connectionId +
+                " | contractGraceSeconds=" + contractGraceSeconds.ToString("F1") +
+                " | inactiveBeforeDisconnectSeconds=" + safeInactiveBeforeDisconnectSeconds.ToString("F1") +
+                " | remainingGraceSeconds=" + remainingGraceSeconds.ToString("F1") +
+                " | reason=" + safeDisconnectReason
+            );
+
+            _ = RemovePlayerAfterReconnectGraceAsync(
+                roomUserKey,
+                session.connectionId,
+                session.roomId,
+                session.userId,
+                safeDisconnectReason,
+                remainingGraceSeconds,
+                contractGraceSeconds,
+                safeInactiveBeforeDisconnectSeconds,
+                graceCts
+            );
+        }
+
+        //* این تابع بعد از پایان گریس فقط همان کانکشن قدیمی را حذف می کند؛ ریکانکت جدید را دست نمی زند.
+        private async Task RemovePlayerAfterReconnectGraceAsync(
+            string roomUserKey,
+            string disconnectedConnectionId,
+            string roomId,
+            string userId,
+            string disconnectReason,
+            float remainingGraceSeconds,
+            float contractGraceSeconds,
+            float inactiveBeforeDisconnectSeconds,
+            CancellationTokenSource graceCts)
+        {
+            try
+            {
+                int delayMilliseconds = Mathf.Max(
+                    1000,
+                    Mathf.RoundToInt(remainingGraceSeconds * 1000f)
+                );
+
+                await Task.Delay(delayMilliseconds, graceCts.Token);
+
+                EnsureReferences();
+
+                if (playerRegistry == null) return;
+
+                DedicatedPlayerSession currentSession =
+                    playerRegistry.GetByConnectionId(disconnectedConnectionId);
+
+                if (currentSession == null)
+                {
+                    Debug.Log(
+                        "[DedicatedTicketHandshakeHandler] Reconnect grace expired but old connection was already rebound or removed | userId=" +
+                        NormalizeText(userId) + " | roomId=" + NormalizeText(roomId) +
+                        " | oldConnectionId=" + NormalizeText(disconnectedConnectionId)
+                    );
+
+                    return;
+                }
+
+                if (!string.Equals(
+                        NormalizeText(currentSession.userId),
+                        NormalizeText(userId),
+                        StringComparison.Ordinal) ||
+                    !string.Equals(
+                        NormalizeText(currentSession.roomId),
+                        NormalizeText(roomId),
+                        StringComparison.Ordinal))
+                {
+                    Debug.LogWarning(
+                        "[DedicatedTicketHandshakeHandler] Reconnect grace cleanup skipped because registry ownership changed | oldConnectionId=" +
+                        NormalizeText(disconnectedConnectionId) +
+                        " | expectedUserId=" + NormalizeText(userId) +
+                        " | currentUserId=" + NormalizeText(currentSession.userId)
+                    );
+
+                    return;
+                }
+
+                string finalReason =
+                    "reconnect_grace_expired:" + NormalizeText(disconnectReason);
+
+                bool removed = playerRegistry.RemoveByConnectionId(
+                    disconnectedConnectionId,
+                    finalReason
+                );
+
+                Debug.Log(
+                    "[DedicatedTicketHandshakeHandler] Reconnect grace expired | userId=" +
+                    NormalizeText(userId) + " | roomId=" + NormalizeText(roomId) +
+                    " | connectionId=" + NormalizeText(disconnectedConnectionId) +
+                    " | removed=" + removed +
+                    " | contractGraceSeconds=" + contractGraceSeconds.ToString("F1") +
+                    " | inactiveBeforeDisconnectSeconds=" + inactiveBeforeDisconnectSeconds.ToString("F1") +
+                    " | remainingGraceSeconds=" + remainingGraceSeconds.ToString("F1") +
+                    " | reason=" + finalReason
+                );
+            }
+            catch (OperationCanceledException)
+            {
+                Debug.Log(
+                    "[DedicatedTicketHandshakeHandler] Reconnect grace cancelled | userId=" +
+                    NormalizeText(userId) + " | roomId=" + NormalizeText(roomId) +
+                    " | oldConnectionId=" + NormalizeText(disconnectedConnectionId)
+                );
+            }
+            catch (Exception error)
+            {
+                Debug.LogError(
+                    "[DedicatedTicketHandshakeHandler] Reconnect grace cleanup failed | userId=" +
+                    NormalizeText(userId) + " | roomId=" + NormalizeText(roomId) +
+                    " | oldConnectionId=" + NormalizeText(disconnectedConnectionId) +
+                    " | error=" + error.Message
+                );
+            }
+            finally
+            {
+                RemoveReconnectGraceToken(roomUserKey, graceCts);
+            }
+        }
+
+        //* این تابع تایمر گریس همان یوزر و روم را بعد از ریکانکت یا خروج قطعی لغو می کند.
+        private void CancelPendingReconnectGrace(
+            string roomId,
+            string userId,
+            string reason)
+        {
+            string roomUserKey = BuildRoomUserKey(roomId, userId);
+            if (string.IsNullOrWhiteSpace(roomUserKey)) return;
+
+            CancellationTokenSource graceCts = null;
+
+            lock (reconnectGraceLock)
+            {
+                if (dict_reconnectGraceCtsByRoomUserKey.TryGetValue(
+                        roomUserKey,
+                        out graceCts))
+                {
+                    dict_reconnectGraceCtsByRoomUserKey.Remove(roomUserKey);
+                }
+            }
+
+            if (graceCts == null) return;
+
+            CancelAndDispose(graceCts);
+
+            Debug.Log(
+                "[DedicatedTicketHandshakeHandler] Pending reconnect grace cancelled | userId=" +
+                NormalizeText(userId) + " | roomId=" + NormalizeText(roomId) +
+                " | reason=" + NormalizeText(reason)
+            );
+        }
+
+        //* این تابع همه تایمرهای گریس را هنگام خاموش شدن هندلر لغو می کند.
+        private void CancelAllPendingReconnectGrace(string reason)
+        {
+            List<CancellationTokenSource> graceTokens;
+
+            lock (reconnectGraceLock)
+            {
+                graceTokens = new List<CancellationTokenSource>(
+                    dict_reconnectGraceCtsByRoomUserKey.Values
+                );
+
+                dict_reconnectGraceCtsByRoomUserKey.Clear();
+            }
+
+            for (int i = 0; i < graceTokens.Count; i++)
+            {
+                CancelAndDispose(graceTokens[i]);
+            }
+
+            if (graceTokens.Count > 0)
+            {
+                Debug.Log(
+                    "[DedicatedTicketHandshakeHandler] All reconnect grace timers cancelled | count=" +
+                    graceTokens.Count + " | reason=" + NormalizeText(reason)
+                );
+            }
+        }
+
+        //* این تابع توکن پایان یافته را فقط اگر هنوز همان نمونه ثبت شده باشد از دیکشنری حذف می کند.
+        private void RemoveReconnectGraceToken(
+            string roomUserKey,
+            CancellationTokenSource expectedCts)
+        {
+            lock (reconnectGraceLock)
+            {
+                if (!dict_reconnectGraceCtsByRoomUserKey.TryGetValue(
+                        roomUserKey,
+                        out CancellationTokenSource currentCts))
+                {
+                    return;
+                }
+
+                if (!ReferenceEquals(currentCts, expectedCts)) return;
+
+                dict_reconnectGraceCtsByRoomUserKey.Remove(roomUserKey);
+            }
+
+            expectedCts?.Dispose();
+        }
+
+        //* این تابع دلایل خروج عمدی یا بسته شدن سرور را از قطع غیرمنتظره جدا می کند.
+        private static bool ShouldRemoveDisconnectedPlayerImmediately(string reason)
+        {
+            string value = NormalizeText(reason).ToLowerInvariant();
+
+            if (value.Contains("client_closed")) return true;
+            if (value.Contains("manual")) return true;
+            if (value.Contains("user_exit")) return true;
+            if (value.Contains("leave_room")) return true;
+            if (value.Contains("room_left")) return true;
+            if (value.Contains("server_stopped")) return true;
+            if (value.Contains("shutdown")) return true;
+            if (value.Contains("auth_failed")) return true;
+            if (value.Contains("kicked")) return true;
+            if (value.Contains("duplicate_user_replaced")) return true;
+
+            return false;
+        }
+
+        //* این تابع کلید پایدار گریس را از روم و یوزر می سازد.
+        private static string BuildRoomUserKey(string roomId, string userId)
+        {
+            string safeRoomId = NormalizeText(roomId);
+            string safeUserId = NormalizeText(userId);
+
+            if (string.IsNullOrWhiteSpace(safeRoomId) ||
+                string.IsNullOrWhiteSpace(safeUserId))
+            {
+                return string.Empty;
+            }
+
+            return safeRoomId + "::" + safeUserId;
+        }
+
+        //* این تابع متن های ورودی را برای مقایسه و لاگ امن می کند.
+        private static string NormalizeText(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? string.Empty
+                : value.Trim();
+        }
+
+        //* این تابع توکن گریس را بدون پرتاب خطا لغو و آزاد می کند.
+        private static void CancelAndDispose(CancellationTokenSource cts)
+        {
+            if (cts == null) return;
+
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                cts.Dispose();
+            }
+            catch
+            {
+            }
         }
 
         /*
