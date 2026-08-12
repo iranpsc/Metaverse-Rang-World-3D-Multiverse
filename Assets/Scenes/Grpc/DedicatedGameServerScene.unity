@@ -119,6 +119,99 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &286393701
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 286393702}
+  - component: {fileID: 286393706}
+  - component: {fileID: 286393705}
+  - component: {fileID: 286393704}
+  - component: {fileID: 286393703}
+  m_Layer: 0
+  m_Name: Voice_Dedicated_Authority_Runtime
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &286393702
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 286393701}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1415647059}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &286393703
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 286393701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3bd71c87c8874e1f8b03f05b0e1b1f67, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Voice.Dedicated.VoiceDedicatedAuthorityManualBinder
+  dedicatedRuntime: {fileID: 1415647056}
+  playerRegistry: {fileID: 1415647049}
+  playerStateStore: {fileID: 1415647048}
+  controlClient: {fileID: 1415647055}
+  positionProvider: {fileID: 286393706}
+  deltaSender: {fileID: 286393705}
+  authorityMonitor: {fileID: 286393704}
+  deltaTransportEnabled: 1
+  maximumAcceptedStateAgeMs: 15000
+  stabilityDelayMs: 50
+--- !u!114 &286393704
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 286393701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f28639a7cf1e9f429d1b2c360dd0d2e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Voice.Dedicated.VoiceDedicatedAuthorityMonitor
+--- !u!114 &286393705
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 286393701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 27300a9bdcc42aa4fb5f1cda2c5fa71a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Voice.Dedicated.VoiceDedicatedSessionDeltaSender
+--- !u!114 &286393706
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 286393701}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ba382a8e14a041bc913b1bd120a4cf7e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Network_A.Voice.Dedicated.VoiceDedicatedAuthoritativePositionProvider
 --- !u!1 &1099454310
 GameObject:
   m_ObjectHideFlags: 0
@@ -441,10 +534,13 @@ MonoBehaviour:
   webSocketServer: {fileID: 1415647053}
   ticketVerifier: {fileID: 1415647052}
   playerRegistry: {fileID: 1415647049}
+  playerStateStore: {fileID: 0}
   runtime: {fileID: 0}
   closeConnectionOnAuthFailed: 1
   ignoreNonAuthMessagesBeforeAuth: 1
   rejectSecondAuthTicket: 1
+  preserveUnexpectedDisconnectForReconnect: 1
+  reconnectGraceSeconds: 210
   logMessageFormat: 1
 --- !u!114 &1415647052
 MonoBehaviour:
@@ -480,6 +576,9 @@ MonoBehaviour:
   autoStartOnRuntimeStarted: 1
   echoTestMessages: 0
   maxConnections: 20
+  enableConnectionLivenessCheck: 1
+  connectionPingIntervalSeconds: 5
+  connectionLivenessTimeoutSeconds: 15
   logTextMessages: 1
   logFullTextMessages: 0
 --- !u!114 &1415647054
@@ -606,7 +705,8 @@ Transform:
   m_LocalPosition: {x: 881.63324, y: 558.67255, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 286393702}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2036478091 stripped

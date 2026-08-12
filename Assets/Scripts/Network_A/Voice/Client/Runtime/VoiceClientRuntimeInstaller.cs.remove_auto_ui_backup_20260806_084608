@@ -1,0 +1,849 @@
+using System;
+using System.Collections;
+using System.Threading;
+using System.Threading.Tasks;
+using Network_A.Voice.Client.Routing;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+namespace Network_A.Voice.Client.Runtime
+{
+    public static class VoiceClientRuntimeInstaller
+    {
+        private const string RootName = "Voice_Client_Runtime_Root";
+        private static int lastProcessedSceneHandle = int.MinValue;
+
+        //* این تابع پیش از بارگذاری نخستین صحنه، دریافت رویداد بارگذاری صحنه‌ها را به‌صورت یکتا آماده می‌کند.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void InitializeSceneHandling()
+        {
+            lastProcessedSceneHandle = int.MinValue;
+            SceneManager.sceneLoaded -= HandleSceneLoaded;
+            SceneManager.sceneLoaded += HandleSceneLoaded;
+
+            Debug.Log(
+                "VOICE_CLIENT_INSTALLER_INITIALIZED" +
+                " | batchMode=" + Application.isBatchMode);
+        }
+
+        //* این تابع پس از نخستین صحنه، نصب کلاینت صوت را با همان مسیر مشترک بررسی می‌کند.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void InstallAfterSceneLoad()
+        {
+            Scene scene = SceneManager.GetActiveScene();
+
+            Debug.Log(
+                "VOICE_CLIENT_SCENE_EVENT" +
+                " | source=after_scene_load" +
+                " | scene=" + scene.name);
+
+            ApplyRuntimeForScene(scene);
+        }
+
+        //* این تابع پس از هر تغییر صحنه، نصب یا پاک‌سازی کلاینت صوت را برای همان صحنه اجرا می‌کند.
+        private static void HandleSceneLoaded(Scene scene, LoadSceneMode loadMode)
+        {
+            Debug.Log(
+                "VOICE_CLIENT_SCENE_EVENT" +
+                " | source=scene_loaded" +
+                " | scene=" + scene.name +
+                " | loadMode=" + loadMode);
+
+            ApplyRuntimeForScene(scene);
+        }
+
+        //* این تابع کلاینت صوت را فقط برای مسیر صوت یا فعال‌سازی صریح آزمایشی می‌سازد و هنگام بازگشت مسیر صوت به لابی آن را آزاد می‌کند.
+        private static void ApplyRuntimeForScene(Scene scene)
+        {
+            if (Application.isBatchMode)
+            {
+                Debug.Log("VOICE_CLIENT_RUNTIME_SKIPPED | reason=batch_mode");
+                return;
+            }
+
+            if (!scene.IsValid())
+            {
+                Debug.LogWarning("VOICE_CLIENT_RUNTIME_SKIPPED | reason=invalid_scene");
+                return;
+            }
+
+            if (scene.handle == lastProcessedSceneHandle)
+            {
+                Debug.Log(
+                    "VOICE_CLIENT_RUNTIME_SKIPPED" +
+                    " | reason=scene_already_processed" +
+                    " | scene=" + scene.name);
+                return;
+            }
+
+            lastProcessedSceneHandle = scene.handle;
+
+            bool explicitlyEnabled = IsEnabled();
+
+            bool selectedVoiceScene =
+                VoiceLobbyRouteSelection.IsVoiceModeSelected &&
+                string.Equals(
+                    scene.name,
+                    VoiceLobbyRouteSelection.VoiceGameplaySceneName,
+                    StringComparison.Ordinal);
+
+            GameObject root = GameObject.Find(RootName);
+
+            Debug.Log(
+                "VOICE_CLIENT_RUNTIME_CHECK" +
+                " | scene=" + scene.name +
+                " | explicitEnabled=" + explicitlyEnabled +
+                " | selectedVoiceScene=" + selectedVoiceScene +
+                " | rootExists=" + (root != null));
+
+            if (!explicitlyEnabled && !selectedVoiceScene)
+            {
+                if (
+                    root != null &&
+                    string.Equals(
+                        scene.name,
+                        VoiceLobbyRouteSelection.LobbySceneName,
+                        StringComparison.Ordinal)
+                )
+                {
+                    _ = StopRuntimeForLobbyAsync(root, scene.name);
+                    return;
+                }
+
+                Debug.Log(
+                    "VOICE_CLIENT_RUNTIME_SKIPPED" +
+                    " | reason=voice_route_not_selected" +
+                    " | scene=" + scene.name);
+                return;
+            }
+
+            bool rootCreated = root == null;
+
+            if (rootCreated)
+            {
+                root = new GameObject(RootName);
+            }
+
+            UnityEngine.Object.DontDestroyOnLoad(root);
+
+            VoiceClientRuntime runtime = root.GetComponent<VoiceClientRuntime>();
+            bool runtimeCreated = runtime == null;
+
+            if (runtimeCreated)
+            {
+                runtime = root.AddComponent<VoiceClientRuntime>();
+            }
+
+            runtime.Initialize();
+
+            VoiceClientAutoConnector connector = root.GetComponent<VoiceClientAutoConnector>();
+            bool connectorCreated = connector == null;
+
+            if (connectorCreated)
+            {
+                connector = root.AddComponent<VoiceClientAutoConnector>();
+            }
+
+            connector.Initialize(runtime);
+
+            VoiceClientUserConsentGate consentGate = root.GetComponent<VoiceClientUserConsentGate>();
+            bool consentGateCreated = consentGate == null;
+
+            if (consentGateCreated)
+            {
+                consentGate = root.AddComponent<VoiceClientUserConsentGate>();
+            }
+
+            consentGate.Initialize(runtime);
+
+            Debug.Log(
+                "VOICE_CLIENT_RUNTIME_CREATED" +
+                " | scene=" + scene.name +
+                " | rootCreated=" + rootCreated +
+                " | runtimeCreated=" + runtimeCreated +
+                " | connectorCreated=" + connectorCreated +
+                " | consentGateCreated=" + consentGateCreated);
+
+            if (ReadFlag("METAVERSE_VOICE_LIVE_TEST_ENABLED", "voiceTest=1"))
+            {
+                VoiceClientLiveTestController liveTest = root.GetComponent<VoiceClientLiveTestController>();
+
+                if (liveTest == null)
+                {
+                    liveTest = root.AddComponent<VoiceClientLiveTestController>();
+                }
+
+                liveTest.Initialize(
+                    runtime,
+                    ReadFlag("METAVERSE_VOICE_LIVE_TEST_AUTO_MIC", "voiceAutoMic=1"),
+                    ReadFlag("METAVERSE_VOICE_LIVE_TEST_RECORDING_CONSENT", "voiceRecord=1"));
+            }
+
+            Debug.Log(
+                "VOICE_CLIENT_ROUTE_RUNTIME=READY" +
+                " | scene=" + scene.name +
+                " | source=" + (selectedVoiceScene ? "lobby_voice_route" : "explicit_test_flag"));
+        }
+
+        //* این تابع هنگام بازگشت عمدی مسیر صوت به لابی ابتدا خروج پروتکلی را کامل و سپس ریشه Runtime را نابود می‌کند.
+        private static async Task StopRuntimeForLobbyAsync(GameObject root, string sceneName)
+        {
+            bool disconnected = true;
+            VoiceClientRuntime runtime = root != null ? root.GetComponent<VoiceClientRuntime>() : null;
+
+            try
+            {
+                if (runtime != null)
+                {
+                    disconnected = await runtime.DisconnectGracefullyAsync(
+                        "voice_route_returned_to_lobby",
+                        2500,
+                        CancellationToken.None);
+                }
+            }
+            catch (Exception exception)
+            {
+                disconnected = false;
+
+                Debug.LogWarning(
+                    "VOICE_CLIENT_ROUTE_DISCONNECT=FAIL" +
+                    " | scene=" + sceneName +
+                    " | error=" + exception.Message);
+            }
+
+            Debug.Log(
+                "VOICE_CLIENT_ROUTE_DISCONNECT=" + (disconnected ? "PASS" : "FAIL") +
+                " | scene=" + sceneName);
+
+            if (root != null)
+            {
+                UnityEngine.Object.Destroy(root);
+            }
+
+            Debug.Log("VOICE_CLIENT_ROUTE_RUNTIME=STOPPED | scene=" + sceneName);
+        }
+
+        //* این تابع فعال‌سازی صریح آزمایشی کلاینت صوت را از محیط اجرای همان پردازش می‌خواند.
+        private static bool IsEnabled()
+        {
+            string value = Environment.GetEnvironmentVariable("METAVERSE_VOICE_CLIENT_ENABLED");
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return Application.absoluteURL.IndexOf("voice=1", StringComparison.OrdinalIgnoreCase) >= 0;
+#else
+            return
+                string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+#endif
+        }
+
+        //* این تابع پرچم‌های اختیاری آزمون زنده را از محیط اجرا یا نشانی وب می‌خواند.
+        private static bool ReadFlag(string environmentName, string webGlQuery)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return Application.absoluteURL.IndexOf(webGlQuery, StringComparison.OrdinalIgnoreCase) >= 0;
+#else
+            string value = Environment.GetEnvironmentVariable(environmentName);
+
+            return
+                string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+#endif
+        }
+    }
+
+    internal sealed class VoiceClientAutoConnector : MonoBehaviour
+    {
+        private VoiceClientRuntime runtime;
+        private bool attempted;
+        private float nextAttemptAt;
+        private string lastWaitReason;
+
+        //* این تابع نمونه کلاینت صوت را برای شروع خودکار اتصال دریافت می‌کند.
+        public void Initialize(VoiceClientRuntime value)
+        {
+            runtime = value;
+            attempted = false;
+            nextAttemptAt = 0f;
+            lastWaitReason = null;
+
+            Debug.Log(
+                "VOICE_CLIENT_CONNECTOR_INITIALIZED" +
+                " | runtimeAssigned=" + (runtime != null));
+        }
+
+        //* این تابع پس از آماده‌شدن هویت سرور اختصاصی، اتصال صوت را با فاصله امن میان تلاش‌های ناموفق آغاز می‌کند.
+        private async void Update()
+        {
+            if (attempted) return;
+
+            if (runtime == null)
+            {
+                LogWaitReason("runtime_missing");
+                return;
+            }
+
+            if (!MetaverseNetworkClient.isReady)
+            {
+                LogWaitReason("dedicated_not_ready");
+                return;
+            }
+
+            if (Time.realtimeSinceStartup < nextAttemptAt)
+            {
+                LogWaitReason("retry_delay");
+                return;
+            }
+
+            lastWaitReason = null;
+            attempted = true;
+
+            Debug.Log(
+                "VOICE_CLIENT_CONNECT_ATTEMPT" +
+                " | scene=" + SceneManager.GetActiveScene().name);
+
+            bool connected;
+
+            try
+            {
+                connected = await runtime.ConnectAsync(CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    "VOICE_CLIENT_ROUTE_CONNECT=FAIL" +
+                    " | reason=exception" +
+                    " | exception=" + exception);
+
+                nextAttemptAt = Time.realtimeSinceStartup + 3f;
+                attempted = false;
+                return;
+            }
+
+            Debug.Log(
+                "VOICE_CLIENT_ROUTE_CONNECT=" + (connected ? "PASS" : "FAIL") +
+                " | scene=" + SceneManager.GetActiveScene().name +
+                (connected ? string.Empty : " | retryInSeconds=3"));
+
+            if (connected) return;
+
+            nextAttemptAt = Time.realtimeSinceStartup + 3f;
+            attempted = false;
+        }
+
+        //* این تابع علت انتظار اتصال را فقط هنگام تغییر وضعیت در لاگ عمومی یونیتی ثبت می‌کند.
+        private void LogWaitReason(string reason)
+        {
+            if (string.Equals(lastWaitReason, reason, StringComparison.Ordinal)) return;
+
+            lastWaitReason = reason;
+            Debug.Log("VOICE_CLIENT_CONNECT_WAIT | reason=" + reason);
+        }
+    }
+
+    internal sealed class VoiceClientUserConsentGate : MonoBehaviour
+    {
+        private const string CanvasName = "Voice_User_Consent_Canvas";
+        private const string PanelName = "Pnl_Voice_User_Consent";
+        private const int CanvasSortingOrder = 5000;
+
+        private VoiceClientRuntime runtime;
+        private GameObject canvasObject;
+        private Text statusText;
+        private Text microphoneButtonText;
+        private Text recordingButtonText;
+        private Text speakerButtonText;
+        private Text muteAllButtonText;
+        private Button microphoneButton;
+        private Button recordingButton;
+        private Button speakerButton;
+        private Button muteAllButton;
+
+        private bool initialized;
+        private bool microphoneWanted;
+        private bool microphonePermissionGranted;
+        private bool microphonePermissionRequestRunning;
+        private bool recordingConsentWanted;
+        private bool speakerOff;
+        private bool muteAllIncoming;
+        private int lastConsentAppliedSessionCount = -1;
+
+        //* این تابع پنل رضایت کاربر را به Runtime صوت وصل و فقط یک‌بار رابط کاربری زمان اجرا را ایجاد می‌کند.
+        public void Initialize(VoiceClientRuntime value)
+        {
+            runtime = value;
+
+            if (initialized)
+            {
+                UpdateUi();
+                return;
+            }
+
+            initialized = true;
+            CreateUi();
+            UpdateUi();
+
+            Debug.Log(
+                "VOICE_V6_USER_CONSENT_GATE=READY" +
+                " | runtimeAssigned=" + (runtime != null));
+        }
+
+        //* این تابع رضایت ضبط را برای نشست‌های تازه‌ای که پس از انتخاب کاربر ایجاد می‌شوند دوباره اعمال می‌کند.
+        private void Update()
+        {
+            if (runtime == null)
+            {
+                UpdateUi();
+                return;
+            }
+
+            if (
+                runtime.IsAuthenticated &&
+                recordingConsentWanted &&
+                runtime.ActiveSessionCount > 0 &&
+                runtime.ActiveSessionCount != lastConsentAppliedSessionCount
+            )
+            {
+                runtime.SetRecordingConsentForAll(true);
+                lastConsentAppliedSessionCount = runtime.ActiveSessionCount;
+
+                Debug.Log(
+                    "VOICE_V6_RECORDING_CONSENT_USER_APPLIED=PASS" +
+                    " | sessionCount=" + runtime.ActiveSessionCount);
+            }
+
+            UpdateUi();
+        }
+
+        //* این تابع یک پنل ساده و مستقل برای کنترل میکروفن، رضایت ضبط، بلندگو و قطع همه صداها می‌سازد.
+        private void CreateUi()
+        {
+            canvasObject = new GameObject(CanvasName);
+            canvasObject.transform.SetParent(transform, false);
+
+            Canvas canvas = canvasObject.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = CanvasSortingOrder;
+
+            CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.matchWidthOrHeight = 0.5f;
+
+            canvasObject.AddComponent<GraphicRaycaster>();
+
+            GameObject panel = new GameObject(PanelName, typeof(RectTransform), typeof(Image));
+            panel.transform.SetParent(canvasObject.transform, false);
+
+            RectTransform panelRect = panel.GetComponent<RectTransform>();
+            panelRect.anchorMin = new Vector2(1f, 1f);
+            panelRect.anchorMax = new Vector2(1f, 1f);
+            panelRect.pivot = new Vector2(1f, 1f);
+            panelRect.anchoredPosition = new Vector2(-32f, -32f);
+            panelRect.sizeDelta = new Vector2(470f, 300f);
+
+            Image panelImage = panel.GetComponent<Image>();
+            panelImage.color = new Color(0f, 0f, 0f, 0.74f);
+
+            statusText = CreateText(
+                panel.transform,
+                "Txt_Voice_Status",
+                new Vector2(0f, 1f),
+                new Vector2(1f, 1f),
+                new Vector2(0.5f, 1f),
+                new Vector2(0f, -16f),
+                new Vector2(-28f, 104f),
+                18,
+                TextAnchor.UpperRight);
+
+            microphoneButton = CreateButton(
+                panel.transform,
+                "Btn_Voice_Microphone",
+                new Vector2(0f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0f, 174f),
+                new Vector2(-28f, 44f),
+                out microphoneButtonText);
+            microphoneButton.onClick.AddListener(HandleMicrophoneButtonClicked);
+
+            recordingButton = CreateButton(
+                panel.transform,
+                "Btn_Voice_Recording_Consent",
+                new Vector2(0f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0f, 124f),
+                new Vector2(-28f, 44f),
+                out recordingButtonText);
+            recordingButton.onClick.AddListener(HandleRecordingButtonClicked);
+
+            speakerButton = CreateButton(
+                panel.transform,
+                "Btn_Voice_Speaker",
+                new Vector2(0f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(-7f, 72f),
+                new Vector2(-28f, 42f),
+                out speakerButtonText);
+            speakerButton.onClick.AddListener(HandleSpeakerButtonClicked);
+
+            muteAllButton = CreateButton(
+                panel.transform,
+                "Btn_Voice_Mute_All",
+                new Vector2(0.5f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(7f, 72f),
+                new Vector2(-28f, 42f),
+                out muteAllButtonText);
+            muteAllButton.onClick.AddListener(HandleMuteAllButtonClicked);
+        }
+
+        //* این تابع متن‌های ساده پنل را با تنظیمات قابل خواندن برای رابط کاربری می‌سازد.
+        private Text CreateText(
+            Transform parent,
+            string objectName,
+            Vector2 anchorMin,
+            Vector2 anchorMax,
+            Vector2 pivot,
+            Vector2 anchoredPosition,
+            Vector2 sizeDelta,
+            int fontSize,
+            TextAnchor alignment)
+        {
+            GameObject textObject = new GameObject(objectName, typeof(RectTransform), typeof(Text));
+            textObject.transform.SetParent(parent, false);
+
+            RectTransform rect = textObject.GetComponent<RectTransform>();
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = pivot;
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = sizeDelta;
+
+            Text text = textObject.GetComponent<Text>();
+            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            text.fontSize = fontSize;
+            text.alignment = alignment;
+            text.color = Color.white;
+            text.raycastTarget = false;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+
+            return text;
+        }
+
+        //* این تابع یک دکمه ساده با متن داخلی ایجاد می‌کند تا وابستگی به Prefab یا Inspector نداشته باشیم.
+        private Button CreateButton(
+            Transform parent,
+            string objectName,
+            Vector2 anchorMin,
+            Vector2 anchorMax,
+            Vector2 pivot,
+            Vector2 anchoredPosition,
+            Vector2 sizeDelta,
+            out Text label)
+        {
+            GameObject buttonObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
+            buttonObject.transform.SetParent(parent, false);
+
+            RectTransform rect = buttonObject.GetComponent<RectTransform>();
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = pivot;
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = sizeDelta;
+
+            Image image = buttonObject.GetComponent<Image>();
+            image.color = new Color(0.04f, 0.55f, 0.72f, 0.96f);
+
+            Button button = buttonObject.GetComponent<Button>();
+            button.targetGraphic = image;
+
+            label = CreateText(
+                buttonObject.transform,
+                objectName + "_Text",
+                Vector2.zero,
+                Vector2.one,
+                new Vector2(0.5f, 0.5f),
+                Vector2.zero,
+                Vector2.zero,
+                16,
+                TextAnchor.MiddleCenter);
+
+            return button;
+        }
+
+        //* این تابع فقط با اقدام مستقیم کاربر اجازه میکروفن را درخواست و سپس میکروفن را روشن می‌کند.
+        private void HandleMicrophoneButtonClicked()
+        {
+            if (runtime == null || !runtime.IsAuthenticated)
+            {
+                Debug.LogWarning("VOICE_V6_MIC_USER_ACTION=FAIL | reason=voice_not_authenticated");
+                return;
+            }
+
+            if (!runtime.IsMicrophoneMuted)
+            {
+                microphoneWanted = false;
+                runtime.SetMicrophoneMuted(true);
+
+                Debug.Log("VOICE_V6_MIC_USER_DISABLED=PASS");
+
+                UpdateUi();
+                return;
+            }
+
+            if (microphonePermissionRequestRunning) return;
+
+            microphoneWanted = true;
+
+            StartCoroutine(RequestMicrophonePermissionAndEnable());
+            UpdateUi();
+        }
+
+        //* این تابع درخواست اجازه میکروفن را از سیستم‌عامل یا مرورگر می‌گیرد و فقط در صورت اجازه کاربر Capture را فعال می‌کند.
+        private IEnumerator RequestMicrophonePermissionAndEnable()
+        {
+            microphonePermissionRequestRunning = true;
+
+            Debug.Log("VOICE_V6_MIC_PERMISSION_REQUEST=START");
+
+            AsyncOperation request = Application.RequestUserAuthorization(UserAuthorization.Microphone);
+            yield return request;
+
+            microphonePermissionGranted = Application.HasUserAuthorization(UserAuthorization.Microphone);
+            microphonePermissionRequestRunning = false;
+
+            if (!microphonePermissionGranted)
+            {
+                microphoneWanted = false;
+                runtime.SetMicrophoneMuted(true);
+
+                Debug.LogWarning("VOICE_V6_MIC_PERMISSION=FAIL | reason=user_denied_or_platform_denied");
+
+                UpdateUi();
+                yield break;
+            }
+
+            runtime.SetMicrophoneMuted(false);
+
+            Debug.Log("VOICE_V6_MIC_PERMISSION=PASS");
+            Debug.Log("VOICE_V6_MIC_USER_ENABLED=PASS");
+
+            UpdateUi();
+        }
+
+        //* این تابع رضایت ضبط را فقط با انتخاب مستقیم کاربر تغییر می‌دهد و به نشست‌های فعال ارسال می‌کند.
+        private void HandleRecordingButtonClicked()
+        {
+            if (runtime == null || !runtime.IsAuthenticated)
+            {
+                Debug.LogWarning("VOICE_V6_RECORDING_CONSENT_USER_ACTION=FAIL | reason=voice_not_authenticated");
+                return;
+            }
+
+            recordingConsentWanted = !recordingConsentWanted;
+            lastConsentAppliedSessionCount = -1;
+
+            runtime.SetRecordingConsentForAll(recordingConsentWanted);
+
+            Debug.Log(
+                "VOICE_V6_RECORDING_CONSENT_USER_SELECTED=PASS" +
+                " | consented=" + recordingConsentWanted +
+                " | sessionCount=" + runtime.ActiveSessionCount);
+
+            UpdateUi();
+        }
+
+        //* این تابع خاموشی بلندگو را هم در پخش محلی و هم در مسیر سرور اعمال می‌کند.
+        private void HandleSpeakerButtonClicked()
+        {
+            if (runtime == null || !runtime.IsAuthenticated) return;
+
+            speakerOff = !speakerOff;
+            runtime.SetSpeakerOff(speakerOff);
+
+            Debug.Log(
+                "VOICE_V6_SPEAKER_USER_SELECTED=PASS" +
+                " | speakerOff=" + speakerOff);
+
+            UpdateUi();
+        }
+
+        //* این تابع دریافت همه صداهای ورودی را با انتخاب مستقیم کاربر قطع یا وصل می‌کند.
+        private void HandleMuteAllButtonClicked()
+        {
+            if (runtime == null || !runtime.IsAuthenticated) return;
+
+            muteAllIncoming = !muteAllIncoming;
+            runtime.SetMuteAllIncoming(muteAllIncoming);
+
+            Debug.Log(
+                "VOICE_V6_MUTE_ALL_USER_SELECTED=PASS" +
+                " | muteAll=" + muteAllIncoming);
+
+            UpdateUi();
+        }
+
+        //* این تابع نوشته‌ها و فعال بودن دکمه‌ها را بر اساس وضعیت واقعی Runtime به‌روزرسانی می‌کند.
+        private void UpdateUi()
+        {
+            bool authenticated = runtime != null && runtime.IsAuthenticated;
+            int sessionCount = runtime != null ? runtime.ActiveSessionCount : 0;
+            bool micMuted = runtime == null || runtime.IsMicrophoneMuted;
+
+            if (statusText != null)
+            {
+                statusText.text =
+                    "وضعیت صدا: " + (authenticated ? "وصل" : "در انتظار اتصال") + "\n" +
+                    "جلسه فعال: " + sessionCount + "\n" +
+                    "میکروفن: " + (micMuted ? "خاموش" : "روشن") + "\n" +
+                    "رضایت ضبط: " + (recordingConsentWanted ? "داده شده" : "داده نشده") + "\n" +
+                    "ضبط فقط پس از رضایت کاربر فعال می‌شود.";
+            }
+
+            if (microphoneButtonText != null)
+            {
+                if (microphonePermissionRequestRunning)
+                {
+                    microphoneButtonText.text = "در حال گرفتن اجازه میکروفن...";
+                }
+                else
+                {
+                    microphoneButtonText.text = micMuted ? "روشن کردن میکروفن" : "خاموش کردن میکروفن";
+                }
+            }
+
+            if (recordingButtonText != null)
+            {
+                recordingButtonText.text = recordingConsentWanted
+                    ? "لغو رضایت ضبط"
+                    : "اجازه ضبط این مکالمه";
+            }
+
+            if (speakerButtonText != null)
+            {
+                speakerButtonText.text = speakerOff ? "روشن کردن بلندگو" : "خاموش کردن بلندگو";
+            }
+
+            if (muteAllButtonText != null)
+            {
+                muteAllButtonText.text = muteAllIncoming ? "شنیدن همه" : "قطع صدای همه";
+            }
+
+            if (microphoneButton != null)
+            {
+                microphoneButton.interactable = authenticated && !microphonePermissionRequestRunning;
+            }
+
+            if (recordingButton != null)
+            {
+                recordingButton.interactable = authenticated;
+            }
+
+            if (speakerButton != null)
+            {
+                speakerButton.interactable = authenticated;
+            }
+
+            if (muteAllButton != null)
+            {
+                muteAllButton.interactable = authenticated;
+            }
+        }
+
+        //* این تابع هنگام نابودی Runtime، اتصال رویدادهای دکمه‌ها را آزاد می‌کند.
+        private void OnDestroy()
+        {
+            if (microphoneButton != null)
+            {
+                microphoneButton.onClick.RemoveListener(HandleMicrophoneButtonClicked);
+            }
+
+            if (recordingButton != null)
+            {
+                recordingButton.onClick.RemoveListener(HandleRecordingButtonClicked);
+            }
+
+            if (speakerButton != null)
+            {
+                speakerButton.onClick.RemoveListener(HandleSpeakerButtonClicked);
+            }
+
+            if (muteAllButton != null)
+            {
+                muteAllButton.onClick.RemoveListener(HandleMuteAllButtonClicked);
+            }
+        }
+    }
+
+    internal sealed class VoiceClientLiveTestController : MonoBehaviour
+    {
+        private VoiceClientRuntime runtime;
+        private bool autoMic;
+        private bool recordingConsent;
+        private bool micStarted;
+        private int consentedSessionCount;
+        private float nextLogAt;
+
+        //* این تابع کنترلر آزمون زنده را با وضعیت میکروفن و رضایت ضبط تعیین‌شده آماده می‌کند.
+        public void Initialize(VoiceClientRuntime value, bool enableAutoMic, bool enableRecordingConsent)
+        {
+            runtime = value;
+            autoMic = enableAutoMic;
+            recordingConsent = enableRecordingConsent;
+
+            Debug.Log(
+                "VOICE_V9_LIVE_TEST_CONTROLLER=PASS" +
+                " | autoMic=" + autoMic +
+                " | recordingConsent=" + recordingConsent);
+        }
+
+        //* این تابع وضعیت اتصال، نشست‌ها و میکروفن را در آزمون زنده ثبت می‌کند و فقط در صورت اجازه صریح، قابلیت‌های تست را فعال می‌کند.
+        private void Update()
+        {
+            if (runtime == null) return;
+
+            if (runtime.IsAuthenticated && autoMic && !micStarted)
+            {
+                runtime.SetMicrophoneMuted(false);
+                micStarted = true;
+
+                Debug.Log("VOICE_V9_LIVE_TEST_MIC_STARTED=PASS");
+            }
+
+            if (
+                runtime.IsAuthenticated &&
+                recordingConsent &&
+                runtime.ActiveSessionCount > consentedSessionCount
+            )
+            {
+                runtime.SetRecordingConsentForAll(true);
+                consentedSessionCount = runtime.ActiveSessionCount;
+
+                Debug.Log(
+                    "VOICE_V9_LIVE_TEST_RECORDING_CONSENT_SENT=PASS" +
+                    " | sessionCount=" + consentedSessionCount);
+            }
+
+            if (Time.realtimeSinceStartup < nextLogAt) return;
+
+            nextLogAt = Time.realtimeSinceStartup + 5f;
+
+            Debug.Log(
+                "VOICE_V9_LIVE_CLIENT_STATUS" +
+                " | authenticated=" + runtime.IsAuthenticated +
+                " | sessions=" + runtime.ActiveSessionCount +
+                " | micMuted=" + runtime.IsMicrophoneMuted);
+        }
+    }
+}
+
+/*
+توضیح فایل:
+این فایل نصب کلاینت صوت را فقط پس از انتخاب مسیر صوت یا فعال‌سازی صریح آزمایشی انجام می‌دهد. در نسخه V6، یک دروازه کاربری زمان اجرا به Runtime اضافه شده است تا روشن کردن میکروفن فقط با اقدام مستقیم کاربر و پس از دریافت اجازه میکروفن انجام شود. رضایت ضبط نیز فقط با انتخاب کاربر به نشست‌های فعال ارسال می‌شود. کنترل‌های خاموشی میکروفن، خاموشی بلندگو و قطع صدای ورودی‌ها در همین پنل قرار دارند و مسیر آزمون زنده قبلی برای تست‌های کنترل‌شده حفظ شده است.
+*/

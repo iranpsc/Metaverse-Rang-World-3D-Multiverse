@@ -6,6 +6,7 @@ using Network_A.Bootstrap;
 using Network_A.Realtime.Controllers;
 using Network_A.Tests.Realtime;
 using Network_A.UI;
+using Network_A.Voice.Client.Routing;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -2638,9 +2639,12 @@ namespace Network_A.DedicatedGameServer.Client
                 #region لابی عمومی سه بعدی
 
                 bool publicLobbyRoom = IsCurrentRealtimeRoomPublicLobby();
+                string normalGameplaySceneName = string.IsNullOrWhiteSpace(gameplaySceneName)
+                    ? "Grpc_Enviroment"
+                    : gameplaySceneName.Trim();
                 string targetSceneName = publicLobbyRoom
                     ? (string.IsNullOrWhiteSpace(lobbySceneName) ? "Lobby 1" : lobbySceneName.Trim())
-                    : (string.IsNullOrWhiteSpace(gameplaySceneName) ? "Grpc_Enviroment" : gameplaySceneName.Trim());
+                    : VoiceLobbyRouteSelection.ResolveGameplaySceneName(normalGameplaySceneName);
 
                 #endregion
 

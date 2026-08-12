@@ -7,6 +7,7 @@ using Network_A.Auth;
 using Network_A.Bootstrap;
 using Network_A.DedicatedGameServer.Client;
 using Network_A.Realtime.Controllers;
+using Network_A.Voice.Client.Runtime;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -202,6 +203,7 @@ public class ExitGameButton : MonoBehaviour
         Stopwatch exitTimer = Stopwatch.StartNew();
         int safeTimeoutMs = Mathf.Max(1000, gracefulExitTimeoutMs);
 
+        await CloseVoiceRuntimeAsync(exitTimer, safeTimeoutMs);
         await CloseDedicatedGameServerAndRoomAsync(exitTimer, safeTimeoutMs);
         await CloseRemainingRealtimeRoomAsync(exitTimer, safeTimeoutMs);
 
@@ -213,6 +215,49 @@ public class ExitGameButton : MonoBehaviour
         }
 
         UnityEngine.Debug.Log("[ExitGameButton] Graceful runtime shutdown finished | elapsedMs=" + exitTimer.ElapsedMilliseconds + " | timeoutMs=" + safeTimeoutMs);
+    }
+
+    //* این تابع پیش از خروج Dedicated و Room، اتصال Voice فعال را با پیام پروتکلی DISCONNECT می‌بندد.
+    private async Task CloseVoiceRuntimeAsync(Stopwatch exitTimer, int totalTimeoutMs)
+    {
+        VoiceClientRuntime voiceRuntime = FindObjectOfType<VoiceClientRuntime>(true);
+        if (voiceRuntime == null)
+        {
+            UnityEngine.Debug.Log("[ExitGameButton] Voice runtime is not active in the current application stage.");
+            return;
+        }
+
+        int remainingMs = Mathf.Max(0, totalTimeoutMs - (int)exitTimer.ElapsedMilliseconds);
+        int voiceTimeoutMs = Mathf.Min(2000, remainingMs);
+        if (voiceTimeoutMs <= 0)
+        {
+            UnityEngine.Debug.LogWarning("[ExitGameButton] Graceful exit budget finished before Voice cleanup.");
+            return;
+        }
+
+        try
+        {
+            Task<bool> cleanupTask = voiceRuntime.DisconnectGracefullyAsync(
+                "user_exit_whole_game",
+                voiceTimeoutMs,
+                CancellationToken.None);
+
+            bool completedInTime = await WaitForBooleanTaskWithinBudgetAsync(
+                cleanupTask,
+                exitTimer,
+                totalTimeoutMs,
+                "voice_cleanup");
+
+            if (!completedInTime) return;
+
+            UnityEngine.Debug.Log(
+                "[ExitGameButton] Voice graceful exit completed | result=" + cleanupTask.Result);
+        }
+        catch (Exception error)
+        {
+            UnityEngine.Debug.LogWarning(
+                "[ExitGameButton] Voice graceful exit failed | error=" + error.Message);
+        }
     }
 
     //* این تابع در صورت وجود بایندر، سوکت Dedicated را می بندد و خروج رسمی از Room را انجام می دهد.
@@ -316,6 +361,9 @@ public class ExitGameButton : MonoBehaviour
 
         StartupNetworkSceneRouter networkRouter = StartupNetworkSceneRouter.Instance;
         if (networkRouter != null) ScheduleRuntimeRootDestroy(networkRouter.transform.root.gameObject, "network_router_root");
+
+        VoiceClientRuntime voiceRuntime = FindObjectOfType<VoiceClientRuntime>(true);
+        if (voiceRuntime != null) ScheduleRuntimeRootDestroy(voiceRuntime.transform.root.gameObject, "voice_client_runtime_root");
     }
 
     //* این تابع هر ریشه Runtime را فقط یک بار برای نابودی ثبت می کند و ریشه خود دکمه خروج را نگه می دارد.
