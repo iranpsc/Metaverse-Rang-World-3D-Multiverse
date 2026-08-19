@@ -16,7 +16,73 @@ MonoBehaviour:
   templateName: Custom World
   description: user customizable world
   preview: {fileID: 0}
-  dependencies: []
+  dependencies:
+  - dependency: {fileID: 919132149155446097, guid: 8d4174f323a91f34391db76333b58257, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 880c255619b72c7419d0c9c5ed3fe9df, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: c1e5a3e027cfd5b47b3750761ae297d1, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: f1026389d660f254796c2c8deea62389, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: ba3d39c6138145a40bf1db81740f96b9, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: 951ef66f7edd905488bb30673bd8eed7, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 415e74e21be8f8d4fb3e73209309bf47, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: ddb8b96da66b44b41a32f9fe5163c6e3, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 263b2d33dbd558c4a98802856784ec9b, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: -944628639613478452, guid: 541d787586e381541a6c72625ed77fdc, type: 3}
+    instantiationMode: 1
+  - dependency: {fileID: 2800000, guid: 21456cc2ccae30248a8232a54a0bb776, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 11400000, guid: 4ac50dba3c2928547909c04460a1aa9f, type: 2}
+    instantiationMode: 1
+  - dependency: {fileID: 919132149155446097, guid: 11d8ca0e9f02b864f9d63402d297077d, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 0e7da65659c092247b460ed2962c7d9f, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: b38ad0f75bc391d43bd5469a82a30b84, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 123df891a7b34874bb67971d11572111, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 9100000, guid: 98629d7f76f92fd41b4f89630510b3b5, type: 2}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 82ef6649413b160449bacf393d0634be, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 26ece7034caa0ea45b27575e686adaaa, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: ee148e281f3c41c5b4ff5f8a5afe5a6c, type: 3}
+    instantiationMode: 1
+  - dependency: {fileID: 919132149155446097, guid: e74393d561513364fb97c104bfe7224a, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: e394a1f19cbd124499e5729441b2fce2, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 04142d6abefef1e488dd9f0dcfc4bc64, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2100000, guid: 17c936d191cca014ab1fd72a98d65781, type: 2}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: e0174c4250a3ae4459728530b4cfb304, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 56c7252dab4b5a44e828547856b503a6, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: 5663411791a19b746a4e6f4b2fa88ff0, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: 8f6a8ebaa20ab924abd218681e5ff208, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: bf19b35de516a89439d73c26fd695232, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: f9eb505b02fee894fa85a481ae9f62fc, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: 44934769ad71ada47acc39bc0a4b2380, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 919132149155446097, guid: cf7ee26b3182c3d4ba661feb83ea61ae, type: 3}
+    instantiationMode: 0
+  - dependency: {fileID: 2800000, guid: 54d080410f93c1c46b9d2e3498b0d1cf, type: 3}
+    instantiationMode: 0
   templatePipeline: {fileID: 0}
   badge: {fileID: 0}
   addToDefaults: 0

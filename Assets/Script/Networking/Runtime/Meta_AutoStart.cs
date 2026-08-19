@@ -12,6 +12,9 @@ namespace Meta
         public float StartupDelay = 0.1f;
         public bool AutoStart;
 
+        [SerializeField] private string WebGLScene = "Base.WebLobby";
+        [SerializeField] private string WindowScene = "Base.Lobby";
+
         private void Start()
         {
             if (AutoStart) Invoke(nameof(StartNetwork), StartupDelay);
@@ -62,9 +65,9 @@ namespace Meta
         public void GetLobby()
         {
 #if UNITY_WEBGL
-            SceneManager.LoadSceneAsync("Lobby 1 WebGL", LoadSceneMode.Single);
+            SceneManager.LoadSceneAsync(WebGLScene, LoadSceneMode.Single);
 #else
-    SceneManager.LoadSceneAsync("Lobby 1", LoadSceneMode.Single);
+            SceneManager.LoadSceneAsync(WindowScene, LoadSceneMode.Single);
 #endif
 
         }

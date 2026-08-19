@@ -5,21 +5,30 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
+  - enabled: 0
+    path: Assets/Scenes/Base.Scene/Base.Bootstrap.unity
+    guid: 3fc3d98dd12314241b5ecd0ef44fee4d
   - enabled: 1
-    path: Assets/Scenes/Network.unity
-    guid: b6d077966c07efd48be555f72a5d9d3e
+    path: Assets/Scenes/Base.Scene/Base.Login.unity
+    guid: 38506048877aaa54e9cf927059fe7720
   - enabled: 1
-    path: Assets/Scenes/Offline.unity
-    guid: 9d59451b264321244a7bb6ea04f10889
+    path: Assets/Scenes/Base.Scene/Base.Offline.unity
+    guid: 09eaa08487db46a4c98779a0e624387d
   - enabled: 1
-    path: Assets/Scenes/Login.unity
-    guid: 193caca88b482d346a0879d48f4d838f
+    path: Assets/Scenes/Base.Scene/Base.Dashboard.unity
+    guid: 26b33782e62172a4fb491620df5ac487
   - enabled: 1
-    path: Assets/Scenes/Avatar Selector.unity
-    guid: 29ab025fc95b80d40948aeca5e3f3b06
+    path: Assets/Scenes/Base.Scene/Base.Lobby.unity
+    guid: e766b2d94a5ca1f4ba336d36836cc274
   - enabled: 1
-    path: Assets/Scenes/Lobby.unity
-    guid: bb00c6df144615f45a56d79ae8f125ff
+    path: Assets/Scenes/Base.Scene/Base.WebLobby.unity
+    guid: bd9a3a0fd23ae1a4d9c160a9b62dd005
+  - enabled: 1
+    path: Assets/Scenes/Base.Scene/Base.Room.unity
+    guid: 4ad24be9968ef574e8ed2c549f517c57
+  - enabled: 1
+    path: Assets/Scenes/Base.Scene/Base.WebRoom.unity
+    guid: 5443d0ac30462a148a4382dd073b23eb
   m_configObjects:
     Unity.XR.Oculus.Settings: {fileID: 11400000, guid: bfa1182bd221b4ca89619141f66f1260, type: 2}
     Unity.XR.WindowsMR.Settings: {fileID: 11400000, guid: dc5a169419fa04987b057f65238cf3ba, type: 2}

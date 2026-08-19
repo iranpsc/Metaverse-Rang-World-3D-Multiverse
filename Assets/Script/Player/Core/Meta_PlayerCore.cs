@@ -1,4 +1,4 @@
-﻿using Mirror;
+﻿//using Mirror;
 using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -10,7 +10,7 @@ namespace Meta.Player.Core
     [AddComponentMenu("Meta/Meta PlayerCore")]
     [HelpURL("https://github.com/DreamFaver")]
     [DisallowMultipleComponent]
-    public class Meta_PlayerCore : NetworkBehaviour
+    public class Meta_PlayerCore : MetaverseNetworkBehaviour
     {
         
         public enum GroundState : byte { Grounded, Jumping, Falling }
@@ -35,14 +35,14 @@ namespace Meta.Player.Core
         [Serializable]
         public struct RuntimeData
         {
-            [ReadOnly, SerializeField] float _Horizontal;
-            [ReadOnly, SerializeField] float _Vertical;
-            [ReadOnly, SerializeField] float _JumpForce;
-            [ReadOnly, SerializeField] GroundState _GroundState;
-            [ReadOnly, SerializeField] Vector3 _Direction;
-            [ReadOnly, SerializeField] Vector2 _MoveInput;
-            [ReadOnly, SerializeField] Vector3 _Velocity;
-            [ReadOnly, SerializeField] bool _IsGrounded;
+            [SerializeField] float _Horizontal;
+            [SerializeField] float _Vertical;
+            [SerializeField] float _JumpForce;
+            [SerializeField] GroundState _GroundState;
+            [SerializeField] Vector3 _Direction;
+            [SerializeField] Vector2 _MoveInput;
+            [SerializeField] Vector3 _Velocity;
+            [SerializeField] bool _IsGrounded;
 
             #region Properties
             public float Horizontal
@@ -119,19 +119,18 @@ namespace Meta.Player.Core
 
         public bool EnableLog;
 
-        [ReadOnly] public int HashPosX;
-        [ReadOnly] public int HashPosZ;
-        [ReadOnly] public int HashGrounded;
-        [ReadOnly] public int HashWalkJump;
-        [ReadOnly] public int HashRunJump;
+        public int HashPosX;
+        public int HashPosZ;
+        public int HashGrounded;
+        public int HashWalkJump;
+        public int HashRunJump;
 
         #region Network Setup
-        protected override void OnValidate()
+        protected void OnValidate()
         {
             if (Application.isPlaying) return;
 
             Machine?.SetActive(false);
-            base.OnValidate();
             Reset();
         }
         private void Reset()

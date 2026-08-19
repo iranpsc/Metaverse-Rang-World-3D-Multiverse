@@ -1,4 +1,4 @@
-using Mirror;
+//using Mirror;
 using System.Collections.Generic;
 using Unity.Cinemachine;
 using UnityEngine;
@@ -10,7 +10,7 @@ namespace Meta
 {
     [AddComponentMenu("Meta/Cursor Action")]
     [HelpURL("https://google.com")]
-    public class Meta_CursorAction : NetworkBehaviour
+    public class Meta_CursorAction : MetaverseNetworkBehaviour
     {
         [Header("References")]
         [Tooltip("Reference to your Cinemachine Input Axis Controller component")]
@@ -39,10 +39,9 @@ namespace Meta
         //    _IsCursorControlAllowed = !(Application.platform == RuntimePlatform.Android);
         //}
 
-        protected override void OnValidate()
+        protected void OnValidate()
         {
             if (Application.isPlaying) return;
-            base.OnValidate();
             this.enabled = false;
         }
 

@@ -1,18 +1,17 @@
 ﻿using Meta.PlayerAudio;
-using Mirror;
+//using Mirror;
 using UnityEngine;
 
 namespace Meta
 {
     [AddComponentMenu("Meta/Meta_PlayerAudioCollision")]
-    public class Meta_PlayerAudioCollision : NetworkBehaviour
+    public class Meta_PlayerAudioCollision : MetaverseNetworkBehaviour
     {
         [Header("References")]
         private Meta_PlayerAudioController AudioController;
         public CharacterController Controller;
 
         // این متغیر روی سرور تغییر میکند و خودکار به همه کلاینت‌ها اطلاع میدهد
-        [SyncVar(hook = nameof(OnStateChanged))]
         public string movementState = "";
 
         void Start()
@@ -48,7 +47,6 @@ namespace Meta
             }
         }
 
-        [Command]
         void CmdUpdateState(string state)
         {
             movementState = state;
