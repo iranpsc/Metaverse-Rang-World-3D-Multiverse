@@ -6,5 +6,6 @@ public enum InputContext
     Inventory,
     Dialogue,
     Vehicle,
-    Cutscene
+    Cutscene,
+    Spawn
 }

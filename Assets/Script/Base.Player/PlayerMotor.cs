@@ -10,9 +10,9 @@ public class PlayerMotor : MonoBehaviour
     // ============================================================
 
     [Header("Movement")]
-    [SerializeField] private float WalkSpeed = 4f;
-    [SerializeField] private float SprintSpeed = 7f;
-    [SerializeField] private float CrouchSpeed = 2f;
+    [SerializeField] private float WalkSpeed = 2f;
+    [SerializeField] private float SprintSpeed = 4f;
+    [SerializeField] private float CrouchSpeed = 1f;
     [SerializeField] private float Acceleration = 25f;
     [SerializeField] private float Deceleration = 30f;
 

@@ -21,8 +21,6 @@ MonoBehaviour:
   m_OverrideGlobalSceneList: 1
   m_Scenes:
   - m_enabled: 1
-    m_path: Assets/Scenes/Base.Scene/Base.Bootstrap.unity
-  - m_enabled: 1
     m_path: Assets/Scenes/Base.Scene/Base.Login.unity
   - m_enabled: 1
     m_path: Assets/Scenes/Base.Scene/Base.Offline.unity
