@@ -27,6 +27,8 @@ namespace Network_A.DedicatedGameServer.Client
 
         private readonly HashSet<string> set_leftNotifiedPlayerIds = new HashSet<string>();
         private readonly Dictionary<string, long> dict_lastSequenceByPlayerId = new Dictionary<string, long>();
+        private readonly Dictionary<string, DedicatedRemotePlayerVisibilityEvent> dict_hiddenVisibilityByPlayerId =
+            new Dictionary<string, DedicatedRemotePlayerVisibilityEvent>();
 
         private bool wsEventsBound;
         private DedicatedGameServerWsClient boundWsClient;
@@ -39,6 +41,7 @@ namespace Network_A.DedicatedGameServer.Client
         public event Action<DedicatedRemotePlayerState> RemotePlayerStateReceived;
         public event Action<DedicatedRemotePresenceEvent> RemotePlayerJoined;
         public event Action<DedicatedRemotePresenceEvent> RemotePlayerLeft;
+        public event Action<DedicatedRemotePlayerVisibilityEvent> RemotePlayerVisibilityChanged;
         public event Action<DedicatedPlayerStateAcceptedEvent> PlayerStateAccepted;
 
         private void Awake()
@@ -121,6 +124,13 @@ namespace Network_A.DedicatedGameServer.Client
                 : null;
         }
 
+        //* این تابع اسنپ شات پلیرهایی را که سرور hidden اعلام کرده برمی گرداند.
+        public List<DedicatedRemotePlayerVisibilityEvent> CreateVisibilitySnapshot()
+        {
+            return new List<DedicatedRemotePlayerVisibilityEvent>(
+                dict_hiddenVisibilityByPlayerId.Values);
+        }
+
         private void HandleRawMessageReceived(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return;
@@ -143,6 +153,12 @@ namespace Network_A.DedicatedGameServer.Client
             if (messageType == RealtimeMessageTypes.PlayerLeft || messageType == "player_left")
             {
                 HandlePlayerLeft(raw);
+                return;
+            }
+
+            if (messageType == "player_visibility")
+            {
+                HandlePlayerVisibility(raw);
                 return;
             }
 
@@ -230,6 +246,7 @@ namespace Network_A.DedicatedGameServer.Client
                 joinedPlayerId = joinedPlayerId.Trim();
                 set_leftNotifiedPlayerIds.Remove(joinedPlayerId);
                 dict_lastSequenceByPlayerId.Remove(joinedPlayerId);
+                dict_hiddenVisibilityByPlayerId.Remove(joinedPlayerId);
             }
 
             RemotePlayerJoined?.Invoke(evt);
@@ -238,6 +255,7 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 Debug.Log("[DedicatedRemotePlayerStateReceiver] Remote player joined | playerId=" +
                           evt.ResolvePlayerId() + " | userId=" + evt.userId + " | roomId=" + evt.roomId +
+                          " | onlineCount=" + evt.onlineCount +
                           BuildFormatLog(raw));
             }
         }
@@ -275,6 +293,7 @@ namespace Network_A.DedicatedGameServer.Client
                 set_leftNotifiedPlayerIds.Add(playerId);
                 dict_remoteStatesByPlayerId.Remove(playerId);
                 dict_lastSequenceByPlayerId.Remove(playerId);
+                dict_hiddenVisibilityByPlayerId.Remove(playerId);
             }
 
             RemotePlayerLeft?.Invoke(evt);
@@ -283,8 +302,59 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 Debug.Log("[DedicatedRemotePlayerStateReceiver] Remote player left | playerId=" +
                           playerId + " | reason=" + evt.reason + " | remoteCount=" + RemotePlayerCount +
+                          " | onlineCount=" + evt.onlineCount +
                           BuildFormatLog(raw));
             }
+        }
+
+        //* این تابع پیام authoritative مخفی یا قابل مشاهده بودن پلیر وب جی ال را دریافت می کند.
+        private void HandlePlayerVisibility(string raw)
+        {
+            DedicatedRemotePlayerVisibilityEvent evt = null;
+            string payloadJson = ReadPayloadOrRawJson(raw);
+
+            try
+            {
+                evt = JsonUtility.FromJson<DedicatedRemotePlayerVisibilityEvent>(payloadJson);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[DedicatedRemotePlayerStateReceiver] player_visibility parse failed | " +
+                    ex.Message);
+                return;
+            }
+
+            if (evt == null) return;
+
+            evt.rawJson = raw;
+            string playerId = evt.ResolvePlayerId();
+            if (string.IsNullOrWhiteSpace(playerId)) return;
+
+            if (ignoreOwnPlayerState &&
+                wsClient != null &&
+                string.Equals(playerId, wsClient.PlayerId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (evt.hidden)
+            {
+                dict_hiddenVisibilityByPlayerId[playerId] = evt;
+            }
+            else
+            {
+                dict_hiddenVisibilityByPlayerId.Remove(playerId);
+            }
+
+            RemotePlayerVisibilityChanged?.Invoke(evt);
+
+            Debug.Log(
+                "[DedicatedRemotePlayerStateReceiver] Remote player_visibility received | playerId=" +
+                playerId +
+                " | hidden=" +
+                evt.hidden +
+                BuildFormatLog(raw));
         }
 
         private void HandlePlayerStateAccepted(string raw)
@@ -335,6 +405,7 @@ namespace Network_A.DedicatedGameServer.Client
             dict_remoteStatesByPlayerId.Clear();
             set_leftNotifiedPlayerIds.Clear();
             dict_lastSequenceByPlayerId.Clear();
+            dict_hiddenVisibilityByPlayerId.Clear();
 
             if (previousCount > 0)
             {
@@ -537,6 +608,32 @@ namespace Network_A.DedicatedGameServer.Client
         public string serverId;
         public string sessionId;
         public string reason;
+        public int onlineCount;
+        public long serverTimeUnixMs;
+        public string rawJson;
+
+        public string ResolvePlayerId()
+        {
+            if (!string.IsNullOrWhiteSpace(playerId)) return playerId.Trim();
+            if (!string.IsNullOrWhiteSpace(userId)) return userId.Trim();
+            if (!string.IsNullOrWhiteSpace(connectionId)) return connectionId.Trim();
+            return string.Empty;
+        }
+    }
+
+    [Serializable]
+    public class DedicatedRemotePlayerVisibilityEvent
+    {
+        public string type;
+        public bool hidden;
+        public string userId;
+        public string playerId;
+        public string userName;
+        public string connectionId;
+        public string roomId;
+        public string serverId;
+        public string sessionId;
+        public long clientTimeUnixMs;
         public long serverTimeUnixMs;
         public string rawJson;
 

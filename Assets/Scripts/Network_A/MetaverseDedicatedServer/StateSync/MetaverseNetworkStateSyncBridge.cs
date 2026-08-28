@@ -93,7 +93,7 @@ public class MetaverseNetworkStateSyncBridge : MonoBehaviour
             return false;
         }
 
-        return SetSyncVar(identity.NetId, identity.PrefabId, syncKey, valueJson);
+        return SetSyncVar(identity.NetId, identity.PrefabId, syncKey, valueJson, identity.RoomId);
     }
 
     public bool SetSyncVar(GameObject obj, string syncKey, string valueJson = "")
@@ -103,6 +103,11 @@ public class MetaverseNetworkStateSyncBridge : MonoBehaviour
 
 
     public bool SetSyncVar(int netId, string prefabId, string syncKey, string valueJson = "")
+    {
+        return SetSyncVar(netId, prefabId, syncKey, valueJson, ResolveRoomIdForNetId(netId));
+    }
+
+    public bool SetSyncVar(int netId, string prefabId, string syncKey, string valueJson, string roomId)
     {
         string safeKey = SafeTrim(syncKey);
         string safeValueJson = SafeJson(valueJson);
@@ -125,6 +130,7 @@ public class MetaverseNetworkStateSyncBridge : MonoBehaviour
             syncKey = safeKey,
             oldValueJson = string.IsNullOrWhiteSpace(oldValueJson) ? "{}" : oldValueJson,
             valueJson = safeValueJson,
+            roomId = SafeTrim(roomId),
             version = version,
             serverTimeUnixMs = NowUnixMs()
         };
@@ -172,6 +178,7 @@ public class MetaverseNetworkStateSyncBridge : MonoBehaviour
             type = RealtimeMessageTypes.NetworkTransform,
             netId = identity.NetId,
             prefabId = identity.PrefabId,
+            roomId = identity.RoomId,
             position = t.position,
             rotation = t.rotation,
             scale = t.localScale,
@@ -620,6 +627,13 @@ public class MetaverseNetworkStateSyncBridge : MonoBehaviour
     private void OnDedicatedClientRawMessageReceived(string rawJson)
     {
         HandleDedicatedClientRawMessage(rawJson);
+    }
+
+    private string ResolveRoomIdForNetId(int netId)
+    {
+        if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
+        if (spawnManager == null || netId <= 0) return string.Empty;
+        return spawnManager.TryGetSpawnedObject(netId, out MetaverseNetworkIdentity identity) && identity != null ? identity.RoomId : string.Empty;
     }
 
     private bool CanWriteServerState()

@@ -12,6 +12,7 @@ namespace Network_A.GameServer.Gameplay
 {
     public class DedicatedGameMessageRouter : MonoBehaviour
     {
+        private const string PlayerVisibilityMessageType = "player_visibility";
         [Header("References")]
         [SerializeField] private DedicatedWebSocketServer webSocketServer;
         [SerializeField] private DedicatedPlayerRegistry playerRegistry;
@@ -48,6 +49,9 @@ namespace Network_A.GameServer.Gameplay
         private bool loggedSpawnBridgeSubscription;
         private readonly ConcurrentDictionary<string, long> dict_lastStateSequenceByConnectionId =
             new ConcurrentDictionary<string, long>();
+
+        private readonly ConcurrentDictionary<string, bool> dict_browserHiddenByRoomPlayerKey =
+            new ConcurrentDictionary<string, bool>();
 
         //* این تابع رفرنس های لازم را هنگام شروع آبجکت پیدا می کند.
         private void Awake()
@@ -447,6 +451,12 @@ namespace Network_A.GameServer.Gameplay
                 return;
             }
 
+            if (IsPlayerVisibilityMessage(text, messageType))
+            {
+                await HandlePlayerVisibilityAsync(connection, text, messageFormat, messageRoute);
+                return;
+            }
+
             if (IsPlayerStateMessage(text, messageType))
             {
                 await HandlePlayerStateAsync(connection, text, messageFormat, messageRoute);
@@ -586,6 +596,115 @@ namespace Network_A.GameServer.Gameplay
             }
         }
 
+        //* این تابع پیام player_visibility را با هویت سشن معتبر می کند و برای مشاهده کننده های روم می فرستد.
+        private async Task HandlePlayerVisibilityAsync(
+            DedicatedWebSocketConnection connection,
+            string text,
+            string messageFormat,
+            string messageRoute)
+        {
+            DedicatedPlayerSession session =
+                playerRegistry.GetByConnectionId(connection.ConnectionId);
+
+            if (session == null)
+            {
+                await SendErrorAsync(
+                    connection,
+                    "session_missing",
+                    "Authenticated session was not found.");
+                return;
+            }
+
+            DedicatedPlayerVisibilityMessageDto message =
+                ParsePlayerVisibilityMessage(text);
+
+            if (message == null)
+            {
+                await SendErrorAsync(
+                    connection,
+                    "player_visibility_parse_failed",
+                    "Player visibility message could not be parsed.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(message.roomId) &&
+                !string.Equals(
+                    message.roomId.Trim(),
+                    session.roomId,
+                    StringComparison.Ordinal))
+            {
+                await SendErrorAsync(
+                    connection,
+                    "room_mismatch",
+                    "Player visibility room does not match authenticated session.");
+                return;
+            }
+
+            string playerId = !string.IsNullOrWhiteSpace(session.playerId)
+                ? session.playerId.Trim()
+                : SafeForLog(session.userId);
+
+            if (string.IsNullOrWhiteSpace(playerId))
+            {
+                await SendErrorAsync(
+                    connection,
+                    "player_id_missing",
+                    "Authenticated player id was not found.");
+                return;
+            }
+
+            string visibilityKey = BuildVisibilityKey(session.roomId, playerId);
+
+            if (message.hidden)
+            {
+                dict_browserHiddenByRoomPlayerKey[visibilityKey] = true;
+            }
+            else
+            {
+                dict_browserHiddenByRoomPlayerKey.TryRemove(visibilityKey, out bool _);
+            }
+
+            long serverTimeUnixMs = NowUnixMs();
+            playerRegistry.TouchConnection(connection.ConnectionId);
+
+            DedicatedPlayerVisibilityBroadcastDto broadcast =
+                DedicatedPlayerVisibilityBroadcastDto.FromSession(
+                    session,
+                    message.hidden,
+                    message.clientTimeUnixMs,
+                    serverTimeUnixMs);
+
+            string broadcastJson = WrapPresenceEnvelope(
+                PlayerVisibilityMessageType,
+                JsonUtility.ToJson(broadcast),
+                session.roomId);
+
+            int sentCount = BroadcastToRoom(
+                session.roomId,
+                broadcastJson,
+                connection.ConnectionId);
+
+            Debug.Log(
+                "[DedicatedGameMessageRouter] Player visibility handled | userId=" +
+                SafeForLog(session.userId) +
+                " | playerId=" +
+                playerId +
+                " | roomId=" +
+                SafeForLog(session.roomId) +
+                " | hidden=" +
+                message.hidden +
+                " | broadcastCount=" +
+                sentCount +
+                " | messageFormat=" +
+                messageFormat +
+                " | route=" +
+                messageRoute +
+                " | outgoingRoute=" +
+                RealtimeChannels.Presence +
+                "/" +
+                PlayerVisibilityMessageType);
+        }
+
         //* این تابع پیام player_state را پردازش، ذخیره و برای بقیه پلیرهای همان روم پخش می کند.
         private async Task HandlePlayerStateAsync(DedicatedWebSocketConnection connection, string text, string messageFormat, string messageRoute)
         {
@@ -668,10 +787,33 @@ namespace Network_A.GameServer.Gameplay
         {
             if (session != null && !string.IsNullOrWhiteSpace(session.connectionId))
             {
-                dict_lastStateSequenceByConnectionId.TryRemove(session.connectionId, out long _);
+                string connectionId = session.connectionId.Trim();
+                dict_lastStateSequenceByConnectionId.TryRemove(connectionId, out long _);
+
+                string suffix = "::" + connectionId;
+                foreach (string key in dict_lastStateSequenceByConnectionId.Keys)
+                {
+                    if (string.IsNullOrWhiteSpace(key)) continue;
+                    if (!key.EndsWith(suffix, StringComparison.Ordinal)) continue;
+                    dict_lastStateSequenceByConnectionId.TryRemove(key, out long _);
+                }
             }
 
-            if (!broadcastPresenceEvents || session == null) return;
+            if (session == null) return;
+
+            if (session.wasReconnectRebound)
+            {
+                SendSpawnSnapshotToSession(session);
+                SendVisibilitySnapshotToSession(session);
+
+                Debug.Log("[DedicatedGameMessageRouter] Player joined broadcast skipped for reconnect | userId=" +
+                          session.userId + " | connectionId=" + session.connectionId +
+                          " | roomId=" + session.roomId +
+                          " | reconnectRebound=True | outgoingRoute=none");
+                return;
+            }
+
+            if (!broadcastPresenceEvents) return;
 
             DedicatedPresenceEventDto evt = new DedicatedPresenceEventDto
             {
@@ -684,15 +826,20 @@ namespace Network_A.GameServer.Gameplay
                 serverId = session.serverId,
                 sessionId = session.sessionId,
                 reason = "player_registered",
+                onlineCount = playerRegistry != null
+                    ? playerRegistry.GetCurrentPlayerCountInRoom(session.roomId)
+                    : 1,
                 serverTimeUnixMs = NowUnixMs()
             };
 
             int sentCount = BroadcastToRoom(session.roomId, WrapPresenceEnvelope(RealtimeMessageTypes.PlayerJoined, JsonUtility.ToJson(evt), session.roomId), session.connectionId);
 
             SendSpawnSnapshotToSession(session);
+            SendVisibilitySnapshotToSession(session);
 
             Debug.Log("[DedicatedGameMessageRouter] Player joined broadcast | userId=" +
                       session.userId + " | sentCount=" + sentCount +
+                      " | onlineCount=" + evt.onlineCount +
                       " | outgoingMessageFormat=envelope | outgoingRoute=" +
                       RealtimeChannels.Presence + "/" + RealtimeMessageTypes.PlayerJoined);
         }
@@ -701,6 +848,21 @@ namespace Network_A.GameServer.Gameplay
         private void HandlePlayerRemoved(DedicatedPlayerSession session, string reason)
         {
             if (session == null) return;
+
+            string removedPlayerId = !string.IsNullOrWhiteSpace(session.playerId)
+                ? session.playerId.Trim()
+                : SafeForLog(session.userId);
+
+            if (!string.IsNullOrWhiteSpace(removedPlayerId))
+            {
+                string visibilityKey = BuildVisibilityKey(
+                    session.roomId,
+                    removedPlayerId);
+
+                dict_browserHiddenByRoomPlayerKey.TryRemove(
+                    visibilityKey,
+                    out bool _);
+            }
 
             if (!string.IsNullOrWhiteSpace(session.connectionId))
             {
@@ -725,6 +887,9 @@ namespace Network_A.GameServer.Gameplay
                 serverId = session.serverId,
                 sessionId = session.sessionId,
                 reason = reason,
+                onlineCount = playerRegistry != null
+                    ? playerRegistry.GetCurrentPlayerCountInRoom(session.roomId)
+                    : 0,
                 serverTimeUnixMs = NowUnixMs()
             };
 
@@ -732,6 +897,7 @@ namespace Network_A.GameServer.Gameplay
 
             Debug.Log("[DedicatedGameMessageRouter] Player left broadcast | userId=" +
                       session.userId + " | reason=" + reason + " | sentCount=" + sentCount +
+                      " | onlineCount=" + evt.onlineCount +
                       " | outgoingMessageFormat=envelope | outgoingRoute=" +
                       RealtimeChannels.Presence + "/" + RealtimeMessageTypes.PlayerLeft);
         }
@@ -888,6 +1054,145 @@ namespace Network_A.GameServer.Gameplay
             return string.Empty;
         }
 
+        //* این تابع وضعیت hidden پلیرهای موجود روم را هنگام ورود یا ریکانکت برای همان کلاینت می فرستد.
+        private void SendVisibilitySnapshotToSession(DedicatedPlayerSession targetSession)
+        {
+            if (targetSession == null) return;
+            if (string.IsNullOrWhiteSpace(targetSession.connectionId)) return;
+            if (string.IsNullOrWhiteSpace(targetSession.roomId)) return;
+            if (playerRegistry == null) return;
+
+            ConcurrentDictionary<string, DedicatedWebSocketConnection> connections =
+                GetConnections();
+
+            if (connections == null) return;
+
+            if (!connections.TryGetValue(
+                    targetSession.connectionId,
+                    out DedicatedWebSocketConnection targetConnection))
+            {
+                return;
+            }
+
+            if (targetConnection == null || !targetConnection.IsOpen) return;
+
+            System.Collections.Generic.List<DedicatedPlayerSession> sessions =
+                playerRegistry.CreateSnapshot();
+
+            if (sessions == null || sessions.Count <= 0) return;
+
+            int sentCount = 0;
+
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                DedicatedPlayerSession remoteSession = sessions[i];
+                if (remoteSession == null) continue;
+                if (remoteSession.connectionId == targetSession.connectionId) continue;
+                if (!string.Equals(
+                        remoteSession.roomId,
+                        targetSession.roomId,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string remotePlayerId = !string.IsNullOrWhiteSpace(remoteSession.playerId)
+                    ? remoteSession.playerId.Trim()
+                    : SafeForLog(remoteSession.userId);
+
+                if (string.IsNullOrWhiteSpace(remotePlayerId)) continue;
+
+                string visibilityKey = BuildVisibilityKey(
+                    remoteSession.roomId,
+                    remotePlayerId);
+
+                if (!dict_browserHiddenByRoomPlayerKey.ContainsKey(visibilityKey)) continue;
+
+                DedicatedPlayerStateRecord stateRecord =
+                    ResolveStoredStateForSession(remoteSession);
+
+                if (stateRecord != null && stateRecord.sequence > 0)
+                {
+                    DedicatedPlayerStateBroadcastDto stateSnapshot =
+                        DedicatedPlayerStateBroadcastDto.FromRecord(stateRecord);
+
+                    string stateJson = WrapPresenceEnvelope(
+                        RealtimeMessageTypes.PlayerState,
+                        JsonUtility.ToJson(stateSnapshot),
+                        remoteSession.roomId);
+
+                    _ = targetConnection.SendTextAsync(stateJson);
+                }
+
+                DedicatedPlayerVisibilityBroadcastDto snapshot =
+                    DedicatedPlayerVisibilityBroadcastDto.FromSession(
+                        remoteSession,
+                        true,
+                        0L,
+                        NowUnixMs());
+
+                string json = WrapPresenceEnvelope(
+                    PlayerVisibilityMessageType,
+                    JsonUtility.ToJson(snapshot),
+                    remoteSession.roomId);
+
+                _ = targetConnection.SendTextAsync(json);
+                sentCount++;
+            }
+
+            if (sentCount > 0)
+            {
+                Debug.Log(
+                    "[DedicatedGameMessageRouter] Visibility snapshot sent | connectionId=" +
+                    targetSession.connectionId +
+                    " | roomId=" +
+                    targetSession.roomId +
+                    " | count=" +
+                    sentCount);
+            }
+        }
+
+        //* این تابع آخرین state ذخیره شده سشن را بدون وابستگی به connectionId قدیمی یا جدید پیدا می کند.
+        private DedicatedPlayerStateRecord ResolveStoredStateForSession(
+            DedicatedPlayerSession session)
+        {
+            if (session == null || playerStateStore == null) return null;
+
+            if (!string.IsNullOrWhiteSpace(session.connectionId))
+            {
+                DedicatedPlayerStateRecord byConnection =
+                    playerStateStore.GetByConnectionId(session.connectionId);
+
+                if (byConnection != null) return byConnection;
+            }
+
+            System.Collections.Generic.List<DedicatedPlayerStateRecord> states =
+                playerStateStore.CreateSnapshot();
+
+            if (states == null) return null;
+
+            for (int i = 0; i < states.Count; i++)
+            {
+                DedicatedPlayerStateRecord record = states[i];
+                if (record == null) continue;
+                if (!string.Equals(record.roomId, session.roomId, StringComparison.Ordinal)) continue;
+
+                if (!string.IsNullOrWhiteSpace(session.playerId) &&
+                    string.Equals(record.playerId, session.playerId, StringComparison.Ordinal))
+                {
+                    return record;
+                }
+
+                if (!string.IsNullOrWhiteSpace(session.userId) &&
+                    string.Equals(record.userId, session.userId, StringComparison.Ordinal))
+                {
+                    return record;
+                }
+            }
+
+            return null;
+        }
+
         //* این تابع بعد از ورود پلیر، اسنپ شات آبجکت های اسپاون شده را فقط برای همان کلاینت می فرستد.
         private void SendSpawnSnapshotToSession(DedicatedPlayerSession session)
         {
@@ -900,7 +1205,7 @@ namespace Network_A.GameServer.Gameplay
             if (!connections.TryGetValue(session.connectionId, out DedicatedWebSocketConnection connection)) return;
             if (connection == null || !connection.IsOpen) return;
 
-            MetaverseSpawnPayload[] payloads = MetaverseSpawnManager.Instance.BuildSnapshotPayloads();
+            MetaverseSpawnPayload[] payloads = MetaverseSpawnManager.Instance.BuildSnapshotPayloads(session.roomId);
             string json = MetaverseSpawnMessageCodec.CreateSpawnSnapshotEnvelopeJson(payloads, session.roomId);
             if (string.IsNullOrWhiteSpace(json)) return;
 
@@ -923,6 +1228,18 @@ namespace Network_A.GameServer.Gameplay
                 {
                     return envelope.room.Trim();
                 }
+
+                if (MetaverseSpawnMessageCodec.TryReadMessage(rawJson, out _, out MetaverseSpawnPayload spawnPayload, out MetaverseDespawnPayload despawnPayload, out MetaverseSpawnPayload[] snapshotPayloads))
+                {
+                    if (spawnPayload != null && !string.IsNullOrWhiteSpace(spawnPayload.roomId)) return spawnPayload.roomId.Trim();
+                    if (despawnPayload != null && !string.IsNullOrWhiteSpace(despawnPayload.roomId)) return despawnPayload.roomId.Trim();
+                    if (snapshotPayloads != null && snapshotPayloads.Length > 0 && snapshotPayloads[0] != null && !string.IsNullOrWhiteSpace(snapshotPayloads[0].roomId)) return snapshotPayloads[0].roomId.Trim();
+                }
+
+                if (MetaverseNetworkRpcMessageCodec.TryReadPayload(rawJson, string.Empty, out MetaverseNetworkRpcPayload rpcPayload) && rpcPayload != null && !string.IsNullOrWhiteSpace(rpcPayload.roomId)) return rpcPayload.roomId.Trim();
+                if (MetaverseNetworkStateSyncMessageCodec.TryReadSyncVarPayload(rawJson, out MetaverseNetworkSyncVarPayload syncPayload) && syncPayload != null && !string.IsNullOrWhiteSpace(syncPayload.roomId)) return syncPayload.roomId.Trim();
+                if (MetaverseNetworkStateSyncMessageCodec.TryReadNetworkTransformPayload(rawJson, out MetaverseNetworkTransformPayload transformPayload) && transformPayload != null && !string.IsNullOrWhiteSpace(transformPayload.roomId)) return transformPayload.roomId.Trim();
+                if (MetaverseNetworkOwnershipMessageCodec.TryReadOwnershipPayload(rawJson, out MetaverseNetworkOwnershipPayload ownershipPayload) && ownershipPayload != null && !string.IsNullOrWhiteSpace(ownershipPayload.roomId)) return ownershipPayload.roomId.Trim();
             }
 
             return playerRegistry != null ? playerRegistry.GetPrimaryRoomId() : string.Empty;
@@ -974,11 +1291,29 @@ namespace Network_A.GameServer.Gameplay
         {
             if (connection == null) return;
 
-            dict_lastStateSequenceByConnectionId.TryRemove(connection.ConnectionId, out long _);
+            string connectionId = string.IsNullOrWhiteSpace(connection.ConnectionId)
+                ? string.Empty
+                : connection.ConnectionId.Trim();
 
-            if (playerStateStore == null) return;
+            if (!string.IsNullOrWhiteSpace(connectionId))
+            {
+                dict_lastStateSequenceByConnectionId.TryRemove(connectionId, out long _);
 
-            playerStateStore.RemoveByConnectionId(connection.ConnectionId, reason);
+                string suffix = "::" + connectionId;
+                foreach (string key in dict_lastStateSequenceByConnectionId.Keys)
+                {
+                    if (string.IsNullOrWhiteSpace(key)) continue;
+                    if (!key.EndsWith(suffix, StringComparison.Ordinal)) continue;
+                    dict_lastStateSequenceByConnectionId.TryRemove(key, out long _);
+                }
+            }
+
+            // Do not remove authoritative player state merely because the websocket dropped.
+            // DedicatedTicketHandshakeHandler owns the reconnect grace decision. When the registry
+            // finally removes the player (manual close or grace expiry), HandlePlayerRemoved removes
+            // the state through the single authoritative cleanup path.
+            Debug.Log("[DedicatedGameMessageRouter] Websocket disconnect observed; player state retained until registry removal | connectionId=" +
+                      connectionId + " | reason=" + (string.IsNullOrWhiteSpace(reason) ? "unknown" : reason.Trim()));
         }
 
 
@@ -990,7 +1325,7 @@ namespace Network_A.GameServer.Gameplay
             if (string.IsNullOrWhiteSpace(session.connectionId)) return false;
             if (message.sequence <= 0) return false;
 
-            string key = session.connectionId.Trim();
+            string key = SafeForLog(session.roomId) + "::" + session.connectionId.Trim();
 
             if (dict_lastStateSequenceByConnectionId.TryGetValue(key, out long lastSequence) &&
                 message.sequence <= lastSequence)
@@ -1204,6 +1539,29 @@ namespace Network_A.GameServer.Gameplay
             return string.IsNullOrWhiteSpace(messageType) ? null : new DedicatedMessageTypeDto { type = messageType };
         }
 
+        //* این تابع کلید visibility را با روم و پلیر می سازد تا روم های یک سرور با هم قاطی نشوند.
+        private string BuildVisibilityKey(string roomId, string playerId)
+        {
+            return SafeForLog(roomId) + "::" + SafeForLog(playerId);
+        }
+
+        //* این تابع بررسی می کند پیام ورودی مربوط به visibility پلیر وب جی ال است یا نه.
+        private bool IsPlayerVisibilityMessage(string text, string messageType)
+        {
+            if (string.Equals(
+                    messageType,
+                    PlayerVisibilityMessageType,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return DedicatedRealtimeEnvelopeCodec.Matches(
+                text,
+                RealtimeChannels.Presence,
+                PlayerVisibilityMessageType);
+        }
+
         //* این تابع بررسی می کند پیام ورودی، وضعیت پلیر از مسیر استاندارد یا قدیمی است یا نه.
         private bool IsPlayerStateMessage(string text, string messageType)
         {
@@ -1263,6 +1621,28 @@ namespace Network_A.GameServer.Gameplay
             return false;
         }
 
+        //* این تابع پیام player_visibility را از پِیلود اِنولوپ یا پیام خام می خواند.
+        private DedicatedPlayerVisibilityMessageDto ParsePlayerVisibilityMessage(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+
+            try
+            {
+                string payloadJson =
+                    DedicatedRealtimeEnvelopeCodec.ReadPayloadOrRawJson(text);
+
+                return JsonUtility.FromJson<DedicatedPlayerVisibilityMessageDto>(
+                    payloadJson);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[DedicatedGameMessageRouter] Player visibility parse failed | " +
+                    ex.Message);
+                return null;
+            }
+        }
+
         //* این تابع پیام player_state را از پِیلود اِنولوپ یا پیام قدیمی خام می خواند.
         private DedicatedPlayerStateMessageDto ParsePlayerStateMessage(string text)
         {
@@ -1306,6 +1686,57 @@ namespace Network_A.GameServer.Gameplay
         برای تست تک کلاینت، پیام player_state_accepted به همان فرستنده برمی گردد.
         این فایل با GameServerClient قدیمی هیچ تداخلی ندارد.
         */
+    }
+
+    [Serializable]
+    public class DedicatedPlayerVisibilityMessageDto
+    {
+        public string type;
+        public bool hidden;
+        public string userId;
+        public string playerId;
+        public string roomId;
+        public string serverId;
+        public string sessionId;
+        public long clientTimeUnixMs;
+    }
+
+    [Serializable]
+    public class DedicatedPlayerVisibilityBroadcastDto
+    {
+        public string type;
+        public bool hidden;
+        public string userId;
+        public string playerId;
+        public string userName;
+        public string connectionId;
+        public string roomId;
+        public string serverId;
+        public string sessionId;
+        public long clientTimeUnixMs;
+        public long serverTimeUnixMs;
+
+        public static DedicatedPlayerVisibilityBroadcastDto FromSession(
+            DedicatedPlayerSession session,
+            bool hidden,
+            long clientTimeUnixMs,
+            long serverTimeUnixMs)
+        {
+            return new DedicatedPlayerVisibilityBroadcastDto
+            {
+                type = "player_visibility",
+                hidden = hidden,
+                userId = session != null ? session.userId : string.Empty,
+                playerId = session != null ? session.playerId : string.Empty,
+                userName = session != null ? session.userName : string.Empty,
+                connectionId = session != null ? session.connectionId : string.Empty,
+                roomId = session != null ? session.roomId : string.Empty,
+                serverId = session != null ? session.serverId : string.Empty,
+                sessionId = session != null ? session.sessionId : string.Empty,
+                clientTimeUnixMs = clientTimeUnixMs,
+                serverTimeUnixMs = serverTimeUnixMs
+            };
+        }
     }
 
     [Serializable]
@@ -1421,6 +1852,7 @@ namespace Network_A.GameServer.Gameplay
         public string serverId;
         public string sessionId;
         public string reason;
+        public int onlineCount;
         public long serverTimeUnixMs;
     }
 

@@ -17,6 +17,7 @@ public class MetaverseSpawnManager : MonoBehaviour
     [SerializeField] private bool allowEditorSimulation = true;
 
     private readonly Dictionary<int, MetaverseNetworkIdentity> dictSpawnedByNetId = new Dictionary<int, MetaverseNetworkIdentity>();
+    private readonly Dictionary<string, Transform> dictSpawnedRootByRoomId = new Dictionary<string, Transform>();
     private long spawnSequence;
     private int nextNetId = 1;
 
@@ -48,25 +49,30 @@ public class MetaverseSpawnManager : MonoBehaviour
     public MetaverseNetworkIdentity Spawn(GameObject obj, int ownerConnectionId)
     {
         string ownerConnectionIdText = ownerConnectionId >= 0 ? ownerConnectionId.ToString() : string.Empty;
-        return Spawn(obj, ownerConnectionId, ownerConnectionIdText, string.Empty, string.Empty, false, "network_server_spawn");
+        return Spawn(obj, ownerConnectionId, ownerConnectionIdText, string.Empty, string.Empty, string.Empty, false, "network_server_spawn");
     }
 
     public MetaverseNetworkIdentity Spawn(GameObject obj, string ownerConnectionId, string ownerUserId = "", string ownerPlayerId = "")
     {
-        return Spawn(obj, ParseConnectionId(ownerConnectionId), ownerConnectionId, ownerUserId, ownerPlayerId, false, "network_server_spawn");
+        return Spawn(obj, ParseConnectionId(ownerConnectionId), ownerConnectionId, ownerUserId, ownerPlayerId, string.Empty, false, "network_server_spawn");
     }
 
     public MetaverseNetworkIdentity Spawn(GameObject obj, string ownerConnectionId, string ownerUserId, string ownerPlayerId, bool serverOwned, string reason)
     {
-        return Spawn(obj, ParseConnectionId(ownerConnectionId), ownerConnectionId, ownerUserId, ownerPlayerId, serverOwned, reason);
+        return Spawn(obj, ParseConnectionId(ownerConnectionId), ownerConnectionId, ownerUserId, ownerPlayerId, string.Empty, serverOwned, reason);
     }
 
     public MetaverseNetworkIdentity SpawnServerOwned(GameObject obj, string reason = "network_server_spawn_server_owned")
     {
-        return Spawn(obj, -1, string.Empty, string.Empty, string.Empty, true, reason);
+        return Spawn(obj, -1, string.Empty, string.Empty, string.Empty, string.Empty, true, reason);
     }
 
     public MetaverseNetworkIdentity Spawn(GameObject obj, int ownerConnectionId, string ownerConnectionIdText, string ownerUserId, string ownerPlayerId, bool serverOwned, string reason)
+    {
+        return Spawn(obj, ownerConnectionId, ownerConnectionIdText, ownerUserId, ownerPlayerId, string.Empty, serverOwned, reason);
+    }
+
+    public MetaverseNetworkIdentity Spawn(GameObject obj, int ownerConnectionId, string ownerConnectionIdText, string ownerUserId, string ownerPlayerId, string roomId, bool serverOwned, string reason)
     {
         LastSpawnRejectReason = string.Empty;
         if (!CanUseNetworkServerApi("NetworkServer.Spawn")) return null;
@@ -95,7 +101,7 @@ public class MetaverseSpawnManager : MonoBehaviour
         if (ownerConnectionId < 0) ownerConnectionId = ParseConnectionId(resolvedOwnerConnectionIdText);
         bool resolvedServerOwned = serverOwned || (ownerConnectionId < 0 && string.IsNullOrWhiteSpace(resolvedOwnerConnectionIdText) && string.IsNullOrWhiteSpace(ownerUserId) && string.IsNullOrWhiteSpace(ownerPlayerId));
 
-        identity.AssignSpawnData(prefabId, netId, ownerConnectionId, resolvedOwnerConnectionIdText, SafeTrim(ownerUserId), SafeTrim(ownerPlayerId), resolvedServerOwned, false);
+        identity.AssignSpawnData(prefabId, netId, ownerConnectionId, resolvedOwnerConnectionIdText, SafeTrim(ownerUserId), SafeTrim(ownerPlayerId), SafeTrim(roomId), resolvedServerOwned, false);
         dictSpawnedByNetId[netId] = identity;
 
         MetaverseSpawnPayload payload = BuildPayload(identity, SafeReason(reason, "network_server_spawn"), MetaverseSpawnMessageCodec.MirrorSpawnRoute);
@@ -107,38 +113,43 @@ public class MetaverseSpawnManager : MonoBehaviour
     public bool TrySpawnPrefab(string prefabId, Vector3 position, Quaternion rotation, int ownerConnectionId, out MetaverseNetworkIdentity identity)
     {
         string ownerConnectionIdText = ownerConnectionId >= 0 ? ownerConnectionId.ToString() : string.Empty;
-        return TrySpawnPrefab(prefabId, position, rotation, ownerConnectionId, ownerConnectionIdText, string.Empty, string.Empty, false, out identity);
+        return TrySpawnPrefab(prefabId, position, rotation, ownerConnectionId, ownerConnectionIdText, string.Empty, string.Empty, string.Empty, false, out identity);
     }
 
     public bool TrySpawnPrefab(string prefabId, Vector3 position, Quaternion rotation, out MetaverseNetworkIdentity identity)
     {
-        return TrySpawnPrefab(prefabId, position, rotation, -1, string.Empty, string.Empty, string.Empty, true, out identity);
+        return TrySpawnPrefab(prefabId, position, rotation, -1, string.Empty, string.Empty, string.Empty, string.Empty, true, out identity);
     }
 
     public bool TrySpawnPrefab(string prefabId, Vector3 position, Quaternion rotation, string ownerConnectionId, string ownerUserId, string ownerPlayerId, out MetaverseNetworkIdentity identity)
     {
-        return TrySpawnPrefab(prefabId, position, rotation, ParseConnectionId(ownerConnectionId), ownerConnectionId, ownerUserId, ownerPlayerId, false, out identity);
+        return TrySpawnPrefab(prefabId, position, rotation, ParseConnectionId(ownerConnectionId), ownerConnectionId, ownerUserId, ownerPlayerId, string.Empty, false, out identity);
     }
 
     public bool TrySpawnServerOwnedPrefab(string prefabId, Vector3 position, Quaternion rotation, out MetaverseNetworkIdentity identity)
     {
-        return TrySpawnPrefab(prefabId, position, rotation, -1, string.Empty, string.Empty, string.Empty, true, out identity);
+        return TrySpawnPrefab(prefabId, position, rotation, -1, string.Empty, string.Empty, string.Empty, string.Empty, true, out identity);
     }
 
     public bool TrySpawnPrefab(string prefabId, Vector3 position, Quaternion rotation, int ownerConnectionId, string ownerConnectionIdText, string ownerUserId, string ownerPlayerId, bool serverOwned, out MetaverseNetworkIdentity identity)
+    {
+        return TrySpawnPrefab(prefabId, position, rotation, ownerConnectionId, ownerConnectionIdText, ownerUserId, ownerPlayerId, string.Empty, serverOwned, out identity);
+    }
+
+    public bool TrySpawnPrefab(string prefabId, Vector3 position, Quaternion rotation, int ownerConnectionId, string ownerConnectionIdText, string ownerUserId, string ownerPlayerId, string roomId, bool serverOwned, out MetaverseNetworkIdentity identity)
     {
         identity = null;
         LastSpawnRejectReason = string.Empty;
         if (!CanUseNetworkServerApi("NetworkServer.SpawnPrefab")) return false;
         if (!CanSpawnPrefab(prefabId)) return false;
 
-        EnsureSpawnedRoot();
+        Transform parentRoot = GetSpawnedRootForRoom(roomId);
         GameObject prefab = null;
         prefabRegistry.TryGetPrefab(SafeTrim(prefabId), out prefab);
-        GameObject obj = Instantiate(prefab, position, rotation, spawnedRoot);
+        GameObject obj = Instantiate(prefab, position, rotation, parentRoot);
         identity = EnsureIdentity(obj);
         if (identity != null) identity.AssignPrefabId(SafeTrim(prefabId));
-        identity = Spawn(obj, ownerConnectionId, ownerConnectionIdText, ownerUserId, ownerPlayerId, serverOwned, "network_server_spawn_prefab");
+        identity = Spawn(obj, ownerConnectionId, ownerConnectionIdText, ownerUserId, ownerPlayerId, roomId, serverOwned, "network_server_spawn_prefab");
         return identity != null;
     }
 
@@ -281,9 +292,28 @@ public class MetaverseSpawnManager : MonoBehaviour
         return new List<MetaverseNetworkIdentity>(dictSpawnedByNetId.Values);
     }
 
+    public List<MetaverseNetworkIdentity> GetSpawnedObjects(string roomId)
+    {
+        string safeRoomId = SafeTrim(roomId);
+        if (string.IsNullOrWhiteSpace(safeRoomId)) return GetSpawnedObjects();
+
+        List<MetaverseNetworkIdentity> result = new List<MetaverseNetworkIdentity>();
+        foreach (MetaverseNetworkIdentity identity in dictSpawnedByNetId.Values)
+        {
+            if (identity == null) continue;
+            if (identity.IsRoom(safeRoomId)) result.Add(identity);
+        }
+        return result;
+    }
+
     public MetaverseSpawnPayload[] BuildSnapshotPayloads()
     {
-        List<MetaverseNetworkIdentity> identities = GetSpawnedObjects();
+        return BuildSnapshotPayloads(string.Empty);
+    }
+
+    public MetaverseSpawnPayload[] BuildSnapshotPayloads(string roomId)
+    {
+        List<MetaverseNetworkIdentity> identities = GetSpawnedObjects(roomId);
         List<MetaverseSpawnPayload> payloads = new List<MetaverseSpawnPayload>();
         for (int i = 0; i < identities.Count; i++)
         {
@@ -322,8 +352,8 @@ public class MetaverseSpawnManager : MonoBehaviour
             return false;
         }
 
-        EnsureSpawnedRoot();
-        GameObject obj = Instantiate(prefab, payload.position, payload.rotation, spawnedRoot);
+        Transform parentRoot = GetSpawnedRootForRoom(payload.roomId);
+        GameObject obj = Instantiate(prefab, payload.position, payload.rotation, parentRoot);
         obj.transform.localScale = payload.scale == Vector3.zero ? prefab.transform.localScale : payload.scale;
 
         MetaverseNetworkIdentity identity = EnsureIdentity(obj);
@@ -335,6 +365,7 @@ public class MetaverseSpawnManager : MonoBehaviour
             payload.ownerConnectionIdText,
             payload.ownerUserId,
             payload.ownerPlayerId,
+            payload.roomId,
             payload.serverOwned,
             resolvedLocalPlayer);
         dictSpawnedByNetId[payload.netId] = identity;
@@ -378,7 +409,7 @@ public class MetaverseSpawnManager : MonoBehaviour
             position = t.position,
             rotation = t.rotation,
             scale = t.localScale,
-            roomId = MetaverseNetworkClient.roomId,
+            roomId = !string.IsNullOrWhiteSpace(identity.RoomId) ? identity.RoomId : MetaverseNetworkClient.roomId,
             sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name,
             spawnReason = SafeReason(reason, "network_server_spawn"),
             mirrorRoute = SafeReason(mirrorRoute, MetaverseSpawnMessageCodec.MirrorSpawnRoute),
@@ -415,6 +446,34 @@ public class MetaverseSpawnManager : MonoBehaviour
     public void SetSpawnedRoot(Transform root)
     {
         spawnedRoot = root;
+    }
+
+    private Transform GetSpawnedRootForRoom(string roomId)
+    {
+        string safeRoomId = SafeTrim(roomId);
+        if (string.IsNullOrWhiteSpace(safeRoomId))
+        {
+            EnsureSpawnedRoot();
+            return spawnedRoot;
+        }
+
+        if (dictSpawnedRootByRoomId.TryGetValue(safeRoomId, out Transform root) && root != null) return root;
+
+        EnsureSpawnedRoot();
+        if (!autoCreateSpawnedRoot || spawnedRoot == null) return spawnedRoot;
+
+        GameObject roomRoot = new GameObject("Room_" + MakeSafeObjectName(safeRoomId) + "_Runtime_Root");
+        roomRoot.transform.SetParent(spawnedRoot, false);
+        dictSpawnedRootByRoomId[safeRoomId] = roomRoot.transform;
+        return roomRoot.transform;
+    }
+
+    private string MakeSafeObjectName(string value)
+    {
+        string safe = SafeTrim(value);
+        if (string.IsNullOrWhiteSpace(safe)) return "default";
+        foreach (char c in System.IO.Path.GetInvalidFileNameChars()) safe = safe.Replace(c, '_');
+        return safe.Replace(' ', '_');
     }
 
     private MetaverseNetworkIdentity EnsureIdentity(GameObject obj)
