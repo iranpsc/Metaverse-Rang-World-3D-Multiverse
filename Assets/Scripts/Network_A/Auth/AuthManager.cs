@@ -165,6 +165,7 @@ namespace Network_A.Auth//22
 
         private void Awake()
         {
+
             if (Instance == null)
             {
                 Instance = this;
@@ -242,7 +243,7 @@ namespace Network_A.Auth//22
             emailOrUsername = user;
             password = pass;
 
-            NetworkFileLogger.Auth("REGISTER_START", true, "Register button flow started.", user, HasAccessToken(), HasRefreshToken());
+            NetworkFileLogger.Auth("REGISTER_START", true, "Register button flow started.", string.Empty, HasAccessToken(), HasRefreshToken());
             ShowInfoMessage("در حال ثبت نام...");
 
             ApiResult<AuthResponseDto> res = await RegisterAsync(user, pass);
@@ -252,7 +253,7 @@ namespace Network_A.Auth//22
                 SetButton(btn_Reg, true);
                 string userMessage = BuildUserMessage("REGISTER", res);
                 ShowErrorMessage(userMessage);
-                NetworkFileLogger.Auth("REGISTER_FAILED", false, res.ErrorMessage, user, HasAccessToken(), HasRefreshToken());
+                NetworkFileLogger.Auth("REGISTER_FAILED", false, res.ErrorMessage, string.Empty, HasAccessToken(), HasRefreshToken());
                 return;
             }
 
@@ -262,7 +263,7 @@ namespace Network_A.Auth//22
             DH_Pnl_Login(false);
 
             ShowSuccessMessage("ثبت نام با موفقیت انجام شد");
-            NetworkFileLogger.Auth("REGISTER_SUCCESS", true, ReadAuthMessage(res), user, HasAccessToken(), HasRefreshToken());
+            NetworkFileLogger.Auth("REGISTER_SUCCESS", true, ReadAuthMessage(res), string.Empty, HasAccessToken(), HasRefreshToken());
 
             await Task.Delay(300);
             await Login_Init();
@@ -291,7 +292,7 @@ namespace Network_A.Auth//22
             emailOrUsername = user;
             password = pass;
 
-            NetworkFileLogger.Auth("LOGIN_START", true, "Manual login flow started.", user, HasAccessToken(), HasRefreshToken());
+            NetworkFileLogger.Auth("LOGIN_START", true, "Manual login flow started.", string.Empty, HasAccessToken(), HasRefreshToken());
             ShowInfoMessage("در حال ورود...");
 
             ApiResult<AuthResponseDto> res = await LoginAsync(user, pass);
@@ -301,7 +302,7 @@ namespace Network_A.Auth//22
                 SetButton(btn_Log, true);
                 string userMessage = BuildUserMessage("LOGIN", res);
                 ShowErrorMessage(userMessage);
-                NetworkFileLogger.Auth("LOGIN_FAILED", false, res.ErrorMessage, user, HasAccessToken(), HasRefreshToken());
+                NetworkFileLogger.Auth("LOGIN_FAILED", false, res.ErrorMessage, string.Empty, HasAccessToken(), HasRefreshToken());
                 return;
             }
 
@@ -310,7 +311,7 @@ namespace Network_A.Auth//22
             DH_Pnl_Login(false);
 
             ShowSuccessMessage("ورود موفق بود");
-            NetworkFileLogger.Auth("LOGIN_SUCCESS", true, ReadAuthMessage(res), user, HasAccessToken(), HasRefreshToken());
+            NetworkFileLogger.Auth("LOGIN_SUCCESS", true, ReadAuthMessage(res), string.Empty, HasAccessToken(), HasRefreshToken());
 
             await Task.Delay(300);
             await Login_Init();
@@ -430,10 +431,10 @@ namespace Network_A.Auth//22
             if (is_First_Reg) is_First_Reg = false;
 
             HideAuthActionButtonsInServerDebug();
-            ShowAutoLoginProgress(autoLoginSuccessMessage, "AUTO_LOGIN_SUCCESS", "User=" + SafeText(CurrentUser.emailOrUsername) + " | Request=GetUserData");
+            ShowAutoLoginProgress(autoLoginSuccessMessage, "AUTO_LOGIN_SUCCESS", "Request=GetUserData");
             CloseServerDebugPanelAfterAutoLoginSuccessIfNeeded();
-            ShowSuccessMessage("اطلاعات کاربر دریافت شد | User: " + CurrentUser.emailOrUsername + " | Request: GetUserData");
-            NetworkFileLogger.Auth("LOGIN_INIT_SUCCESS", true, res.Data.message, CurrentUser.emailOrUsername, HasAccessToken(), HasRefreshToken());
+            ShowSuccessMessage("اطلاعات کاربر دریافت شد | Request: GetUserData");
+            NetworkFileLogger.Auth("LOGIN_INIT_SUCCESS", true, res.Data.message, string.Empty, HasAccessToken(), HasRefreshToken());
             NotifyLoginReady("login_init_success");
         }
 
@@ -450,7 +451,7 @@ namespace Network_A.Auth//22
             if (response == null || response.user == null) return;
             CurrentUser = response.user;
             NetworkFileLogger.Data("USER_DATA", "id", CurrentUser.id);
-            NetworkFileLogger.Data("USER_DATA", "emailOrUsername", CurrentUser.emailOrUsername);
+            NetworkFileLogger.Data("USER_DATA", "emailOrUsername", "<redacted>");
             NetworkFileLogger.Data("USER_DATA", "createdAtUnix", CurrentUser.createdAtUnix.ToString());
         }
         #endregion
@@ -1765,9 +1766,10 @@ namespace Network_A.Auth//22
             if (pass.Length < minPasswordLength)
             {
                 ShowWarningMessage("رمز عبور باید حداقل " + minPasswordLength + " کاراکتر باشد");
-                NetworkFileLogger.Warning(stage, "Password length is less than " + minPasswordLength + " before " + actionName + ".");
+                NetworkFileLogger.Warning(stage, "Password length is below the configured minimum before " + actionName + ".");
                 return false;
             }
+            ;
 
             return true;
         }
