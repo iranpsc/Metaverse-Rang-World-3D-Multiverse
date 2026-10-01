@@ -1,0 +1,17 @@
+{
+  "name": "metaverse-rang-world-3d-multiverse-main",
+  "version": "1.0.0",
+  "description": "Modular server infrastructure for metaverse gameplay, identity management, realtime communication, Room management, and Dedicated Game Server allocation.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "qrcode": "^1.5.4"
+  }
+}

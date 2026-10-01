@@ -1,0 +1,12 @@
+# وابستگی‌های نصب‌شده npm — هرگز commit نشود
+node_modules/
+
+# لاگ runtime
+logs/
+*.log
+
+# متغیرهای محرمانه
+.env
+
+# دادهٔ runtime محیط‌ها (فایل JSON هر محیط در زمان اجرا ساخته می‌شود)
+data/environments/*.json
