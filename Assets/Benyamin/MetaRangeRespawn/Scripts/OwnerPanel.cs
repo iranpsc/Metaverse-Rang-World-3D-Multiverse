@@ -147,6 +147,8 @@ namespace MetaRange.Avatar
         /// <summary>آواتار فعلی (برای کارت‌های ویرایش)</summary>
         public bool HasAvatar => avatar != null;
         public Vector3 AvatarPosition => avatar != null ? avatar.position : Vector3.zero;
+        /// <summary>چرخش آواتار بر حسب درجه — برای پیش‌نمایش زندهٔ Rx/Ry/Rz در کارت ویرایش</summary>
+        public Vector3 AvatarRotation => avatar != null ? avatar.eulerAngles : Vector3.zero;
         public string AvatarName => avatar != null ? avatar.name : "—";
 
         private void OnDestroy()

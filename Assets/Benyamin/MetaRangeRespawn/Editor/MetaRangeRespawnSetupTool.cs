@@ -962,11 +962,14 @@ namespace MetaRange.Avatar.EditorLayer
             ev.childForceExpandWidth = true;
             ev.childForceExpandHeight = false;
 
-            // هر فیلد با لیبل خودش: «نام»، «X»، «Y»، «Z»
+            // هر فیلد با لیبل خودش: «نام»، «X»، «Y»، «Z» و چرخش «Rx»، «Ry»، «Rz»
             TMP_InputField nameField = CreateLabeledField(editRow.transform, "NameRow", "نام", "NameField", "نام موقعیت");
             TMP_InputField xField = CreateLabeledField(editRow.transform, "XRow", "X", "XField", "0");
             TMP_InputField yField = CreateLabeledField(editRow.transform, "YRow", "Y", "YField", "0");
             TMP_InputField zField = CreateLabeledField(editRow.transform, "ZRow", "Z", "ZField", "0");
+            TMP_InputField rxField = CreateLabeledField(editRow.transform, "RxRow", "Rx", "RxField", "0");
+            TMP_InputField ryField = CreateLabeledField(editRow.transform, "RyRow", "Ry", "RyField", "0");
+            TMP_InputField rzField = CreateLabeledField(editRow.transform, "RzRow", "Rz", "RzField", "0");
 
             System.Type cardType = FindCardType();
             if (cardType == null)
@@ -987,6 +990,9 @@ namespace MetaRange.Avatar.EditorLayer
             SetRef(so, "xField", xField);
             SetRef(so, "yField", yField);
             SetRef(so, "zField", zField);
+            SetRef(so, "rxField", rxField);
+            SetRef(so, "ryField", ryField);
+            SetRef(so, "rzField", rzField);
             SetRef(so, "confirmButton", confirm);
             SetRef(so, "cancelButton", cancel);
             SetBool(so, "moveAvatarOnConfirm", true);   // بعد از ویرایش، آواتار جابه‌جا شود
@@ -1023,7 +1029,8 @@ namespace MetaRange.Avatar.EditorLayer
             var so = new SerializedObject(comp);
             string[] required = {
                 "idLabel", "posLabel", "dateLabel", "editButton", "editRow",
-                "nameField", "xField", "yField", "zField", "confirmButton", "cancelButton"
+                "nameField", "xField", "yField", "zField", "rxField", "ryField", "rzField",
+                "confirmButton", "cancelButton"
             };
             for (int i = 0; i < required.Length; i++)
             {
@@ -1045,10 +1052,13 @@ namespace MetaRange.Avatar.EditorLayer
             return true;
         }
 
-        /// <summary>بررسی وجود لیبل‌های نام/X/Y/Z در کارت (برای تشخیص پریفب قدیمی)</summary>
+        /// <summary>بررسی وجود لیبل‌های نام/X/Y/Z و چرخش Rx/Ry/Rz در کارت (برای تشخیص پریفب قدیمی)</summary>
         static bool CardHasFieldLabels(GameObject prefab)
         {
-            string[] required = { "NameRowLabel", "XRowLabel", "YRowLabel", "ZRowLabel" };
+            string[] required = {
+                "NameRowLabel", "XRowLabel", "YRowLabel", "ZRowLabel",
+                "RxRowLabel", "RyRowLabel", "RzRowLabel"
+            };
             var all = prefab.GetComponentsInChildren<Transform>(true);
 
             for (int i = 0; i < required.Length; i++)

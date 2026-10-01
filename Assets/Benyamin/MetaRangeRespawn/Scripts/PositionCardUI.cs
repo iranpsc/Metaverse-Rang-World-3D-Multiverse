@@ -19,6 +19,10 @@ namespace MetaRange.Avatar
         [SerializeField] private TMP_InputField xField;
         [SerializeField] private TMP_InputField yField;
         [SerializeField] private TMP_InputField zField;
+        [Tooltip("چرخش آواتار بر حسب درجه (eulerAngles) — در حالت ویرایش زنده به‌روز می‌شود")]
+        [SerializeField] private TMP_InputField rxField;
+        [SerializeField] private TMP_InputField ryField;
+        [SerializeField] private TMP_InputField rzField;
         [SerializeField] private Button confirmButton;
         [SerializeField] private Button cancelButton;
 
@@ -103,7 +107,7 @@ namespace MetaRange.Avatar
         }
 
         /// <summary>
-        /// خواندن موقعیت لحظه‌ای بازیکن در فیلدها (بدون شبکه).
+        /// خواندن موقعیت و چرخش لحظه‌ای بازیکن در فیلدها (بدون شبکه).
         /// اگر کاربر داخل یک فیلد تایپ کرده باشد، همان فیلد دست‌نخورده می‌ماند
         /// تا نوشتهٔ او پاک نشود.
         /// </summary>
@@ -116,6 +120,12 @@ namespace MetaRange.Avatar
             SetField(xField, p.x);
             SetField(yField, p.y);
             SetField(zField, p.z);
+
+            // چرخش هم زنده از بازیکن خوانده می‌شود (درجه)
+            Vector3 e = owner.AvatarRotation;
+            SetField(rxField, e.x);
+            SetField(ryField, e.y);
+            SetField(rzField, e.z);
         }
 
         static void SetField(TMP_InputField field, float value)
@@ -165,9 +175,9 @@ namespace MetaRange.Avatar
             float y = OwnerPanel.ParseFloat(yField != null ? yField.text : null, 0f);
             float z = OwnerPanel.ParseFloat(zField != null ? zField.text : null, 0f);
 
-            Quaternion rot = (entry != null && entry.rotation != null)
-                ? entry.rotation.ToQuaternion()
-                : Quaternion.identity;
+            // ---------- ۳) چرخش (درجه) ----------
+            // اگر فیلدهای چرخش وجود نداشته باشند (پریفب قدیمی)، چرخش ثبت‌شده حفظ می‌شود
+            Quaternion rot = ReadRotation();
 
             yield return owner.UpdatePositionRoutine(env, posId, new Vector3(x, y, z), rot, moveAvatarOnConfirm);
 
@@ -176,6 +186,26 @@ namespace MetaRange.Avatar
 
             if (owner != null) owner.NotifyEditEnded(this);
             SetMode(false);   // لیست با مقادیر جدید دوباره ساخته می‌شود
+        }
+
+        /// <summary>
+        /// ساخت Quaternion از فیلدهای Rx/Ry/Rz (درجه).
+        /// اگر هر سه فیلد نال باشند ⇒ چرخش قبلیِ ثبت‌شده برگردانده می‌شود.
+        /// </summary>
+        private Quaternion ReadRotation()
+        {
+            bool hasFields = rxField != null || ryField != null || rzField != null;
+
+            if (!hasFields)
+                return (entry != null && entry.rotation != null)
+                    ? entry.rotation.ToQuaternion()
+                    : Quaternion.identity;
+
+            float rx = OwnerPanel.ParseFloat(rxField != null ? rxField.text : null, 0f);
+            float ry = OwnerPanel.ParseFloat(ryField != null ? ryField.text : null, 0f);
+            float rz = OwnerPanel.ParseFloat(rzField != null ? rzField.text : null, 0f);
+
+            return Quaternion.Euler(rx, ry, rz);   // ZYX (هم‌ترتیب Unity)
         }
 
         private void OnCancel()
