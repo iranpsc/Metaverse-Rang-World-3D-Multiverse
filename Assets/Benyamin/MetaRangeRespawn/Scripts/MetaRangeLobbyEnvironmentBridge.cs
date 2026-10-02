@@ -781,6 +781,10 @@ namespace MetaRange.Avatar
 
             networkSpawnBridge.ApplyPoseWhenPlayerReady(position, rotation, env, spawnId);
 
+            // پنل مالک هم دقیقاً همین آواتار شبکه را بگیرد تا «موقعیت زنده» و «ثبت موقعیت»
+            // روی همان Transform باشند (نه یک کپسول، نه آواتار دوم).
+            networkSpawnBridge.AdoptNetworkPlayer("LobbyJoin:" + spawnId);
+
             Log("[متارنج لابی] پوز محیط ثبت شد | env=" + env + " | spawn=" + spawnId +
                 " | points=" + entries.Count + " | pos=" + position +
                 " rot=" + rotation.eulerAngles + " (اعمال روی local player شبکه در بریج)");

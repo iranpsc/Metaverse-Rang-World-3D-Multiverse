@@ -120,8 +120,7 @@ namespace MetaRange.Avatar
         }
 
         /// <summary>شیء identity محلی (برای خواندن NetId / authority)</summary>
-        public static object TryGetLocalPlayerIdentity()
-        {
+        public static object TryGetLocalPlayerIdentity()        {
             ResolveTypes();
             if (tNetworkClient == null) return null;
 
@@ -293,6 +292,56 @@ namespace MetaRange.Avatar
 
             applied = false;
             return StartCoroutine(WaitForLocalPlayerAndApply());
+        }
+
+        /// <summary>
+        /// یکپارچه‌سازی آواتار: به OwnerPanel های صحنه می‌گوید همین Transform شبکه
+        /// تنها مرجع آواتار است (موقعیت زنده، ثبت موقعیت و کارت‌ها روی همین).
+        /// هرگز آواتار دوم نمی‌سازد — فقط مرجع را هم‌راستا می‌کند.
+        /// </summary>
+        public void AdoptNetworkPlayer(string reason)
+        {
+            Transform t;
+            if (!MetaverseNetworkHooks.TryGetLocalPlayer(out t) || t == null)
+            {
+                Debug.Log("[متارنج اسپان] هنوز local player شبکه آماده نیست (" + reason +
+                          ") — پنل‌ها خودکار منتظر می‌مانند.");
+                return;
+            }
+
+            OwnerPanel[] panels = FindObjectsByType<OwnerPanel>();
+            for (int i = 0; i < panels.Length; i++)
+            {
+                if (panels[i] == null) continue;
+                panels[i].AdoptAvatar(t, reason);
+            }
+
+            // پنل مالک ممکن است هنوز ساخته نشده باشد؛ آن‌وقت خودمان می‌سازیم — بدون آواتار جدید
+            if (panels.Length == 0)
+            {
+                OwnerPanel panel = FindAnyObjectByType<OwnerPanel>();
+                if (panel == null)
+                {
+                    GameObject go = new GameObject("OwnerPanel");
+                    panel = go.AddComponent<OwnerPanel>();
+                    var f = typeof(OwnerPanel).GetField(
+                        "ownerToggle",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    if (f != null && f.GetValue(panel) == null)
+                    {
+                        go.AddComponent<Canvas>();
+                        var goToggle = new GameObject("OwnerToggle");
+                        goToggle.transform.SetParent(go.transform, false);
+                        UnityEngine.UI.Toggle tg = goToggle.AddComponent<UnityEngine.UI.Toggle>();
+                        f.SetValue(panel, tg);
+                    }
+                    Debug.Log("[متارنج اسپان] OwnerPanel ساخته شد و روی آواتار شبکه نشست (" + reason + ").");
+                }
+                panel.AdoptAvatar(t, reason);
+            }
+
+            Debug.Log("[متارنج اسپان] آواتار شبکه به پنل‌ها اعلام شد (" + reason + "): " + t.name +
+                      "  |  پنل‌های هماهنگ‌شده: " + panels.Length);
         }
 
         /// <summary>پوز را ثبت می‌کند و اگر local player همین حالا آماده است بی‌درنگ اعمالش می‌کند.</summary>

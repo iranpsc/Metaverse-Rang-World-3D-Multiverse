@@ -40,9 +40,9 @@ namespace MetaRange.Avatar.EditorLayer
         {
             EnsureFolders();
 
-            // آواتار اول مشخص می‌شود: اگر پیدا نشد، هیچ تغییری در صحنه داده نمی‌شود
+            // آواتار فقط مرجع *اختیاری* ادیتور است (پیش‌نمایش). نبودش مانع Setup نیست،
+            // چون منبع حقیقت در Runtime آواتار شبکه (local player) است.
             Transform avatar = ResolveAvatar();
-            if (avatar == null) return;
 
             // ریشه منطقی (بدون UI)
             GameObject systemRoot = FindOrCreateSceneObject(SystemRootName);
@@ -182,7 +182,9 @@ namespace MetaRange.Avatar.EditorLayer
                           (string.IsNullOrEmpty(EnvironmentCreator.StoredEnvironmentName)
                               ? "(قفل نشده — از دکمهٔ لابی پر می‌شود)"
                               : EnvironmentCreator.StoredEnvironmentName) + "\n" +
-                      "آواتار: " + avatar.name + "   |   سرور: " + ServerUrl);
+                      "آواتار ادیتور: " + (avatar == null ? "ندارد (Reference خالی گذاشته شد)" : avatar.name) +
+                      "   |   مرجع Runtime: local player شبکه" +
+                      "   |   سرور: " + ServerUrl);
         }
 
         // =====================================================================
@@ -367,6 +369,12 @@ namespace MetaRange.Avatar.EditorLayer
             report.AppendLine();
             report.AppendLine("— سرور لوکال متارنج —");
             report.AppendLine("  پیش‌فرض serverUrl: http://localhost:3000   (GET /api/health باید {\"ok\":true} بدهد)");
+
+            report.AppendLine();
+            report.AppendLine("— منبع آواتار —");
+            report.AppendLine("  منبع آواتار Runtime = Network local player | Editor selection فقط اختیاری است");
+            report.AppendLine("  اولویت: ① MetaverseNetworkClient.TryGetLocalPlayer  ② تگ Player / نام‌های رایج (فقط آفلاین)");
+            report.AppendLine("  ⇒ Setup بدون آبجکت Player هم کامل می‌شود؛ پس از Join، OwnerPanel خودکار روی آواتار شبکه می‌نشیند.");
 
             Debug.Log(report.ToString());
         }
@@ -1036,12 +1044,16 @@ namespace MetaRange.Avatar.EditorLayer
             }
 
             // ۴) نساز — به کاربر بگو اول Player را انتخاب کند
-            EditorUtility.DisplayDialog(
-                "آواتار پیدا نشد",
-                "لطفاً ابتدا آبجکت Player را در Hierarchy انتخاب کنید، سپس دوباره Tool را اجرا کنید.\n\n" +
-                "اگر آبجکت Player ندارید، یک کپسول بسازید، نامش را Player بگذارید و انتخاب کنید.",
-                "باشه");
-            Debug.LogWarning("[متارنگ] آواتار پیدا نشد — آبجکت Player را انتخاب کنید و دوباره Tool را بزنید.");
+// ④) هیچ آواتاری در صحنه نبود ⇒ Tool کامل ادامه می‌یابد.
+            // آواتار در Runtime از local player شبکه گرفته می‌شود (TryGetLocalPlayer)،
+            // پس نبودِ کپسول در ادیتور مانع هیچ‌چیز نیست.
+            Debug.LogWarning(
+                "[متارنج] آواتاری در صحنه پیدا نشد ⇒ Setup کامل اجرا شد بدون آبجکت آواتار.\n" +
+                "  · پنل‌ها، MetaRange_SpawnSystem و هر دو بریج ساخته و bind شدند.\n" +
+                "  · OwnerPanel و اعمال پوز در Runtime خودکار روی local player شبکه " +
+                "(MetaverseNetworkClient.TryGetLocalPlayer) قفل می‌شوند.\n" +
+                "  · اگر Network_A در پروژه نباشد، fallback آفلاین (تگ Player / نام‌های رایج) کار می‌کند.\n" +
+                "  · برای پیش‌نمایش فوری در ادیتور می‌توانید یک آواتار انتخاب کنید و دوباره Tool را بزنید.");
             return null;
         }
 

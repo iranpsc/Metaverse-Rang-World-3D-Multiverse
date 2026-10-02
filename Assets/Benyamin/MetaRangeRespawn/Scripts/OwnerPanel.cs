@@ -61,6 +61,9 @@ namespace MetaRange.Avatar
         private readonly List<GameObject> spawnedCards = new List<GameObject>();
         private readonly HashSet<string> knownIds = new HashSet<string>();
 
+        /// <summary>شمارندهٔ backoff برای poll آواتار (join با تأخیر)</summary>
+        private float avatarRetryAt;
+
         /// <summary>کارتِ در حال ویرایش — استاتیک تا بین نمونه‌های مختلف OwnerPanel هم مشترک باشد</summary>
         private static PositionCardUI editingCard;
 
@@ -79,24 +82,42 @@ namespace MetaRange.Avatar
         }
 
         /// <summary>
-        /// اطمینان از وجود آواتار معتبر: اگر رفرنس ابزار (Tool) به آبجکتی اشاره می‌کند که
-        /// در زمان اجرا حذف/تعویض شده، آواتار را دوباره پیدا می‌کنیم
-        /// (تگ Player، سپس نام‌های رایج).
+        /// اطمینان از وجود آواتار معتبر.
+        /// اولویت قطعی: <b>local player شبکه</b> (MetaverseNetworkClient.TryGetLocalPlayer).
+        /// بعد تگ Player / نام‌های رایج (فقط fallback آفلاین).
+        /// اگر Tool ادیتور کپسولی را bind کرده باشد و بعداً آواتار شبکه ظاهر شود،
+        /// همین‌جا یک‌بار روی آن سوییچ می‌کنیم تا مالک مختصات = آواتار آنلاین باشد.
         /// </summary>
         void EnsureAvatar(string reason)
         {
-            if (avatar != null) return;
-
             // ① اولویت با local player شبکه (Network_A / برنچ gRPC) است تا مالک
             //    مختصات همان آواتار آنلاین را ثبت کند، نه یک آبجکت اشتباه صحنه.
-            if (MetaverseNetworkHooks.TryGetLocalPlayer(out Transform netPlayer) && netPlayer != null)
+            bool networkReady = MetaverseNetworkHooks.TryGetLocalPlayer(out Transform netPlayer) && netPlayer != null;
+
+            if (networkReady)
             {
-                avatar = netPlayer;
-                Debug.Log("[OwnerPanel] آواتار = local player شبکه (" + reason + "): " + netPlayer.name +
-                                 "  |  " + MetaverseNetworkHooks.Describe());
+                if (avatar != netPlayer)
+                {
+                    if (avatar != null)
+                        Debug.LogWarning("[OwnerPanel] تعویض مرجع آواتار روی local player شبکه (" + reason +
+                                         "): " + avatar.name + " ⇒ " + netPlayer.name +
+                                         "  |  " + MetaverseNetworkHooks.Describe());
+                    else
+                        Debug.Log("[OwnerPanel] آواتار = local player شبکه (" + reason + "): " + netPlayer.name +
+                                  "  |  " + MetaverseNetworkHooks.Describe());
+
+                    avatar = netPlayer;
+                    // مرجع تازه ⇒ کارت‌های قبلی روی آبجکت دیگری بودند
+                    if (spawnedCards.Count > 0) ClearCards();
+                }
                 return;
             }
 
+            // ② شبکه هنوز آماده نیست. اگر فقط رفرنس ادیتور داریم و آن کپسول آفلاین است،
+            //    منتظر می‌مانیم تا آواتار واقعی شبکه بیاید و اشتباه ثبت نشود.
+            if (avatar != null && !IsOfflineAvatar(avatar)) return;
+
+            // ③ fallback آفلاین: تگ Player، سپس نام‌های رایج
             GameObject found = null;
             try { found = GameObject.FindWithTag("Player"); }
             catch { /* تگ Player تعریف نشده */ }
@@ -111,17 +132,48 @@ namespace MetaRange.Avatar
             if (found != null)
             {
                 avatar = found.transform;
-                Debug.LogWarning("[OwnerPanel] آواتار خودکار وصل شد (" + reason + "): " + found.name +
-                                 "  |  موقعیت: " + avatar.position.ToString("F2"));
+                Debug.LogWarning("[OwnerPanel] آواتار آفلاین وصل شد (" + reason + "): " + found.name +
+                                 "  |  موقعیت: " + avatar.position.ToString("F2") +
+                                 "  |  اگر آنلاین هستید، به‌محض ساخت آواتار شبکه خودکار سوییچ می‌کند.");
             }
-            else
+            else if (avatar == null)
             {
-                Debug.LogError("[OwnerPanel] آواتار پیدا نشد (" + reason + ") — هیچ آبجکتی با تگ Player " +
-                               "یا نام رایج وجود ندارد. روی Player تگ Player بگذارید یا فیلد Avatar " +
-                               "را در Inspector دستی ست کنید.");
+                Debug.LogWarning("[OwnerPanel] آواتار هنوز نیست (" + reason + ") — منتظر local player شبکه. " +
+                                 "اگر Network_A فعال نیست (حالت آفلاین) یک آبجکت با تگ Player بسازید.");
                 LogSceneRootNames();
             }
         }
+
+        /// <summary>
+        /// آیا این مرجع فقط یک کپسول/آبجکت آفلاین است (نه آواتار شبکه)؟
+        /// چنین مرجعی در اولویت پایین است و باید با local player شبکه جایگزین شود.
+        /// </summary>
+        static bool IsOfflineAvatar(Transform t)
+        {
+            if (t == null) return false;
+            string n = t.name.ToLowerInvariant();
+            return n.Contains("capsule") || n.Contains("کپسول") || n.Contains("placeholder") ||
+                   n.Contains("test") || n.Contains("temp") || n.Contains("dummy");
+        }
+
+        /// <summary>
+        /// پیشنهاد همان Transform آواتار شبکه به OwnerPanel — بعد از ApplyPose صدا زده می‌شود
+        /// تا پنل مالک و اعمال پوز روی «یک» آواتار باشند (هرگز آواتار دوم ساخته نمی‌شود).
+        /// </summary>
+        public void AdoptAvatar(Transform t, string reason)
+        {
+            if (t == null) return;
+            if (avatar == t) return;
+
+            if (avatar != null)
+                Debug.LogWarning("[OwnerPanel] پذیرش آواتار شبکه (" + reason + "): " + avatar.name + " ⇒ " + t.name);
+
+            avatar = t;
+            if (spawnedCards.Count > 0) ClearCards();
+        }
+
+        /// <summary>مرجع آواتار فعلی (پنل مالک) — برای هماهنگی بین پنل‌ها</summary>
+        public Transform AvatarRef { get { return avatar; } }
 
         /// <summary>فهرست آبجکت‌های ریشهٔ صحنه — برای تشخیص سریع مشکل</summary>
         void LogSceneRootNames()
@@ -179,11 +231,24 @@ namespace MetaRange.Avatar
             if (!ownerOn) return;
 
             // اگر آواتار در زمان اجرا نامعتبر شد (حذف/تعویض صحنه توسط بازی)، دوباره پیدایش کن
-            if (avatar == null) EnsureAvatar("Update");
+            //
+            // join با تأخیر: Network_A آواتار را *بعداً* می‌سازد. تا وقتی local player شبکه
+            // نیامده، هر ~1.2 ثانیه دوباره امتحان می‌کنیم (بدون EnsureAvatar هر فریم و
+            // بدون لاگ تکراری) و به‌محض آمدن، EnsureAvatar مرجع را سوییچ می‌کند.
+            if (avatar == null || IsOfflineAvatar(avatar))
+            {
+                avatarRetryAt -= Time.unscaledDeltaTime;
+                if (avatarRetryAt <= 0f)
+                {
+                    avatarRetryAt = 1.2f;
+                    bool had = avatar != null;
+                    EnsureAvatar(had ? "Update-switch" : "Update");
+                }
+            }
 
             if (avatar == null)
             {
-                livePosText.text = "موقعیت زنده: آواتار پیدا نشد\n(تگ Player یا فیلد Avatar را تنظیم کنید)";
+                livePosText.text = "موقعیت زنده: منتظر آواتار شبکه…\n(بعد از Join، خودکار وصل می‌شود)";
                 return;
             }
 
