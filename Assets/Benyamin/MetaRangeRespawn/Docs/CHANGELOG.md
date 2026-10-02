@@ -1,6 +1,6 @@
 # CHANGELOG — سیستم مدیریت موقعیت ریسپان آواتار (متارنج)
 
-نسخهٔ جاری: **v3.9.3**
+نسخهٔ جاری: **v3.9.4**
 
 ---
 
@@ -26,6 +26,24 @@
 - `Docs/10_جریان_لابی_تا_لینک.md` افزوده شد.
 - **صریح:** سرور لوکال = JSON و اسپان. حرکت و authority آواتار = سرور شبکهٔ آنلاین.
   هیچ فایلی از `Assets/Scripts/Network_A` تغییر نکرد.
+### v3.9.4 — اسکرول کل پنل مالک (رفع خروج لیست از صفحه)
+- **مشکل:** بعد از ثبت موقعیت، بخش «لینک و QR» باز می‌شد و بخش
+  «موقعیت‌های ذخیره‌شده» را از صفحه هل می‌داد بیرون ⇒ هیچ راهی برای دیدن/ویرایش
+  کارت‌ها نبود.
+- **رفع:** `MetaRangeRootPanel` حالا یک **viewport اسکرول‌شونده** است:
+  - خودِ پنل: `ScrollRect` عمودی (`Clamped`) + `Mask` (بریدن محتوای اضافه)
+  - فرزند جدید `PanelContent`: `VerticalLayoutGroup` + `ContentSizeFitter(vertical = PreferredSize)`
+    ⇒ ارتفاع محتوا با بزرگ‌شدن بخش‌ها رشد می‌کند و کل پنل اسکرول می‌خورد.
+  - همهٔ بخش‌ها (`HeaderTitle`, `Section_Owner`, `Section_Result`, `Section_PositionList`)
+    حالا فرزند `PanelContent` هستند، نه خود پنل.
+  - نوار اسکرول عمودی باریک در **لبهٔ چپ** پنل (تا متن RTL را نپوشاند)،
+    `AutoHide` و `scrollSensitivity = 40`.
+- اسکرول داخلی کارت‌ها (`PositionsScroll`) با ارتفاع ثابت ۲۶۰–۳۲۰ سر جایش ماند،
+  پس ویرایش کارت‌ها مثل قبل کار می‌کند.
+- ارتفاع دکمه‌ها (۶۴) و تیک (۴۸) و فونت‌های فارسی RTL **بدون تغییر** ماند.
+- **منطق ثبت موقعیت، ساخت لینک، QR و ویرایش کارت‌ها اصلاً تغییر نکرد**
+  (`OwnerPanel.cs` و `PositionCardUI.cs` دست‌نخورده‌اند؛ فقط `MetaRangeRespawnSetupTool.cs` layout).
+- **صریح:** هیچ فایلی از `Assets/Scripts/Network_A` تغییر نکرد.
 ## v3.8.0 - اتصال دکمهٔ محیط لابی به متارنج
 - فایل جدید `Scripts/MetaRangeLobbyEnvironmentBridge.cs`:
   - `MetaRangeSpawnList`: پارسر مستقل `GET /api/list-positions` (چون `JsonUtility` دیکشنری نمی‌خواند).

@@ -71,12 +71,13 @@ namespace MetaRange.Avatar.EditorLayer
             EnsureEventSystem();
             DestroyAllByName(PanelName);                       // پنل قبلی پاک شود
 
-            GameObject panel = CreateRootPanel(canvas.transform);
+            Transform panelContent;
+            GameObject panel = CreateRootPanel(canvas.transform, out panelContent);
 
             // ۱) عنوان سیستم (داخل CreateRootPanel ساخته می‌شود)
 
             // ۲) مالک: تیک، موقعیت زنده، نام یونیک، دکمه ثبت — فرزند مستقیم این سکشن
-            GameObject secOwner = CreateSection(panel.transform, "Section_Owner", "۱) پنل مالک", SectionMinHeight);
+            GameObject secOwner = CreateSection(panelContent, "Section_Owner", "۱) پنل مالک", SectionMinHeight);
             Toggle ownerToggle = CreateToggle(secOwner.transform, "OwnerToggle", "مالک هستم");
             RTLTextMeshPro livePos = CreateRtlTmp(secOwner.transform, "LivePositionText", "موقعیت زنده:  X: 0   Y: 0   Z: 0", FontSizeBody, TextAlignmentOptions.MidlineRight);
             SetFixedHeight(livePos, LivePosHeight);   // سه خط متن زنده نباید بریده شود
@@ -85,7 +86,7 @@ namespace MetaRange.Avatar.EditorLayer
             RTLTextMeshPro registerStatus = CreateRtlTmp(secOwner.transform, "RegisterStatusText", "", FontSizeBody, TextAlignmentOptions.MidlineRight);
 
             // ۳) نتیجه ثبت — فرزند مستقیم پنل (قبل از لیست)، تا فعال شدن، لیست جا باز نمی‌کند
-            GameObject secResult = CreateSection(panel.transform, "Section_Result", "لینک و QR", 0f);
+            GameObject secResult = CreateSection(panelContent, "Section_Result", "لینک و QR", 0f);
             RTLTextMeshPro linkText = CreateRtlTmp(secResult.transform, "LinkText", "", FontSizeBody, TextAlignmentOptions.MidlineRight);
 
             // QR در ردیف ثابت (بدون LayoutGroup) تا مربع بماند و کشیده نشود
@@ -116,7 +117,7 @@ namespace MetaRange.Avatar.EditorLayer
             SetFixedHeight(linkStatus, StatusHeight);
 
             // ۴) لیست موقعیت‌ها — Scroll فقط و فقط اینجاست، بعد از دکمه ثبت
-            GameObject secList = CreateSection(panel.transform, "Section_PositionList", "۲) موقعیت‌های ذخیره‌شده", SectionMinHeight);
+            GameObject secList = CreateSection(panelContent, "Section_PositionList", "۲) موقعیت‌های ذخیره‌شده", SectionMinHeight);
             RTLTextMeshPro emptyList = CreateRtlTmp(secList.transform, "EmptyListText", "هنوز موقعیتی ثبت نشده", FontSizeBody, TextAlignmentOptions.MidlineRight);
             RectTransform cardContainer = CreateScrollContent(secList.transform, "PositionsScroll");
 
@@ -598,7 +599,12 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
             return panel;
         }
 
-        static GameObject CreateRootPanel(Transform canvasTransform)
+/// <summary>
+        /// پنل راست = یک viewport اسکرول‌شونده.
+        /// محتوا (موقعیت زنده، ثبت، لینک/QR، لیست کارت‌ها) داخل Content چیده می‌شود و
+        /// اگر از ارتفاع صفحه بلندتر شود، کل پنل اسکرول می‌خورد ⇒ هیچ بخشی از دسترس خارج نمی‌ماند.
+        /// </summary>
+        static GameObject CreateRootPanel(Transform canvasTransform, out Transform content)
         {
             GameObject panel = CreateUi(PanelName, canvasTransform);
 
@@ -606,14 +612,27 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
             img.color = PanelBg;
 
             RectTransform rt = panel.GetComponent<RectTransform>();
-            // چسبیده به راست صفحه، تمام ارتفاع با margin
+            // لنگر سمت راست + کمی فاصله از لبه‌ی صفحه (RTL-friendly margin)
             rt.anchorMin = new Vector2(1f, 0f);
             rt.anchorMax = new Vector2(1f, 1f);
             rt.pivot = new Vector2(1f, 0.5f);
             rt.anchoredPosition = new Vector2(-16f, 0f);
-            rt.sizeDelta = new Vector2(PanelWidth, -32f); // width=390 ، بالا/پایین 16px
+            rt.sizeDelta = new Vector2(PanelWidth, -32f);   // ارتفاع ثابت = اندازهٔ اسکرول
 
-            VerticalLayoutGroup vlg = panel.AddComponent<VerticalLayoutGroup>();
+            // viewport خودِ پنل است؛ Mask محتوای اضافه را می‌بُرد
+            Mask mask = panel.AddComponent<Mask>();
+            mask.showMaskGraphic = true;
+
+            // ── Content: ارتفاعش با محتوا رشد می‌کند (PrefSize) ──
+            GameObject contentGo = CreateUi("PanelContent", panel.transform);
+            RectTransform contentRt = contentGo.GetComponent<RectTransform>();
+            contentRt.anchorMin = new Vector2(0f, 1f);
+            contentRt.anchorMax = new Vector2(1f, 1f);
+            contentRt.pivot = new Vector2(0.5f, 1f);
+            contentRt.anchoredPosition = Vector2.zero;
+            contentRt.sizeDelta = new Vector2(0f, 0f);
+
+            VerticalLayoutGroup vlg = contentGo.AddComponent<VerticalLayoutGroup>();
             vlg.padding = new RectOffset(16, 16, 16, 16);
             vlg.spacing = 14;
             vlg.childAlignment = TextAnchor.UpperCenter;
@@ -622,14 +641,71 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
             vlg.childForceExpandWidth = true;
             vlg.childForceExpandHeight = false;
 
-            ContentSizeFitter fitter = panel.AddComponent<ContentSizeFitter>();
+            ContentSizeFitter fitter = contentGo.AddComponent<ContentSizeFitter>();
             fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-            fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;   // ← رشد با محتوا
 
-            RTLTextMeshPro header = CreateRtlTmp(panel.transform, "HeaderTitle", ProductName, FontSizeHeader, TextAlignmentOptions.MidlineRight);
+            content = contentGo.transform;
+
+            // ── ScrollRect روی خود پنل ──
+            ScrollRect scroll = panel.AddComponent<ScrollRect>();
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.elasticity = 0.02f;
+            scroll.scrollSensitivity = 40f;
+            scroll.viewport = rt;
+            scroll.content = contentRt;
+
+            // نوار اسکرول عمودی (لبهٔ چپ پنل تا متن RTL را نپوشاند)
+            CreatePanelScrollbar(panel.transform, scroll);
+
+            RTLTextMeshPro header = CreateRtlTmp(content, "HeaderTitle", ProductName, FontSizeHeader, TextAlignmentOptions.MidlineRight);
             header.color = HeaderColor;
             header.fontStyle = FontStyles.Bold;
             return panel;
+        }
+
+        /// <summary>نوار اسکرول عمودی باریک در لبهٔ چپ پنل (برای کشف‌پذیری در موبایل)</summary>
+        static void CreatePanelScrollbar(Transform panel, ScrollRect scroll)
+        {
+            GameObject barGo = CreateUi("PanelScrollbar", panel);
+            Image barBg = barGo.AddComponent<Image>();
+            barBg.color = new Color(1f, 1f, 1f, 0.08f);
+            barBg.raycastTarget = true;
+
+            RectTransform barRt = barGo.GetComponent<RectTransform>();
+            barRt.anchorMin = new Vector2(0f, 0f);
+            barRt.anchorMax = new Vector2(0f, 1f);
+            barRt.pivot = new Vector2(0f, 0.5f);
+            barRt.sizeDelta = new Vector2(12f, -8f);
+            barRt.anchoredPosition = new Vector2(2f, 0f);
+
+            GameObject slideGo = CreateUi("SlidingArea", barGo.transform);
+            RectTransform slideRt = slideGo.GetComponent<RectTransform>();
+            slideRt.anchorMin = Vector2.zero;
+            slideRt.anchorMax = Vector2.one;
+            slideRt.offsetMin = new Vector2(2f, 2f);
+            slideRt.offsetMax = new Vector2(-2f, -2f);
+
+            GameObject handleGo = CreateUi("Handle", slideGo.transform);
+            Image handleImg = handleGo.AddComponent<Image>();
+            handleImg.color = new Color(1f, 1f, 1f, 0.35f);
+            RectTransform handleRt = handleGo.GetComponent<RectTransform>();
+            handleRt.anchorMin = new Vector2(0f, 1f);
+            handleRt.anchorMax = new Vector2(1f, 1f);
+            handleRt.pivot = new Vector2(0.5f, 1f);
+            handleRt.sizeDelta = new Vector2(0f, 60f);
+            handleRt.anchoredPosition = Vector2.zero;
+
+            Scrollbar bar = barGo.AddComponent<Scrollbar>();
+            bar.handleRect = handleRt;
+            bar.targetGraphic = handleImg;
+            bar.direction = Scrollbar.Direction.BottomToTop;
+            bar.size = 0.25f;
+
+            scroll.verticalScrollbar = bar;
+            scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
         }
 
         static GameObject CreateSection(Transform parent, string name, string title, float minHeight)
