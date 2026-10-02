@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Text;
 using TMPro;
@@ -25,6 +25,21 @@ namespace MetaRange.Avatar
         public static void ClearStoredName()
         {
             StoredEnvironmentName = string.Empty;
+        }
+
+        /// <summary>
+        /// قفل کردن Context مشترک روی یک env مشخص.
+        /// بریج لابی بعد از کلیک روی دکمهٔ محیط این را صدا می‌زند تا OwnerPanel،
+        /// لیست کارت‌ها، ثبت موقعیت و لینک خروجی همگی روی همان env کار کنند.
+        /// نام ورودی با قاعدهٔ سرور یکسان‌سازی می‌شود.
+        /// </summary>
+        public static string LockStoredName(string envName)
+        {
+            string name = NormalizeEnvironmentName(envName);
+            if (string.IsNullOrEmpty(name)) return StoredEnvironmentName;
+
+            StoredEnvironmentName = name;
+            return name;
         }
 
         /// <summary>
@@ -55,6 +70,63 @@ namespace MetaRange.Avatar
                 reply.ok = false;
                 Debug.LogError("[EnvironmentCreator] create-env ناموفق — " + reply.Detail());
             }
+        }
+
+        /// <summary>
+        /// تضمین آماده بودن محیط با یک نام مشخص (مثلاً کد ساختمانِ دکمهٔ لابی).
+        /// 201 → ساخته شد | 409 → از قبل بود | هر دو موفق‌اند و idempotent هستند.
+        /// نام روی StoredEnvironmentName قفل می‌شود تا OwnerPanel و لینک‌سازی همان را ببینند.
+        /// نام با safeName سرور هم‌خوان است: حروف/رقم/ـ/_ و محدودهٔ فارسی (U+0600-U+06FF)،
+        /// بدون فاصله و بدون نیم‌فاصله. اگر سرور نام را رد کند (400) شکست خورده و قفل نمی‌شود.
+        /// </summary>
+        public static IEnumerator EnsureEnvironment(string server, string envName, MetarangeNet.Reply reply)
+        {
+            string name = NormalizeEnvironmentName(envName);
+
+            if (string.IsNullOrEmpty(name))
+            {
+                reply.ok = false;
+                reply.error = "Environment name is empty.";
+                Debug.LogError("[EnvironmentCreator] نام محیط خالی است — create-env صدا زده نشد.");
+                yield break;
+            }
+
+            string json = JsonUtility.ToJson(new CreateEnvBody(name));
+            yield return MetarangeNet.PostJson(server, "/api/create-env", json, reply);
+
+            if (reply.code == 201 || reply.code == 409)
+            {
+                StoredEnvironmentName = name;
+                reply.ok = true;
+                Debug.Log(
+                    "[EnvironmentCreator] محیط «" + name + "» آماده است" +
+                    (reply.code == 409 ? " (از قبل وجود داشت)" : " (ساخته شد)"));
+            }
+            else
+            {
+                reply.ok = false;
+                Debug.LogError("[EnvironmentCreator] create-env ناموفق — " + reply.Detail());
+            }
+        }
+
+        /// <summary>نام محیط را برای سرور Node امن می‌کند (trim + حذف کاراکترهای غیرمجاز).</summary>
+        public static string NormalizeEnvironmentName(string envName)
+        {
+            if (string.IsNullOrWhiteSpace(envName)) return string.Empty;
+
+            var builder = new StringBuilder(envName.Trim().Length);
+            foreach (char c in envName.Trim())
+            {
+                bool latin = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+                bool persian = c >= '\u0600' && c <= '\u06FF';
+                bool mark = c == '-' || c == '_';
+
+                if (latin || persian || mark) builder.Append(c);
+            }
+
+            if (builder.Length == 0) return string.Empty;
+            if (builder.Length > 64) builder.Length = 64;
+            return builder.ToString();
         }
 
         private void Awake()

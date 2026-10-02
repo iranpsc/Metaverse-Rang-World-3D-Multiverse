@@ -1,9 +1,31 @@
 # CHANGELOG — سیستم مدیریت موقعیت ریسپان آواتار (متارنج)
 
-نسخهٔ جاری: **v3.8.0**
+نسخهٔ جاری: **v3.9.0**
 
 ---
 
+## v3.9.0 - دکمهٔ محیط لابی ⇒ create-env ⇒ Context قفل ⇒ اسپان
+- صحنه‌های قطعی کشف و در Tools ثبت شد: لابی `Lobby 1 WebGL` / محیط `WebGL_Enviroment`
+  (منبع: `DedicatedGameServerRealtimeRoomBinderWebGL.cs:19-20`).
+- `EnvironmentCreator`:
+  - `NormalizeEnvironmentName(string)` جدید — هم‌راستا با `safeName` سرور
+    (لاتین/رقم/`-`/`_` + بازهٔ فارسی U+0600-U+06FF، حذف فاصله و نیم‌فاصله، بریدن تا ۶۴).
+  - `EnsureEnvironment(server, envName, reply)` جدید — `POST /api/create-env` با نام صریح؛
+    `201` و `409` هر دو موفق‌اند (idempotent)، `400` شکست با Context دست‌نخورده.
+  - `LockStoredName(string)` جدید — قفل کردن Context مشترک روی env لابی.
+  - overload قدیمی `EnsureEnvironment(server, reply)` بدون تغییر باقی ماند (سازگاری OwnerPanel).
+- `MetaRangeLobbyEnvironmentBridge`: `HandleRoomJoined` حالا نام دکمه را نرمال می‌کند،
+  محیط را روی سرور لوکال تضمین می‌کند، `Context.env` را قفل می‌کند و بعد سراغ
+  `list-positions` → انتخاب نقطه → `get-position` → `ApplyPoseWhenPlayerReady` می‌رود.
+  لیست خالی ⇒ فقط Context قفل می‌شود و خطایی داده نمی‌شود.
+- Tools: لاگ راه‌اندازی نام صحنهٔ فعال/لابی/محیط و Context را نشان می‌دهد؛
+  منوی «بررسی اتصال لابی» بخش صحنه‌ها و Context را اضافه کرد؛
+  منوی جدید «نمایش Context محیط فعلی».
+- تست جدید `envtest` (۳۲ assertion): نرمال‌سازی، Ensure با ۲۰۱/۴۰۹/۴۰۰، نام خالی
+  بدون درخواست، Lock/Clear، و سازگاری overload قدیمی.
+- `Docs/10_جریان_لابی_تا_لینک.md` افزوده شد.
+- **صریح:** سرور لوکال = JSON و اسپان. حرکت و authority آواتار = سرور شبکهٔ آنلاین.
+  هیچ فایلی از `Assets/Scripts/Network_A` تغییر نکرد.
 ## v3.8.0 - اتصال دکمهٔ محیط لابی به متارنج
 - فایل جدید `Scripts/MetaRangeLobbyEnvironmentBridge.cs`:
   - `MetaRangeSpawnList`: پارسر مستقل `GET /api/list-positions` (چون `JsonUtility` دیکشنری نمی‌خواند).

@@ -30,6 +30,11 @@ namespace MetaRange.Avatar.EditorLayer
         const string ServerUrl = "http://localhost:3000";
         const string PlayBaseUrl = "https://metarange.adfam.com/play";
 
+        // نام صحنه‌های قطعی پروژه (از DedicatedGameServerRealtimeRoomBinderWebGL استخراج شده:
+        // WebGLLobbySceneName / WebGLGameplaySceneName). مبنای تشخیص و لاگ هستند.
+        const string LobbySceneName = "Lobby 1 WebGL";
+        const string GameplaySceneName = "WebGL_Enviroment";
+
         [MenuItem(MenuPath)]
         public static void Setup()
         {
@@ -166,9 +171,35 @@ namespace MetaRange.Avatar.EditorLayer
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
 
             Debug.Log("[متارنگ] راه‌اندازی کامل شد — " + ProductName + "\n" +
+                      "صحنهٔ فعال: " + SceneManager.GetActiveScene().name +
+                      "   |   لابی: " + LobbySceneName +
+                      "   |   محیط: " + GameplaySceneName + "\n" +
                       "پنل چپ (ساخت محیط): " + CreateCanvasName + " → " + CreatePanelName + "\n" +
                       "پنل راست (مالک): " + PanelName + "\n" +
+                      "بریج لابی (create-env + Context.env): " +
+                          (FindLobbyBridgeType() != null ? "نصب‌شده" : "★ موجود نیست") +
+                          "   |   Context.env فعلی: " +
+                          (string.IsNullOrEmpty(EnvironmentCreator.StoredEnvironmentName)
+                              ? "(قفل نشده — از دکمهٔ لابی پر می‌شود)"
+                              : EnvironmentCreator.StoredEnvironmentName) + "\n" +
                       "آواتار: " + avatar.name + "   |   سرور: " + ServerUrl);
+        }
+
+        // =====================================================================
+        // وضعیت Context مشترک محیط (برای بازرسی سریع)
+        // =====================================================================
+
+        [MenuItem("Tools/متارنج/نمایش Context محیط فعلی")]
+        public static void ShowEnvironmentContext()
+        {
+            Debug.Log(
+                "[متارنج] Context محیط" +
+                " | StoredEnvironmentName = " +
+                (string.IsNullOrEmpty(EnvironmentCreator.StoredEnvironmentName)
+                    ? "(خالی)" : EnvironmentCreator.StoredEnvironmentName) +
+                " | صحنهٔ فعال = " + SceneManager.GetActiveScene().name +
+                " | لابی = " + LobbySceneName +
+                " | محیط = " + GameplaySceneName);
         }
 
         // =====================================================================
@@ -317,8 +348,39 @@ namespace MetaRange.Avatar.EditorLayer
             report.AppendLine();
             report.AppendLine(LobbyNetworkHooks.Describe());
             report.AppendLine("نگاشت: env = کد ساختمان (CurrentRoomName)  |  spawn = یکی از نقاط /api/list-positions?env=<کد ساختمان>");
+            report.AppendLine("جریان: OnRoomJoinedFor3D ⇒ create-env (idempotent) ⇒ Context.env قفل ⇒ list-positions ⇒ get-position ⇒ TryApplyPose روی local player شبکه");
+            report.AppendLine();
+
+            report.AppendLine("— صحنه‌ها —");
+            report.AppendLine("  لابی      : " + LobbySceneName + "   موجود در Build Settings: " + SceneInBuildSettings(LobbySceneName));
+            report.AppendLine("  محیط      : " + GameplaySceneName + "   موجود در Build Settings: " + SceneInBuildSettings(GameplaySceneName));
+            report.AppendLine("  صحنهٔ فعال: " + SceneManager.GetActiveScene().name);
+            report.AppendLine("  LoadMode  : Single  ⇒  ریشهٔ متارنج باید DontDestroyOnLoad باشد (AutoBootstrap)");
+
+            report.AppendLine();
+            report.AppendLine("— Context مشترک محیط —");
+            report.AppendLine("  EnvironmentCreator.StoredEnvironmentName = " +
+                (string.IsNullOrEmpty(EnvironmentCreator.StoredEnvironmentName)
+                    ? "(خالی — با کلیک روی دکمهٔ محیط قفل می‌شود)"
+                    : EnvironmentCreator.StoredEnvironmentName));
+
+            report.AppendLine();
+            report.AppendLine("— سرور لوکال متارنج —");
+            report.AppendLine("  پیش‌فرض serverUrl: http://localhost:3000   (GET /api/health باید {\"ok\":true} بدهد)");
 
             Debug.Log(report.ToString());
+        }
+
+        static bool SceneInBuildSettings(string sceneName)
+        {
+            EditorBuildSettingsScene[] scenes = EditorBuildSettings.scenes;
+            for (int i = 0; i < scenes.Length; i++)
+            {
+                if (scenes[i] != null &&
+                    string.Equals(System.IO.Path.GetFileNameWithoutExtension(scenes[i].path), sceneName, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
         }
 
         static string MemberRow(string member, bool missing, string role)

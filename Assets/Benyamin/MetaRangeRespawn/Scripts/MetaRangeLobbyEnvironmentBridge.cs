@@ -636,16 +636,21 @@ namespace MetaRange.Avatar
             Log("[متارنج لابی] خروج از اتاق | roomId=" + roomId);
         }
 
-        //* این تابع با ورود به یک محیط، نام آن را به env متارنج تبدیل و پوز را می‌گیرد.
+        //* این تابع با ورود به یک محیط، نام دکمه را به env متارنج تبدیل، آن را روی سرور لوکال تضمین و سپس پوز را می‌گیرد.
         private void HandleRoomJoined(string roomId)
         {
-            string env = ResolveEnvironmentName(roomId);
+            string rawEnv = ResolveEnvironmentName(roomId);
+            string env = EnvironmentCreator.NormalizeEnvironmentName(rawEnv);
+
             if (string.IsNullOrEmpty(env))
             {
-                LastError = "environment_name_unresolved | roomId=" + roomId;
+                LastError = "environment_name_unresolved | roomId=" + roomId + " | raw=" + rawEnv;
                 Debug.LogWarning("[متارنج لابی] نام محیط قابل تشخیص نبود ⇒ پوزی اعمال نشد | roomId=" + roomId);
                 return;
             }
+
+            if (!string.Equals(env, rawEnv, StringComparison.Ordinal))
+                Log("[متارنج لابی] نام env نرمال شد | raw=" + rawEnv + " | normalized=" + env);
 
             CurrentEnvironment = env;
             HasResolvedPose = false;
@@ -653,7 +658,31 @@ namespace MetaRange.Avatar
             LastError = string.Empty;
 
             Log("[متارنج لابی] ورود به محیط | env=" + env + " | roomId=" + roomId);
-            StartCoroutine(ResolvePoseAndApply(env));
+            StartCoroutine(EnsureAndResolve(env));
+        }
+
+        //* این تابع ابتدا محیط را روی سرور لوکال تضمین می‌کند (idempotent)، سپس قفل Context و پوز را ادامه می‌دهد.
+        private IEnumerator EnsureAndResolve(string env)
+        {
+            // ① تضمین وجود محیط روی سرور Node (اگر بود 409 ⇒ موفقیت)
+            var createReply = new MetarangeNet.Reply();
+            yield return EnvironmentCreator.EnsureEnvironment(serverUrl, env, createReply);
+
+            if (!createReply.ok)
+            {
+                LastError = "ensure_environment_failed | env=" + env + " | " + createReply.Detail();
+                Debug.LogWarning("[متارنج لابی] ساخت/تضمین محیط «" + env + "» ناموفق بود ⇒ " +
+                                 "فقط ادامهٔ جریان شبکه، بدون اسپان");
+                yield break;
+            }
+
+            // ② قفل Context مشترک ⇒ OwnerPanel و لینک‌سازی همان env را می‌بینند
+            EnvironmentCreator.LockStoredName(env);
+            Log("[متارنج لابی] Context.env قفل شد | " + EnvironmentCreator.StoredEnvironmentName +
+                " | " + (createReply.code == 409 ? "already_exists" : "created"));
+
+            // ③ حالا فهرست نقاط و پوز
+            yield return ResolvePoseAndApply(env);
         }
 
         //* این تابع نام اتاق جاری (کد ساختمان) را می‌گیرد و فقط در نبود آن به roomId پناه می‌برد.
