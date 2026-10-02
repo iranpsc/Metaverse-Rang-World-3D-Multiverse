@@ -76,24 +76,24 @@ namespace MetaRange.Avatar.EditorLayer
             // ۱) عنوان سیستم (داخل CreateRootPanel ساخته می‌شود)
 
             // ۲) مالک: تیک، موقعیت زنده، نام یونیک، دکمه ثبت — فرزند مستقیم این سکشن
-            GameObject secOwner = CreateSection(panel.transform, "Section_Owner", "۱) پنل مالک", 260f);
+            GameObject secOwner = CreateSection(panel.transform, "Section_Owner", "۱) پنل مالک", SectionMinHeight);
             Toggle ownerToggle = CreateToggle(secOwner.transform, "OwnerToggle", "مالک هستم");
-            RTLTextMeshPro livePos = CreateRtlTmp(secOwner.transform, "LivePositionText", "موقعیت زنده:  X: 0   Y: 0   Z: 0", 15, TextAlignmentOptions.MidlineRight);
-            SetFixedHeight(livePos, 78f);   // سه خط متن زنده نباید بریده شود
+            RTLTextMeshPro livePos = CreateRtlTmp(secOwner.transform, "LivePositionText", "موقعیت زنده:  X: 0   Y: 0   Z: 0", FontSizeBody, TextAlignmentOptions.MidlineRight);
+            SetFixedHeight(livePos, LivePosHeight);   // سه خط متن زنده نباید بریده شود
             TMP_InputField posNameInput = CreateTmpInput(secOwner.transform, "PositionNameInput", "نام موقعیت (یونیک — خالی = خودکار)");
             Button registerBtn = CreateButton(secOwner.transform, "RegisterPositionButton", "ثبت موقعیت", new Color(0.18f, 0.68f, 0.38f));
-            RTLTextMeshPro registerStatus = CreateRtlTmp(secOwner.transform, "RegisterStatusText", "", 13, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro registerStatus = CreateRtlTmp(secOwner.transform, "RegisterStatusText", "", FontSizeBody, TextAlignmentOptions.MidlineRight);
 
             // ۳) نتیجه ثبت — فرزند مستقیم پنل (قبل از لیست)، تا فعال شدن، لیست جا باز نمی‌کند
             GameObject secResult = CreateSection(panel.transform, "Section_Result", "لینک و QR", 0f);
-            RTLTextMeshPro linkText = CreateRtlTmp(secResult.transform, "LinkText", "", 13, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro linkText = CreateRtlTmp(secResult.transform, "LinkText", "", FontSizeBody, TextAlignmentOptions.MidlineRight);
 
             // QR در ردیف ثابت (بدون LayoutGroup) تا مربع بماند و کشیده نشود
             GameObject qrRow = CreateUi("QrRow", secResult.transform);
             LayoutElement qrRowLe = qrRow.AddComponent<LayoutElement>();
-            qrRowLe.minHeight = 124f;
-            qrRowLe.preferredHeight = 124f;
-            RawImage qrImage = CreateQrImage(qrRow.transform, "QrRawImage", 120f);
+            qrRowLe.minHeight = QrSize + 16f;
+            qrRowLe.preferredHeight = QrSize + 16f;
+            RawImage qrImage = CreateQrImage(qrRow.transform, "QrRawImage", QrSize);
 
             // دکمه‌های کنترل لینک/QR (کپی + دانلود متنی + دانلود تصویر)
             GameObject linkBtns = CreateUi("LinkButtons", secResult.transform);
@@ -105,19 +105,19 @@ namespace MetaRange.Avatar.EditorLayer
             lbg.childForceExpandWidth = true;
             lbg.childForceExpandHeight = true;
             LayoutElement lbgLe = linkBtns.AddComponent<LayoutElement>();
-            lbgLe.minHeight = 44f;
-            lbgLe.preferredHeight = 44f;
+            lbgLe.minHeight = ButtonHeight;
+            lbgLe.preferredHeight = ButtonHeight;
 
             Button copyLinkBtn = CreateButton(linkBtns.transform, "CopyLinkButton", "کپی لینک", new Color(0.20f, 0.50f, 0.75f));
             Button downloadLinkBtn = CreateButton(linkBtns.transform, "DownloadLinkButton", "دانلود لینک", new Color(0.25f, 0.45f, 0.60f));
             Button downloadQr = CreateButton(linkBtns.transform, "DownloadQrButton", "دانلود QR", new Color(0.35f, 0.35f, 0.40f));
 
-            RTLTextMeshPro linkStatus = CreateRtlTmp(secResult.transform, "LinkStatusText", "", 13, TextAlignmentOptions.MidlineRight);
-            SetFixedHeight(linkStatus, 30f);
+            RTLTextMeshPro linkStatus = CreateRtlTmp(secResult.transform, "LinkStatusText", "", FontSizeBody, TextAlignmentOptions.MidlineRight);
+            SetFixedHeight(linkStatus, StatusHeight);
 
             // ۴) لیست موقعیت‌ها — Scroll فقط و فقط اینجاست، بعد از دکمه ثبت
-            GameObject secList = CreateSection(panel.transform, "Section_PositionList", "۲) موقعیت‌های ذخیره‌شده", 260f);
-            RTLTextMeshPro emptyList = CreateRtlTmp(secList.transform, "EmptyListText", "هنوز موقعیتی ثبت نشده", 14, TextAlignmentOptions.MidlineRight);
+            GameObject secList = CreateSection(panel.transform, "Section_PositionList", "۲) موقعیت‌های ذخیره‌شده", SectionMinHeight);
+            RTLTextMeshPro emptyList = CreateRtlTmp(secList.transform, "EmptyListText", "هنوز موقعیتی ثبت نشده", FontSizeBody, TextAlignmentOptions.MidlineRight);
             RectTransform cardContainer = CreateScrollContent(secList.transform, "PositionsScroll");
 
             // ارتفاع واقعی هر سکشن محاسبه می‌شود تا overlap نداشته باشیم
@@ -488,6 +488,34 @@ namespace MetaRange.Avatar.EditorLayer
         static readonly Color SectionTitleColor = new Color(0.85f, 0.90f, 1f, 1f);
         static readonly Color BodyTextColor = new Color(0.93f, 0.93f, 0.96f, 1f);
 
+// ───────────── اندازه‌های خوانا (درشت، مناسب موبایل / Game View) ─────────────
+// layout دست‌نخورده است؛ فقط فونت‌ها و ارتفاع‌های متن بزرگ شده‌اند.
+static readonly int FontSizeHeader = 30;     // عنوان پنل
+static readonly int FontSizePanelSubHeader = 26; // عنوان پنل ساخت محیط
+static readonly int FontSizeTitle = 34;      // عنوان بخش
+static readonly int FontSizeBody = 26;       // متن بدنه / وضعیت / مختصات زنده
+static readonly int FontSizeButton = 28;     // برچسب دکمه‌ها
+static readonly int FontSizeInput = 24;      // ورودی متن
+static readonly int FontSizeFieldLabel = 22; // برچسب فیلدهای کارت (X/Y/Z)
+static readonly int FontSizeCard = 24;       // متن کارت
+static readonly int FontSizeCardSmall = 20;  // متن ریز کارت
+
+// ارتفاع‌ها — فقط برای اینکه متن درشت بریده نشود
+static readonly float ButtonHeight = 64f;    // دکمه‌ها
+static readonly float ToggleHeight = 48f;    // تیک «مالک هستم»
+static readonly float FieldRowHeight = 58f;  // ردیف فیلدهای کارت
+static readonly float LivePosHeight = 140f;  // سه خط مختصات زنده
+static readonly float StatusHeight = 62f;    // متن وضعیت (دو خط)
+static readonly float SectionMinHeight = 330f;
+static readonly float ScrollMinHeight = 260f;
+static readonly float ScrollPreferredHeight = 320f;
+static readonly float QrSize = 156f;
+static readonly float CardWidth = 420f;
+static readonly float CardHeight = 170f;
+static readonly float CreatePanelWidth = 470f;
+static readonly float CreatePanelHeight = 300f;
+static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر راست و جمع‌وجور)
+
         /// <summary>Canvas مستقل پنل چپ (ساخت فایل محیط) — تا با پنل راست تداخل نکند</summary>
         static Canvas EnsureCreateCanvas()
         {
@@ -542,7 +570,7 @@ namespace MetaRange.Avatar.EditorLayer
             rt.anchorMax = new Vector2(0f, 1f);
             rt.pivot = new Vector2(0f, 1f);
             rt.anchoredPosition = new Vector2(16f, -16f);
-            rt.sizeDelta = new Vector2(380f, 260f);
+            rt.sizeDelta = new Vector2(CreatePanelWidth, CreatePanelHeight);
 
             VerticalLayoutGroup vlg = panel.AddComponent<VerticalLayoutGroup>();
             vlg.padding = new RectOffset(16, 16, 16, 16);
@@ -558,14 +586,14 @@ namespace MetaRange.Avatar.EditorLayer
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;   // ارتفاع خودکار
 
             RTLTextMeshPro header = CreateRtlTmp(panel.transform, "CreateEnvHeader",
-                "ساخت فایل محیط (Create Environment)", 18, TextAlignmentOptions.MidlineRight);
+                "ساخت فایل محیط (Create Environment)", FontSizePanelSubHeader, TextAlignmentOptions.MidlineRight);
             header.color = HeaderColor;
             header.fontStyle = FontStyles.Bold;
 
             TMP_InputField nameInput = CreateTmpInput(panel.transform, "EnvNameInput", "نام محیط (خالی = خودکار)");
             Button createBtn = CreateButton(panel.transform, "CreateEnvButton",
                 "ساخت فایل محیط", new Color(0.20f, 0.45f, 0.85f));
-            RTLTextMeshPro result = CreateRtlTmp(panel.transform, "CreateEnvResult", "", 14, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro result = CreateRtlTmp(panel.transform, "CreateEnvResult", "", FontSizeBody, TextAlignmentOptions.MidlineRight);
 
             return panel;
         }
@@ -583,7 +611,7 @@ namespace MetaRange.Avatar.EditorLayer
             rt.anchorMax = new Vector2(1f, 1f);
             rt.pivot = new Vector2(1f, 0.5f);
             rt.anchoredPosition = new Vector2(-16f, 0f);
-            rt.sizeDelta = new Vector2(390f, -32f); // width=390 ، بالا/پایین 16px
+            rt.sizeDelta = new Vector2(PanelWidth, -32f); // width=390 ، بالا/پایین 16px
 
             VerticalLayoutGroup vlg = panel.AddComponent<VerticalLayoutGroup>();
             vlg.padding = new RectOffset(16, 16, 16, 16);
@@ -598,7 +626,7 @@ namespace MetaRange.Avatar.EditorLayer
             fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
             fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
 
-            RTLTextMeshPro header = CreateRtlTmp(panel.transform, "HeaderTitle", ProductName, 20, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro header = CreateRtlTmp(panel.transform, "HeaderTitle", ProductName, FontSizeHeader, TextAlignmentOptions.MidlineRight);
             header.color = HeaderColor;
             header.fontStyle = FontStyles.Bold;
             return panel;
@@ -626,7 +654,7 @@ namespace MetaRange.Avatar.EditorLayer
 
             if (!string.IsNullOrEmpty(title))
             {
-                RTLTextMeshPro t = CreateRtlTmp(sec.transform, "Title", title, 16, TextAlignmentOptions.MidlineRight);
+                RTLTextMeshPro t = CreateRtlTmp(sec.transform, "Title", title, FontSizeTitle, TextAlignmentOptions.MidlineRight);
                 t.color = SectionTitleColor;
                 t.fontStyle = FontStyles.Bold;
             }
@@ -758,21 +786,21 @@ namespace MetaRange.Avatar.EditorLayer
             h.childForceExpandHeight = true;
 
             // لیبل
-            RTLTextMeshPro label = CreateRtlTmp(row.transform, rowName + "Label", labelText, 15, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro label = CreateRtlTmp(row.transform, rowName + "Label", labelText, FontSizeFieldLabel, TextAlignmentOptions.MidlineRight);
             label.fontStyle = FontStyles.Bold;
             label.color = SectionTitleColor;
             LayoutElement labelLe = label.GetComponent<LayoutElement>();
             labelLe.minWidth = 52f;
             labelLe.preferredWidth = 52f;
             labelLe.flexibleWidth = 0f;
-            labelLe.minHeight = 40f;
-            labelLe.preferredHeight = 40f;
+            labelLe.minHeight = FieldRowHeight;
+            labelLe.preferredHeight = FieldRowHeight;
 
             // فیلد ورودی
             TMP_InputField field = CreateTmpInput(row.transform, fieldName, placeholder);
             LayoutElement fieldLe = field.GetComponent<LayoutElement>();
-            fieldLe.minHeight = 40f;
-            fieldLe.preferredHeight = 40f;
+            fieldLe.minHeight = FieldRowHeight;
+            fieldLe.preferredHeight = FieldRowHeight;
             fieldLe.flexibleWidth = 1f;   // فضای باقی‌ماندهٔ ردیف
 
             return field;
@@ -785,12 +813,12 @@ namespace MetaRange.Avatar.EditorLayer
             img.color = new Color(1f, 1f, 1f, 0.95f);
 
             LayoutElement le = go.AddComponent<LayoutElement>();
-            le.minHeight = 40;
-            le.preferredHeight = 40;
+            le.minHeight = FieldRowHeight;
+            le.preferredHeight = FieldRowHeight;
 
             GameObject textGo = CreateUi("Text", go.transform);
             RTLTextMeshPro text = textGo.AddComponent<RTLTextMeshPro>();
-            text.fontSize = 16;
+            text.fontSize = FontSizeInput;
             text.color = Color.black;
             text.alignment = TextAlignmentOptions.MidlineRight;
             text.Farsi = true;
@@ -803,7 +831,7 @@ namespace MetaRange.Avatar.EditorLayer
             GameObject phGo = CreateUi("Placeholder", go.transform);
             RTLTextMeshPro ph = phGo.AddComponent<RTLTextMeshPro>();
             ph.text = placeholder;
-            ph.fontSize = 16;
+            ph.fontSize = FontSizeInput;
             ph.fontStyle = FontStyles.Italic;
             ph.color = new Color(0.35f, 0.35f, 0.35f, 0.85f);
             ph.alignment = TextAlignmentOptions.MidlineRight;
@@ -832,8 +860,8 @@ namespace MetaRange.Avatar.EditorLayer
             img.raycastTarget = true;   // دکمه باید کلیک‌پذیر باشد
 
             LayoutElement le = go.AddComponent<LayoutElement>();
-            le.minHeight = 44;
-            le.preferredHeight = 44;
+            le.minHeight = ButtonHeight;
+            le.preferredHeight = ButtonHeight;
 
             Button btn = go.AddComponent<Button>();
             btn.targetGraphic = img;
@@ -842,7 +870,7 @@ namespace MetaRange.Avatar.EditorLayer
             cb.pressedColor = color * 0.82f;
             btn.colors = cb;
 
-            TextMeshProUGUI tmp = CreateTmp(go.transform, "Label", label, 16, TextAlignmentOptions.Center);
+            TextMeshProUGUI tmp = CreateTmp(go.transform, "Label", label, FontSizeButton, TextAlignmentOptions.Center);
             tmp.color = Color.white;
             SetStretch(tmp.rectTransform, 4f);   // برچسب کل دکمه را بپوشاند
             return btn;
@@ -852,8 +880,8 @@ namespace MetaRange.Avatar.EditorLayer
         {
             GameObject go = CreateUi(name, parent);
             LayoutElement le = go.AddComponent<LayoutElement>();
-            le.minHeight = 34;
-            le.preferredHeight = 34;
+            le.minHeight = ToggleHeight;
+            le.preferredHeight = ToggleHeight;
 
             Toggle toggle = go.AddComponent<Toggle>();
 
@@ -864,7 +892,7 @@ namespace MetaRange.Avatar.EditorLayer
             bgRt.anchorMin = new Vector2(1f, 0.5f);
             bgRt.anchorMax = new Vector2(1f, 0.5f);
             bgRt.pivot = new Vector2(1f, 0.5f);
-            bgRt.sizeDelta = new Vector2(26f, 26f);
+            bgRt.sizeDelta = new Vector2(30f, 30f);
             bgRt.anchoredPosition = Vector2.zero;
 
             GameObject check = CreateUi("Checkmark", bg.transform);
@@ -875,7 +903,7 @@ namespace MetaRange.Avatar.EditorLayer
             toggle.targetGraphic = bgImg;
             toggle.graphic = checkImg;
 
-            TextMeshProUGUI labelText = CreateTmp(go.transform, "Label", label, 16, TextAlignmentOptions.MidlineRight);
+            TextMeshProUGUI labelText = CreateTmp(go.transform, "Label", label, FontSizeButton, TextAlignmentOptions.MidlineRight);
             RectTransform labelRt = labelText.rectTransform;
             labelRt.anchorMin = Vector2.zero;
             labelRt.anchorMax = Vector2.one;
@@ -889,8 +917,8 @@ namespace MetaRange.Avatar.EditorLayer
         {
             GameObject scrollGo = CreateUi(scrollName, parent);
             LayoutElement scrollLe = scrollGo.AddComponent<LayoutElement>();
-            scrollLe.minHeight = 200;
-            scrollLe.preferredHeight = 240;
+            scrollLe.minHeight = ScrollMinHeight;
+            scrollLe.preferredHeight = ScrollPreferredHeight;
 
             Image scrollBg = scrollGo.AddComponent<Image>();
             scrollBg.color = new Color(0f, 0f, 0f, 0.30f);
@@ -1107,7 +1135,7 @@ namespace MetaRange.Avatar.EditorLayer
             img.color = new Color(0.18f, 0.20f, 0.25f, 0.95f);
 
             RectTransform rt = card.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(340f, 120f);
+            rt.sizeDelta = new Vector2(CardWidth, CardHeight);
 
             VerticalLayoutGroup vlg = card.AddComponent<VerticalLayoutGroup>();
             vlg.padding = new RectOffset(8, 8, 8, 8);
@@ -1117,9 +1145,9 @@ namespace MetaRange.Avatar.EditorLayer
             vlg.childForceExpandWidth = true;
             vlg.childForceExpandHeight = false;
 
-            RTLTextMeshPro idLabel = CreateRtlTmp(card.transform, "IdLabel", "pos_xxxxxx", 14, TextAlignmentOptions.MidlineRight);
-            RTLTextMeshPro posLabel = CreateRtlTmp(card.transform, "PosLabel", "X:0 Y:0 Z:0", 14, TextAlignmentOptions.MidlineRight);
-            RTLTextMeshPro dateLabel = CreateRtlTmp(card.transform, "DateLabel", "", 12, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro idLabel = CreateRtlTmp(card.transform, "IdLabel", "pos_xxxxxx", FontSizeCard, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro posLabel = CreateRtlTmp(card.transform, "PosLabel", "X:0 Y:0 Z:0", FontSizeCard, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro dateLabel = CreateRtlTmp(card.transform, "DateLabel", "", FontSizeCardSmall, TextAlignmentOptions.MidlineRight);
 
             Button editBtn = CreateButton(card.transform, "EditButton", "ویرایش", new Color(0.25f, 0.45f, 0.75f));
             Button confirm = CreateButton(card.transform, "ConfirmButton", "تأیید", new Color(0.20f, 0.65f, 0.35f));
@@ -1337,6 +1365,11 @@ namespace MetaRange.Avatar.EditorLayer
         {
             System.Type cardType = FindCardType();
             if (cardType == null) return false;
+
+            // اگر فونت کارت قدیمی است ⇒ پریفب باید دوباره ساخته شود،
+            // وگرنه یک‌بار اجرای Tool فونت جدید را اعمال نمی‌کند.
+            RTLTextMeshPro cardId = prefab.transform.Find("IdLabel")?.GetComponent<RTLTextMeshPro>();
+            if (cardId == null || cardId.fontSize != FontSizeCard) return false;
 
             Component comp = prefab.GetComponent(cardType);
             if (comp == null) return false;
