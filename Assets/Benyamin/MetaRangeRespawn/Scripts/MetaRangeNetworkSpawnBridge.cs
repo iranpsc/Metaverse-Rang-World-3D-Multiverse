@@ -37,10 +37,21 @@ namespace MetaRange.Avatar
         const string ManagerTypeName = "MetaverseSpawnManager";
         const string IdentityTypeName = "MetaverseNetworkIdentity";
 
-        static void ResolveTypes()
+        static float lastResolveAttempt = -999f;
+
+        /// <summary>
+        /// پیدا کردن انواع Network_A. عمداً «قفل دائمی» ندارد:
+        /// اگر اسمبلی هنوز لود نشده باشد، هر ۱ ثانیه دوباره تلاش می‌کند.
+        /// (نسخهٔ قبل با latch همیشگی، اولین فراخوانی زودهنگام مثل BeforeSceneLoad
+        ///  باعث می‌شد شبکه تا ابد «پیدا نشده» گزارش شود.)
+        /// </summary>
+        static void ResolveTypes(bool force = false)
         {
-            if (typesResolved) return;
-            typesResolved = true;
+            if (!force && tNetworkClient != null && tSpawnManager != null && tIdentity != null) return;
+
+            float now = Time.realtimeSinceStartup;
+            if (!force && now - lastResolveAttempt < 1f) return;
+            lastResolveAttempt = now;
 
             foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -49,18 +60,27 @@ namespace MetaRange.Avatar
                 if (tIdentity == null) tIdentity = asm.GetType(IdentityTypeName);
             }
 
-            if (tNetworkClient != null)
+            if (tNetworkClient != null && miTryGetLocalPlayer == null)
                 miTryGetLocalPlayer = tNetworkClient.GetMethod("TryGetLocalPlayer",
                     BindingFlags.Public | BindingFlags.Static);
             if (tSpawnManager != null)
             {
-                piSpawnManagerInstance = tSpawnManager.GetProperty("Instance",
-                    BindingFlags.Public | BindingFlags.Static);
-                fiSpawnManagerInstance = tSpawnManager.GetField("Instance",
-                    BindingFlags.Public | BindingFlags.Static);
-                miGetSpawnedObjects = tSpawnManager.GetMethod("GetSpawnedObjects",
-                    BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                if (piSpawnManagerInstance == null)
+                    piSpawnManagerInstance = tSpawnManager.GetProperty("Instance",
+                        BindingFlags.Public | BindingFlags.Static);
+                if (fiSpawnManagerInstance == null)
+                    fiSpawnManagerInstance = tSpawnManager.GetField("Instance",
+                        BindingFlags.Public | BindingFlags.Static);
+                if (miGetSpawnedObjects == null)
+                    miGetSpawnedObjects = tSpawnManager.GetMethod("GetSpawnedObjects",
+                        BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
             }
+        }
+
+        /// <summary>آیا انواع Network_A واقعاً پیدا شده‌اند؟ (تشخیص)</summary>
+        public static bool TypesResolved
+        {
+            get { ResolveTypes(true); return tNetworkClient != null && tIdentity != null; }
         }
 
         static object ReadManagerInstance()
@@ -100,6 +120,109 @@ namespace MetaRange.Avatar
 
         /// <summary>آیا همین حالا local player شبکه وجود دارد؟</summary>
         public static bool LocalPlayerReady => TryGetLocalPlayer(out Transform _);
+
+        /// <summary>تعداد identityهای فعال صحنه (تشخیص)</summary>
+        public static int IdentityScanCount { get; private set; }
+
+        /// <summary>
+        /// لایهٔ B: اسکن مستقیم صحنه برای <c>MetaverseNetworkIdentity</c> و تست
+        /// <c>IsLocalPlayer</c> / <c>IsLocalOwner</c>. مستقل از SpawnManager است،
+        /// پس وقتی <c>MetaverseSpawnManager.Instance</c> تهی است هم کار می‌کند.
+        /// </summary>
+        public static bool TryFindLocalByIdentityScan(out Transform player)
+        {
+            player = null;
+            ResolveTypes(true);
+            if (tIdentity == null) return false;
+
+            UnityEngine.Object[] all;
+            try { all = Resources.FindObjectsOfTypeAll(tIdentity); }
+            catch { return false; }
+            if (all == null || all.Length == 0) return false;
+
+            int live = 0;
+            Transform firstIsLocal = null;
+            for (int i = 0; i < all.Length; i++)
+            {
+                Component comp = all[i] as Component;
+                if (comp == null) continue;
+                if (!comp.gameObject.scene.IsValid()) continue;   // حذف prefab/asset
+                live++;
+
+                if (firstIsLocal == null && IsLocalIdentity(comp)) firstIsLocal = comp.transform;
+            }
+
+            IdentityScanCount = live;
+            if (firstIsLocal != null) { player = firstIsLocal; return true; }
+            return false;
+        }
+
+        /// <summary>آیا این identity متعلق به کلاینت محلی است؟</summary>
+        static bool IsLocalIdentity(Component identity)
+        {
+            Type t = identity.GetType();
+            try
+            {
+                PropertyInfo p = t.GetProperty("IsLocalPlayer",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (p != null && p.GetValue(identity, null) is bool b && b) return true;
+            }
+            catch { }
+
+            try
+            {
+                FieldInfo f = t.GetField("isLocalPlayer",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (f != null && f.GetValue(identity) is bool fb && fb) return true;
+            }
+            catch { }
+
+            try
+            {
+                MethodInfo m = t.GetMethod("get_IsLocalPlayer",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (m != null && m.Invoke(identity, null) is bool mb && mb) return true;
+            }
+            catch { }
+
+            // IsLocalOwner روی identity نیست؛ روی کلاینت است با ورودی identity
+            if (tNetworkClient != null)
+            {
+                try
+                {
+                    MethodInfo owner = tNetworkClient.GetMethod("IsLocalOwner",
+                        BindingFlags.Public | BindingFlags.Static, null,
+                        new[] { tIdentity }, null);
+                    if (owner != null && owner.Invoke(null, new object[] { identity }) is bool ob && ob)
+                        return true;
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// resolve چندلایهٔ local player. خروجی <paramref name="source"/> برای لاگ تشخیصی است.
+        /// A) TryGetLocalPlayer  B) اسکن Identity  C) نام/تگ (خارج از این کلاس)
+        /// </summary>
+        public static bool TryGetLocalPlayerDeep(out Transform player, out string source)
+        {
+            player = null;
+            source = "none";
+
+            Transform t;
+            if (TryGetLocalPlayer(out t) && t != null)
+            {
+                player = t; source = "A:TryGetLocalPlayer"; return true;
+            }
+
+            if (TryFindLocalByIdentityScan(out t) && t != null)
+            {
+                player = t; source = "B:IdentityScan"; return true;
+            }
+
+            return false;
+        }
 
         /// <summary>
         /// پیدا کردن local player شبکه. اول از API رسمی
@@ -190,13 +313,19 @@ namespace MetaRange.Avatar
         }
 
         /// <summary>توضیح وضعیت برای لاگ</summary>
-        public static string Describe()
-        {
-            ResolveTypes();
-            if (!Available) return "Network_A (MetaverseNetworkClient/SpawnManager) یافت نشد ⇒ حالت آفلاین";
-            return "Network_A موجود | isReady=" + NetworkClientReady +
-                   " | localPlayer=" + LocalPlayerReady;
-        }
+public static string Describe()
+            {
+                ResolveTypes(true);
+                string types = "client=" + (tNetworkClient != null) +
+                               " manager=" + (tSpawnManager != null) +
+                               " identity=" + (tIdentity != null);
+                if (tNetworkClient == null)
+                    return "Network_A (MetaverseNetworkClient) در اسمبلی‌های لودشده نیست | " + types;
+
+                return "Network_A حاضر | isReady=" + NetworkClientReady +
+                       " | TryGetLocalPlayer=" + TryGetLocalPlayer(out Transform _) +
+                       " | identityScan=" + IdentityScanCount + " | " + types;
+            }
     }
 
     /// <summary>
@@ -302,10 +431,12 @@ namespace MetaRange.Avatar
         public void AdoptNetworkPlayer(string reason)
         {
             Transform t;
-            if (!MetaverseNetworkHooks.TryGetLocalPlayer(out t) || t == null)
+            string src;
+            if (!MetaverseNetworkHooks.TryGetLocalPlayerDeep(out t, out src) || t == null)
             {
-                Debug.Log("[متارنج اسپان] هنوز local player شبکه آماده نیست (" + reason +
-                          ") — پنل‌ها خودکار منتظر می‌مانند.");
+                Debug.LogWarning("[متارنج اسپان] هنوز local player شبکه آماده نیست (" + reason +
+                                 ") — پنل‌ها خودکار منتظر می‌مانند.  |  hooks: " +
+                                 MetaverseNetworkHooks.Describe());
                 return;
             }
 
