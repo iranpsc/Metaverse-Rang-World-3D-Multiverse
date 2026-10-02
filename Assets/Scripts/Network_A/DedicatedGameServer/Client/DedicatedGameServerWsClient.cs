@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Network_A.Realtime.Protocol;
@@ -18,6 +19,7 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private bool useSecureWebSocket = false;
         [SerializeField] private int connectTimeoutSeconds = 10;
         [SerializeField] private int authTimeoutSeconds = 10;
+        [SerializeField] private int disconnectTimeoutSeconds = 3;
 
         [Header("Realtime Transport")]
         [SerializeField] private RealtimeTransportKind transportKind = RealtimeTransportKind.WebSocket;
@@ -26,13 +28,44 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private bool verboseLogs = true;
         [SerializeField] private bool logRawMessages = true;
 
+        private const string PlayerResumeStateMessageType = "player_resume_state";
+        private const string PlayerVisibilityMessageType = "player_visibility";
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [DllImport("__Internal")]
+        private static extern void RealtimeWebGLWebSocketConfigureVisibilityMessages(
+            string url,
+            string hiddenMessage,
+            string visibleMessage);
+
+        [DllImport("__Internal")]
+        private static extern void RealtimeWebGLWebSocketClearVisibilityMessages(string url);
+
+        [DllImport("__Internal")]
+        private static extern int RealtimeWebGLWebSocketGetDocumentHiddenState();
+
+        [DllImport("__Internal")]
+        private static extern int RealtimeWebGLWebSocketGetVisibilityRevision();
+#endif
+
         private IRealtimeTransport transport;
         private CancellationTokenSource connectionCts;
         private TaskCompletionSource<bool> authCompletionSource;
+        private Task<bool> activeDisconnectTask;
         private bool transportEventsBound;
+        private bool applicationIsQuitting;
+
+        private bool hasPendingPlayerResumeState;
+        private Vector3 pendingPlayerResumePosition;
+        private Quaternion pendingPlayerResumeRotation = Quaternion.identity;
+        private Vector3 pendingPlayerResumeVelocity;
+        private long pendingPlayerResumeSequence;
+        private string pendingPlayerResumePlayerId = string.Empty;
+        private string pendingPlayerResumeRoomId = string.Empty;
 
         public bool IsConnected { get; private set; }
         public bool IsAuthenticated { get; private set; }
+        public string CurrentUrl { get; private set; } = string.Empty;
 
         public string ConnectionId { get; private set; }
         public string UserId { get; private set; }
@@ -50,7 +83,17 @@ namespace Network_A.DedicatedGameServer.Client
         public string LastEnvelopeChannel { get; private set; }
         public string LastEnvelopeType { get; private set; }
         public string LastEnvelopeRoom { get; private set; }
+        public float LastInboundRealtimeSeconds { get; private set; } = -9999f;
+        public string LastInboundRoute { get; private set; } = string.Empty;
         public bool IsReady => IsConnected && IsAuthenticated;
+
+        public bool HasRecentInboundMessage(float maxAgeSeconds)
+        {
+            if (LastInboundRealtimeSeconds < 0f) return false;
+
+            float safeMaxAge = Mathf.Max(0.5f, maxAgeSeconds);
+            return Time.realtimeSinceStartup - LastInboundRealtimeSeconds <= safeMaxAge;
+        }
 
         public event Action Connected;
         public event Action<string> Disconnected;
@@ -75,11 +118,18 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
+        //* این تابع هنگام بسته‌شدن برنامه بستن رسمی سوکت را با دلیل مشخص آغاز می‌کند تا سرور خروج کاربر را سریع‌تر ثبت کند.
+        private void OnApplicationQuit()
+        {
+            applicationIsQuitting = true;
+            if (Instance == this && (IsConnected || IsAuthenticated)) Disconnect("application_quit");
+        }
+
         private void OnDestroy()
         {
             if (Instance == this)
             {
-                Disconnect("destroyed");
+                if (!applicationIsQuitting) Disconnect("destroyed");
                 Instance = null;
             }
         }
@@ -157,6 +207,8 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 return Fail("websocket_url_empty");
             }
+
+            CurrentUrl = url.Trim();
 
             try
             {
@@ -240,6 +292,8 @@ namespace Network_A.DedicatedGameServer.Client
                 playerId = string.IsNullOrWhiteSpace(playerId) ? userId.Trim() : playerId.Trim(),
                 userName = string.IsNullOrWhiteSpace(userName) ? userId.Trim() : userName.Trim()
             };
+
+            ClearPendingPlayerResumeState();
 
             UserId = authTicket.userId;
             PlayerId = authTicket.playerId;
@@ -465,6 +519,57 @@ namespace Network_A.DedicatedGameServer.Client
             return await SendPlayerInputPayloadAsync(payload, cancellationToken);
         }
 
+        //* این تابع وضعیت بازیابی شده از گیم سرور را فقط یک بار به کنترلر پلیر لوکال تحویل می دهد.
+        public bool TryConsumePendingPlayerResumeState(
+            out Vector3 position,
+            out Quaternion rotation,
+            out Vector3 velocity,
+            out long sequence)
+        {
+            position = Vector3.zero;
+            rotation = Quaternion.identity;
+            velocity = Vector3.zero;
+            sequence = 0;
+
+            if (!hasPendingPlayerResumeState) return false;
+
+            bool playerMatches =
+                string.IsNullOrWhiteSpace(pendingPlayerResumePlayerId) ||
+                string.IsNullOrWhiteSpace(PlayerId) ||
+                string.Equals(
+                    pendingPlayerResumePlayerId,
+                    PlayerId,
+                    StringComparison.Ordinal
+                );
+
+            bool roomMatches =
+                string.IsNullOrWhiteSpace(pendingPlayerResumeRoomId) ||
+                string.IsNullOrWhiteSpace(RoomId) ||
+                string.Equals(
+                    pendingPlayerResumeRoomId,
+                    RoomId,
+                    StringComparison.Ordinal
+                );
+
+            if (!playerMatches || !roomMatches)
+            {
+                Debug.LogWarning(
+                    "[DedicatedGameServerWsClient] Pending player resume state rejected because identity does not match current auth."
+                );
+
+                ClearPendingPlayerResumeState();
+                return false;
+            }
+
+            position = pendingPlayerResumePosition;
+            rotation = pendingPlayerResumeRotation;
+            velocity = pendingPlayerResumeVelocity;
+            sequence = pendingPlayerResumeSequence;
+
+            ClearPendingPlayerResumeState();
+            return true;
+        }
+
         public string GetDebugSummary()
         {
             return "connected=" + IsConnected +
@@ -491,13 +596,55 @@ namespace Network_A.DedicatedGameServer.Client
             LastEnvelopeChannel = string.Empty;
             LastEnvelopeType = string.Empty;
             LastEnvelopeRoom = string.Empty;
+            LastInboundRealtimeSeconds = -9999f;
+            LastInboundRoute = string.Empty;
         }
 
 
         public void Disconnect(string reason = "client_disconnect")
         {
+            _ = DisconnectAsync(reason, CancellationToken.None);
+        }
+
+        //* این تابع بستن وب سوکت ددیکیتد را تا پایان ارسال Close Frame با دلیل خروج منتظر می ماند.
+        public async Task<bool> DisconnectAsync(
+            string reason = "client_disconnect",
+            CancellationToken cancellationToken = default)
+        {
+            if (activeDisconnectTask != null && !activeDisconnectTask.IsCompleted)
+            {
+                return await activeDisconnectTask;
+            }
+
+            activeDisconnectTask = DisconnectInternalAsync(reason, cancellationToken);
+
+            try
+            {
+                return await activeDisconnectTask;
+            }
+            finally
+            {
+                if (activeDisconnectTask != null && activeDisconnectTask.IsCompleted)
+                {
+                    activeDisconnectTask = null;
+                }
+            }
+        }
+
+        //* این تابع وضعیت محلی را می بندد و قبل از اعلام پایان، نتیجه بستن ترنسپورت را با تایم اوت محدود دریافت می کند.
+        private async Task<bool> DisconnectInternalAsync(
+            string reason,
+            CancellationToken cancellationToken)
+        {
+            string safeReason = string.IsNullOrWhiteSpace(reason)
+                ? "client_disconnect"
+                : reason.Trim();
+
+            ClearWebGLVisibilityMessages();
+
             bool wasConnected = IsConnected;
             IRealtimeTransport transportToDisconnect = transport;
+            bool transportCloseCompleted = transportToDisconnect == null;
 
             try
             {
@@ -515,17 +662,58 @@ namespace Network_A.DedicatedGameServer.Client
 
             if (transportToDisconnect != null)
             {
-                _ = DisconnectTransportAsync(transportToDisconnect, reason);
+                try
+                {
+                    using (CancellationTokenSource disconnectCts =
+                           CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                    {
+                        disconnectCts.CancelAfter(
+                            Mathf.Max(1, disconnectTimeoutSeconds) * 1000
+                        );
+
+                        await transportToDisconnect.DisconnectAsync(
+                            safeReason,
+                            disconnectCts.Token
+                        );
+
+                        transportCloseCompleted = true;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    Debug.LogWarning(
+                        "[DedicatedGameServerWsClient] Graceful disconnect timed out | reason=" +
+                        safeReason +
+                        " | timeoutSeconds=" +
+                        Mathf.Max(1, disconnectTimeoutSeconds)
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning(
+                        "[DedicatedGameServerWsClient] Graceful disconnect failed | reason=" +
+                        safeReason +
+                        " | error=" +
+                        ex.Message
+                    );
+                }
             }
 
             CleanupSocketOnly();
 
             if (wasConnected)
             {
-                Disconnected?.Invoke(reason);
+                Disconnected?.Invoke(safeReason);
             }
 
-            Log("Disconnected | reason=" + reason);
+            Log(
+                "Disconnected | reason=" +
+                safeReason +
+                " | closeAwaited=True | transportCloseCompleted=" +
+                transportCloseCompleted
+            );
+
+            return transportCloseCompleted;
         }
 
         private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
@@ -540,6 +728,9 @@ namespace Network_A.DedicatedGameServer.Client
             LastRoute = ReadRouteForLog(LastRawMessage);
             LastMirrorLikeRoute = ReadMirrorLikeRouteForLog(LastRawMessage);
             LastPayloadJson = ReadPayloadJsonForLog(LastRawMessage);
+
+            LastInboundRealtimeSeconds = Time.realtimeSinceStartup;
+            LastInboundRoute = LastRoute;
 
             Log("Received message | messageFormat=" + LastMessageFormat +
                 " | route=" + LastRoute +
@@ -559,7 +750,19 @@ namespace Network_A.DedicatedGameServer.Client
                 LastEnvelopeType = envelope.t;
                 LastEnvelopeRoom = envelope.room;
                 LastPayloadJson = envelope.payloadJson;
+
+                LastInboundRoute =
+                    (string.IsNullOrWhiteSpace(envelope.ch) ? string.Empty : envelope.ch.Trim()) +
+                    "/" +
+                    (string.IsNullOrWhiteSpace(envelope.t) ? string.Empty : envelope.t.Trim());
+
                 EnvelopeReceived?.Invoke(envelope);
+
+                if (envelope.t == PlayerResumeStateMessageType)
+                {
+                    HandlePlayerResumeState(envelope.payloadJson);
+                    return;
+                }
 
                 if (envelope.ch == RealtimeChannels.System && envelope.t == RealtimeMessageTypes.AuthOk)
                 {
@@ -584,6 +787,12 @@ namespace Network_A.DedicatedGameServer.Client
                 return;
             }
 
+            if (typeDto.type == PlayerResumeStateMessageType)
+            {
+                HandlePlayerResumeState(LastRawMessage);
+                return;
+            }
+
             if (typeDto.type == "auth_ok")
             {
                 HandleAuthOk(LastRawMessage);
@@ -595,6 +804,102 @@ namespace Network_A.DedicatedGameServer.Client
                 HandleAuthFailed(LastRawMessage);
                 return;
             }
+        }
+
+        //* این تابع پیام player_resume_state را قبل از auth_ok می خواند و برای اعمال روی پلیر لوکال نگه می دارد.
+        private void HandlePlayerResumeState(string message)
+        {
+            DedicatedPlayerResumeStateDto resumeState = null;
+
+            try
+            {
+                resumeState = JsonUtility.FromJson<DedicatedPlayerResumeStateDto>(message);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[DedicatedGameServerWsClient] player_resume_state parse failed | " +
+                    ex.Message
+                );
+
+                return;
+            }
+
+            if (resumeState == null || resumeState.sequence <= 0)
+            {
+                Debug.LogWarning(
+                    "[DedicatedGameServerWsClient] player_resume_state ignored because payload is invalid."
+                );
+
+                return;
+            }
+
+            string resumePlayerId = !string.IsNullOrWhiteSpace(resumeState.playerId)
+                ? resumeState.playerId.Trim()
+                : SafeTrim(resumeState.userId);
+
+            string resumeRoomId = SafeTrim(resumeState.roomId);
+
+            bool playerMatches =
+                string.IsNullOrWhiteSpace(PlayerId) ||
+                string.IsNullOrWhiteSpace(resumePlayerId) ||
+                string.Equals(PlayerId, resumePlayerId, StringComparison.Ordinal);
+
+            bool roomMatches =
+                string.IsNullOrWhiteSpace(RoomId) ||
+                string.IsNullOrWhiteSpace(resumeRoomId) ||
+                string.Equals(RoomId, resumeRoomId, StringComparison.Ordinal);
+
+            if (!playerMatches || !roomMatches)
+            {
+                Debug.LogWarning(
+                    "[DedicatedGameServerWsClient] player_resume_state ignored because player or room does not match auth ticket."
+                );
+
+                return;
+            }
+
+            hasPendingPlayerResumeState = true;
+            pendingPlayerResumePosition =
+                new Vector3(resumeState.px, resumeState.py, resumeState.pz);
+
+            pendingPlayerResumeRotation =
+                new Quaternion(
+                    resumeState.rx,
+                    resumeState.ry,
+                    resumeState.rz,
+                    resumeState.rw == 0f ? 1f : resumeState.rw
+                );
+
+            pendingPlayerResumeVelocity =
+                new Vector3(resumeState.vx, resumeState.vy, resumeState.vz);
+
+            pendingPlayerResumeSequence = resumeState.sequence;
+            pendingPlayerResumePlayerId = resumePlayerId;
+            pendingPlayerResumeRoomId = resumeRoomId;
+
+            Log(
+                "Player resume state cached before auth_ok | playerId=" +
+                resumePlayerId +
+                " | roomId=" +
+                resumeRoomId +
+                " | sequence=" +
+                resumeState.sequence +
+                " | position=" +
+                pendingPlayerResumePosition
+            );
+        }
+
+        //* این تابع کش وضعیت بازیابی پلیر را پاک می کند.
+        private void ClearPendingPlayerResumeState()
+        {
+            hasPendingPlayerResumeState = false;
+            pendingPlayerResumePosition = Vector3.zero;
+            pendingPlayerResumeRotation = Quaternion.identity;
+            pendingPlayerResumeVelocity = Vector3.zero;
+            pendingPlayerResumeSequence = 0;
+            pendingPlayerResumePlayerId = string.Empty;
+            pendingPlayerResumeRoomId = string.Empty;
         }
 
         private void HandleAuthOk(string message)
@@ -621,6 +926,8 @@ namespace Network_A.DedicatedGameServer.Client
                 SessionId = authOk.sessionId;
                 LastAuthReason = authOk.reason;
                 LastError = string.Empty;
+
+                ConfigureWebGLVisibilityMessagesAfterAuth();
 
                 authCompletionSource?.TrySetResult(true);
                 Authenticated?.Invoke();
@@ -679,6 +986,7 @@ namespace Network_A.DedicatedGameServer.Client
         {
             bool wasConnected = IsConnected;
 
+            ClearWebGLVisibilityMessages();
             CleanupSocketOnly();
             UnbindTransportEvents();
             transport = null;
@@ -697,6 +1005,8 @@ namespace Network_A.DedicatedGameServer.Client
 
         private void CleanupSocketOnly()
         {
+            ClearPendingPlayerResumeState();
+
             try
             {
                 if (connectionCts != null)
@@ -713,6 +1023,8 @@ namespace Network_A.DedicatedGameServer.Client
 
         private async Task CleanupTransportOnlyAsync(string reason)
         {
+            ClearWebGLVisibilityMessages();
+
             IRealtimeTransport oldTransport = transport;
             UnbindTransportEvents();
             transport = null;
@@ -872,6 +1184,99 @@ namespace Network_A.DedicatedGameServer.Client
             return message ?? string.Empty;
         }
 
+        //* این تابع پیام های مستقیم hidden و visible وب جی ال را بعد از auth در JSLIB ثبت می کند.
+        private void ConfigureWebGLVisibilityMessagesAfterAuth()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (!IsAuthenticated) return;
+            if (string.IsNullOrWhiteSpace(CurrentUrl)) return;
+
+            try
+            {
+                string hiddenMessage = CreatePlayerVisibilityEnvelopeJson(true);
+                string visibleMessage = CreatePlayerVisibilityEnvelopeJson(false);
+
+                RealtimeWebGLWebSocketConfigureVisibilityMessages(
+                    CurrentUrl,
+                    hiddenMessage,
+                    visibleMessage);
+
+                Log("WebGL visibility messages configured for dedicated websocket.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning(
+                    "[DedicatedGameServerWsClient] WebGL visibility configuration failed | " +
+                    ex.Message);
+            }
+#endif
+        }
+
+        //* این تابع ثبت پیام های visibility را هنگام قطع یا تعویض ترنسپورت از JSLIB پاک می کند.
+        private void ClearWebGLVisibilityMessages()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (string.IsNullOrWhiteSpace(CurrentUrl)) return;
+
+            try
+            {
+                RealtimeWebGLWebSocketClearVisibilityMessages(CurrentUrl);
+            }
+            catch
+            {
+            }
+#endif
+        }
+
+        //* این تابع اِنولوپ درخواست visibility را با هویت فعلی می سازد.
+        private string CreatePlayerVisibilityEnvelopeJson(bool hidden)
+        {
+            DedicatedPlayerVisibilityDto payload = new DedicatedPlayerVisibilityDto
+            {
+                type = PlayerVisibilityMessageType,
+                hidden = hidden,
+                userId = SafeTrim(UserId),
+                playerId = SafeTrim(PlayerId),
+                roomId = SafeTrim(RoomId),
+                serverId = SafeTrim(ServerId),
+                sessionId = SafeTrim(SessionId),
+                clientTimeUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+
+            RealtimeEnvelope envelope = RealtimeEnvelope.Create(
+                RealtimeChannels.Presence,
+                PlayerVisibilityMessageType,
+                JsonUtility.ToJson(payload),
+                RoomId,
+                false);
+
+            return envelope.ToJson();
+        }
+
+        //* این تابع وضعیت document.hidden و شماره تغییر آن را فقط در WebGL برمی گرداند.
+        public bool TryGetWebGLDocumentVisibility(out int revision, out bool hidden)
+        {
+            revision = 0;
+            hidden = false;
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try
+            {
+                revision = RealtimeWebGLWebSocketGetVisibilityRevision();
+                hidden = RealtimeWebGLWebSocketGetDocumentHiddenState() == 1;
+                return true;
+            }
+            catch
+            {
+                revision = 0;
+                hidden = false;
+                return false;
+            }
+#else
+            return false;
+#endif
+        }
+
         private string SafeTrim(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
@@ -911,6 +1316,29 @@ namespace Network_A.DedicatedGameServer.Client
         }
 
         [Serializable]
+        private class DedicatedPlayerResumeStateDto
+        {
+            public string type;
+            public string userId;
+            public string playerId;
+            public string roomId;
+            public long sequence;
+
+            public float px;
+            public float py;
+            public float pz;
+
+            public float rx;
+            public float ry;
+            public float rz;
+            public float rw;
+
+            public float vx;
+            public float vy;
+            public float vz;
+        }
+
+        [Serializable]
         private class DedicatedAuthOkDto
         {
             public string type;
@@ -931,6 +1359,19 @@ namespace Network_A.DedicatedGameServer.Client
             public bool ok;
             public string reason;
             public string message;
+        }
+
+        [Serializable]
+        private class DedicatedPlayerVisibilityDto
+        {
+            public string type;
+            public bool hidden;
+            public string userId;
+            public string playerId;
+            public string roomId;
+            public string serverId;
+            public string sessionId;
+            public long clientTimeUnixMs;
         }
 
         [Serializable]

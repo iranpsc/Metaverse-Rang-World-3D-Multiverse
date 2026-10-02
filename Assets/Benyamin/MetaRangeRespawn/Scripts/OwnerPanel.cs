@@ -87,6 +87,16 @@ namespace MetaRange.Avatar
         {
             if (avatar != null) return;
 
+            // ① اولویت با local player شبکه (Network_A / برنچ gRPC) است تا مالک
+            //    مختصات همان آواتار آنلاین را ثبت کند، نه یک آبجکت اشتباه صحنه.
+            if (MetaverseNetworkHooks.TryGetLocalPlayer(out Transform netPlayer) && netPlayer != null)
+            {
+                avatar = netPlayer;
+                Debug.Log("[OwnerPanel] آواتار = local player شبکه (" + reason + "): " + netPlayer.name +
+                                 "  |  " + MetaverseNetworkHooks.Describe());
+                return;
+            }
+
             GameObject found = null;
             try { found = GameObject.FindWithTag("Player"); }
             catch { /* تگ Player تعریف نشده */ }

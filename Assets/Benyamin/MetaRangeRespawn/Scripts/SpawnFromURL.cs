@@ -114,6 +114,14 @@ namespace MetaRange.Avatar
 
         private IEnumerator FetchSpawn(string env, string spawn)
         {
+            // در پروژه‌های شبکه (Network_A / برنچ gRPC)، بریج متارنج مسئول جای‌گذاری
+            // local player است. اینجا نباید آواتار آفلاین/کپسول را جابه‌جا کنیم.
+            if (MetaRangeNetworkSpawnBridge.IsActive)
+            {
+                Debug.Log("[SpawnFromURL] بریج شبکه فعال است ⇒ ادغام با هوک Network_A انجام می‌شود.");
+                yield break;
+            }
+
             string path = "/api/get-position?env="
                           + UnityWebRequest.EscapeURL(env) + "&spawn="
                           + UnityWebRequest.EscapeURL(spawn);

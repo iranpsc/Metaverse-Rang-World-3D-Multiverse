@@ -42,7 +42,19 @@ public static class MetaverseNetworkServer
     public static MetaverseNetworkIdentity Spawn(GameObject obj, DedicatedPlayerSession ownerSession)
     {
         if (ownerSession == null) return Spawn(obj);
-        return Spawn(obj, ownerSession.connectionId, ownerSession.userId, ownerSession.playerId);
+
+        MetaverseSpawnManager manager = MetaverseSpawnManager.Instance;
+        if (manager == null) return Spawn(obj, ownerSession.connectionId, ownerSession.userId, ownerSession.playerId);
+
+        return manager.Spawn(
+            obj,
+            ParseConnectionId(ownerSession.connectionId),
+            ownerSession.connectionId,
+            ownerSession.userId,
+            ownerSession.playerId,
+            ownerSession.roomId,
+            false,
+            "network_server_spawn_owner");
     }
 
     public static bool SpawnPrefab(string prefabId, Vector3 position, Quaternion rotation, int ownerConnectionId, out MetaverseNetworkIdentity identity)
@@ -73,8 +85,28 @@ public static class MetaverseNetworkServer
 
     public static bool SpawnPrefab(string prefabId, Vector3 position, Quaternion rotation, DedicatedPlayerSession ownerSession, out MetaverseNetworkIdentity identity)
     {
+        identity = null;
         if (ownerSession == null) return SpawnPrefab(prefabId, position, rotation, out identity);
-        return SpawnPrefab(prefabId, position, rotation, ownerSession.connectionId, ownerSession.userId, ownerSession.playerId, out identity);
+
+        MetaverseSpawnManager manager = MetaverseSpawnManager.Instance;
+        if (manager == null) return SpawnPrefab(prefabId, position, rotation, ownerSession.connectionId, ownerSession.userId, ownerSession.playerId, out identity);
+
+        bool spawned = manager.TrySpawnPrefab(
+            SafeTrim(prefabId),
+            position,
+            rotation,
+            ParseConnectionId(ownerSession.connectionId),
+            ownerSession.connectionId,
+            ownerSession.userId,
+            ownerSession.playerId,
+            ownerSession.roomId,
+            false,
+            out identity);
+
+        if (!spawned || identity == null) return false;
+        ApplyOwnerAfterSpawn(identity, ownerSession.connectionId, ownerSession.userId, ownerSession.playerId, false, "network_server_spawn_prefab_owner");
+        identity.SetRoomId(ownerSession.roomId);
+        return true;
     }
 
     public static void Despawn(GameObject obj)
@@ -192,6 +224,7 @@ public static class MetaverseNetworkServer
     public static bool SetOwner(MetaverseNetworkIdentity identity, DedicatedPlayerSession ownerSession, bool serverOwned = false, string reason = "network_server_set_owner")
     {
         if (identity == null || ownerSession == null) return false;
+        identity.SetRoomId(ownerSession.roomId);
         return SetOwner(identity, ownerSession.connectionId, ownerSession.userId, ownerSession.playerId, serverOwned, reason);
     }
 

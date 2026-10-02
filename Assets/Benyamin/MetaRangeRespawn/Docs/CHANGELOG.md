@@ -1,9 +1,27 @@
 # CHANGELOG — سیستم مدیریت موقعیت ریسپان آواتار (متارنج)
 
-نسخهٔ جاری: **v3.6.0**
+نسخهٔ جاری: **v3.8.0**
 
 ---
 
+## v3.8.0 - اتصال دکمهٔ محیط لابی به متارنج
+- فایل جدید `Scripts/MetaRangeLobbyEnvironmentBridge.cs`:
+  - `MetaRangeSpawnList`: پارسر مستقل `GET /api/list-positions` (چون `JsonUtility` دیکشنری نمی‌خواند).
+  - `LobbyNetworkHooks`: دسترسی اختیاری از راه reflection به `OnRoomJoinedFor3D` / `OnRoomLeftFor3D` / `CurrentRoomName` / `CurrentRoomId` / `IsJoinedRoom` / `MetaverseNetworkClient.userId`.
+  - `MetaRangeLobbyEnvironmentBridge`: `env` = کد ساختمان (`CurrentRoomName`) ⇒ انتخاب نقطه ⇒ `ApplyPoseWhenPlayerReady`. خودش `DontDestroyOnLoad` می‌شود چون لابی با `LoadSceneMode.Single` به صحنهٔ گیم‌پلی می‌رود.
+- `MetaRangeNetworkSpawnBridge`: متدهای عمومی `ApplyPoseWhenPlayerReady` و `ApplyPoseNowIfPossible` + قفل `applyRoutineRunning`.
+- `MetaRangeRespawnSetupTool`: نصب و bind خودکار بریج لابی + منوی «بررسی اتصال لابی (Lobby 1 WebGL)».
+- **باگ رفع‌شده:** پارسر لیست موقعیت‌ها کلید بستن `}` را مصرف نمی‌کرد ⇒ با بیش از یک نقطه فقط اولین نقطه خوانده می‌شد.
+- `Network_A` دست‌نخورده (فقط reflection برای اتصال).
+## v3.7.0 - ادغام با برنج gRPC (Network_A / Dedicated)
+- فایل جدید `Scripts/MetaRangeNetworkSpawnBridge.cs`: کلاس `MetaverseNetworkHooks` (دسترسی اختیاری از راه reflection به `MetaverseNetworkClient.TryGetLocalPlayer`، `MetaverseSpawnManager.Instance.GetSpawnedObjects()`، `MetaverseNetworkIdentity.IsLocalPlayer/IsLocalOwner`) + کلاس بریج.
+- جریان: URL ⇒ `GET /api/get-position` (فقط مختصات) ⇒ انتظار local player شبکه ⇒ `TryApplyPose` روی همان Transform موجود (بدون ساخت آواتار دوم) ⇒ bind به `OwnerPanel`.
+- `SpawnFromURL` وقتی بریج فعال است دیگر آواتار آفلاین را جابه‌جا نمی‌کند.
+- `OwnerPanel.EnsureAvatar`: اولویت ① local player شبکه ② تگ `Player` ③ نام‌های رایج.
+- Tool بریج را خودکار روی `MetaRange_SpawnSystem` نصب و bind می‌کند.
+- صادقانه: روی گِرَپ‌سی سرور برای حرکت authority دارد، پس جای‌گذاری **best-effort** است و پنجرهٔ reassert (پیش‌فرض ۲.۵ ثانیه) snap-back را خنثی می‌کند.
+- `Docs/09_یکپارچه‌سازی_با_برنچ_gRPC.md` افزوده شد. **هیچ فایلی از `Assets/Scripts/Network_A/` تغییر نکرد.**
+- تست: `bridgetest` ۲۵/۲۵ PASS (با فیک‌هایی که نام و امضای آن‌ها عیناً مطابق گِرَپ‌سی است) + رگرسیون‌ها سبز.
 ## v3.6.0 - چرخش زنده در ویرایش کارت (Live Rotation)
 - سه فیلد چرخش `Rx/Ry/Rz` (درجه، از `avatar.eulerAngles`) با لیبل اختصاصی به کارت ویرایش اضافه شد؛ تا وقتی `isEditing` است هر فریم زنده به‌روز می‌شوند (بدون شبکه).
 - با «تأیید»، مقدار فیلدها با `ParseFloat` خوانده و `Quaternion.Euler` ساخته و همراه `position` در `PUT /api/update-position` ذخیره می‌شود؛ `MoveAvatarTo` نیز موقعیت **و چرخش** را اعمال می‌کند.

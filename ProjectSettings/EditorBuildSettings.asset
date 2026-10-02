@@ -6,20 +6,41 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/Network.unity
-    guid: b6d077966c07efd48be555f72a5d9d3e
+    path: Assets/Scenes/Grpc/Grpc_Login.unity
+    guid: 940c3ef81f501354f84d9986e1988087
   - enabled: 1
-    path: Assets/Scenes/Offline.unity
-    guid: 9d59451b264321244a7bb6ea04f10889
+    path: Assets/Scenes/Grpc/Avatar Selector.unity
+    guid: 7387d0525d30491408df16e8f2b1e6c6
   - enabled: 1
-    path: Assets/Scenes/Login.unity
-    guid: 193caca88b482d346a0879d48f4d838f
+    path: Assets/Scenes/Grpc/DedicatedGameServerScene.unity
+    guid: afef247bbd11f694f8ec1bc714ef904c
   - enabled: 1
-    path: Assets/Scenes/Avatar Selector.unity
-    guid: 29ab025fc95b80d40948aeca5e3f3b06
+    path: Assets/Scenes/Grpc/Grpc_01.unity
+    guid: 99cfa41cf8c5c1d40ae1558a8a87db56
   - enabled: 1
-    path: Assets/Scenes/Lobby.unity
-    guid: bb00c6df144615f45a56d79ae8f125ff
+    path: Assets/Scenes/Grpc/Grpc_Enviroment.unity
+    guid: 831abbb51c724af4085810c24da2aae4
+  - enabled: 1
+    path: Assets/Scenes/Grpc/Grpc_Enviroment_Voice.unity
+    guid: 87eb83574ef76144bbc9a24f13e13abc
+  - enabled: 1
+    path: Assets/Scenes/Grpc/Grpc_Webgl.unity
+    guid: e06c6da13346e3e479298d696428ef67
+  - enabled: 1
+    path: Assets/Scenes/Grpc/Lobby 1.unity
+    guid: 9bcd695aeec94504d8fef5b3302458eb
+  - enabled: 1
+    path: Assets/Scenes/Grpc/Lobby 1 WebGL.unity
+    guid: 5348af23f3f1a764a8f2748d2453682d
+  - enabled: 1
+    path: Assets/Scenes/Grpc/WebGL_Enviroment.unity
+    guid: 042f97ba5e85b294f95c115e1ab85aa2
+  - enabled: 1
+    path: Assets/Scenes/Grpc/Webgl_Enviroment22.unity
+    guid: 70c5b25563b62094d80316bf485c7b73
+  - enabled: 1
+    path: Assets/Scenes/Grpc/WebGL_Enviroment_Voice.unity
+    guid: ec75f155a17e84f44b4287d630ecd3c8
   m_configObjects:
     Unity.XR.Oculus.Settings: {fileID: 11400000, guid: bfa1182bd221b4ca89619141f66f1260, type: 2}
     Unity.XR.WindowsMR.Settings: {fileID: 11400000, guid: dc5a169419fa04987b057f65238cf3ba, type: 2}
@@ -29,4 +50,3 @@ EditorBuildSettings:
     com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: 5dcc2603f77432c4b8f783205c89bc27, type: 2}
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 1a4c68ca72a83449f938d669337cb305, type: 2}
     com.unity.xr.openxr.settings4: {fileID: 11400000, guid: a9a6963505ddf7f4d886008c6dc86122, type: 2}
-  m_UseUCBPForAssetBundles: 0

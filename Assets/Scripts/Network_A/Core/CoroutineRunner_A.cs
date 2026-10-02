@@ -7,32 +7,88 @@ namespace Network_A.Core
     {
         private static CoroutineRunner_A _instance;
 
-        //* Runs a coroutine from non-MonoBehaviour network classes.
+        //* نمونه موجود را ثبت می‌کند، نمونه تکراری را حذف می‌کند
+        //* و نمونه اصلی را هنگام اجرای برنامه بین صحنه‌ها نگه می‌دارد.
+        private void Awake()
+        {
+            if (!Application.isPlaying)
+            {
+                return;
+            }
+
+            if (_instance != null && _instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            _instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+
+        //* روال دریافت‌شده را فقط هنگام اجرای برنامه آغاز می‌کند.
         public static Coroutine Run(IEnumerator routine)
         {
-            EnsureInstance();
+            if (routine == null || !EnsureInstance())
+            {
+                return null;
+            }
+
             return _instance.StartCoroutine(routine);
         }
 
-        //* Stops a running coroutine safely.
+        //* روال مشخص‌شده را در صورت وجود متوقف می‌کند.
         public static void Stop(Coroutine routine)
         {
-            if (_instance != null && routine != null) _instance.StopCoroutine(routine);
+            if (_instance == null || routine == null)
+            {
+                return;
+            }
+
+            _instance.StopCoroutine(routine);
         }
 
-        //* Stops all network helper coroutines.
+        //* تمام روال‌های در حال اجرا را متوقف می‌کند.
         public static void StopAll()
         {
-            if (_instance != null) _instance.StopAllCoroutines();
+            if (_instance == null)
+            {
+                return;
+            }
+
+            _instance.StopAllCoroutines();
         }
 
-        //* Creates the hidden runner object if needed.
-        private static void EnsureInstance()
+        //* ابتدا نمونه‌ای را که در صحنه قرار داده شده پیدا می‌کند.
+        //* فقط اگر نمونه‌ای وجود نداشته باشد و برنامه در حال اجرا باشد،
+        //* یک نمونه کمکی جدید می‌سازد.
+        private static bool EnsureInstance()
         {
-            if (_instance != null) return;
-            var obj = new GameObject("Network_A_CoroutineRunner");
-            _instance = obj.AddComponent<CoroutineRunner_A>();
-            DontDestroyOnLoad(obj);
+            if (!Application.isPlaying)
+            {
+                return false;
+            }
+
+            if (_instance != null)
+            {
+                return true;
+            }
+
+            CoroutineRunner_A existingRunner =
+                FindFirstObjectByType<CoroutineRunner_A>();
+
+            if (existingRunner != null)
+            {
+                _instance = existingRunner;
+                return true;
+            }
+
+            GameObject runnerObject =
+                new GameObject("Network_A_CoroutineRunner");
+
+            runnerObject.AddComponent<CoroutineRunner_A>();
+
+            return _instance != null;
         }
     }
 }

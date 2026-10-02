@@ -1,0 +1,14 @@
+Note: Unnecessary use of -X or --request, POST is already inferred.
+* Host localhost:3000 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:3000...
+*   Trying 127.0.0.1:3000...
+* connect to ::1 port 3000 from :: port 14690 failed: Connection refused
+* connect to 127.0.0.1 port 3000 from 0.0.0.0 port 14691 failed: Connection refused
+* Failed to connect to localhost:3000 after 2256 ms: Could not connect to server
+* closing connection #0
+curl: (7) Failed to connect to localhost:3000 after 2256 ms: Could not connect to server
+Note: Unnecessary use of -X or --request, POST is already inferred.
+* URL rejected: Port number was not a decimal number between 0 and 65535
+curl: (3) URL rejected: Port number was not a decimal number between 0 and 65535

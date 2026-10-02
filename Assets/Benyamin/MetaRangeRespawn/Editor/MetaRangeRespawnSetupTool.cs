@@ -133,6 +133,34 @@ namespace MetaRange.Avatar.EditorLayer
             var spawn = systemRoot.GetComponent<SpawnFromURL>() ?? Undo.AddComponent<SpawnFromURL>(systemRoot);
             BindSpawnFromURL(spawn, avatar);
 
+            // بریج ادغام با Network_A (برنچ gRPC) — اختیاری و بدون وابستگی سخت
+            System.Type bridgeType = FindBridgeType();
+            if (bridgeType != null)
+            {
+                Component bridge = systemRoot.GetComponent(bridgeType) ?? Undo.AddComponent(systemRoot, bridgeType);
+                var bso = new SerializedObject(bridge);
+                SetRef(bso, "ownerPanel", ownerPanel);
+                SetString(bso, "serverUrl", ServerUrl);
+                bso.ApplyModifiedPropertiesWithoutUndo();
+                LogNulls(bso, "MetaRangeNetworkSpawnBridge");
+                Debug.Log("[متارنج] بریج شبکه (Network_A) به MetaRange_SpawnSystem اضافه شد.");
+
+                // بریج دکمهٔ محیط لابی (Lobby 1 WebGL) → نام اتاق به‌عنوان env متارنج.
+                // این کامپوننت خودش DontDestroyOnLoad می‌شود تا با لود صحنهٔ گیم‌پلی از بین نرود،
+                // پس فقط bind لازم دارد و می‌تواند روی همان ریشهٔ سیستم بنشیند.
+                System.Type lobbyBridgeType = FindLobbyBridgeType();
+                if (lobbyBridgeType != null)
+                {
+                    Component lobbyBridge = systemRoot.GetComponent(lobbyBridgeType) ?? Undo.AddComponent(systemRoot, lobbyBridgeType);
+                    var lso = new SerializedObject(lobbyBridge);
+                    SetRef(lso, "networkSpawnBridge", bridge);
+                    SetString(lso, "serverUrl", ServerUrl);
+                    lso.ApplyModifiedPropertiesWithoutUndo();
+                    LogNulls(lso, "MetaRangeLobbyEnvironmentBridge");
+                    Debug.Log("[متارنج] بریج لابی (دکمهٔ محیط) به MetaRange_SpawnSystem اضافه شد.");
+                }
+            }
+
             Selection.activeGameObject = panel;
             EditorGUIUtility.PingObject(panel);
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
@@ -232,6 +260,80 @@ namespace MetaRange.Avatar.EditorLayer
                 if (it.propertyType == SerializedPropertyType.ObjectReference && it.objectReferenceValue == null)
                     Debug.LogWarning("[MetaRange] " + label + " فیلد خالی: " + it.name);
             }
+        }
+
+        // =====================================================================
+        // نگهبان قرارداد دکمهٔ محیط لابی (Lobby 1 WebGL)
+        // =====================================================================
+
+        [MenuItem("Tools/متارنج/بررسی اتصال لابی (Lobby 1 WebGL)")]
+        public static void VerifyLobbyContract()
+        {
+            const string managerTypeName = "Network_A.Realtime.Controllers.RealtimeRoomGameServerManager";
+            const string clientTypeName = "MetaverseNetworkClient";
+
+            System.Text.StringBuilder report = new System.Text.StringBuilder();
+            report.AppendLine("=== اتصال دکمهٔ محیط لابی ⇒ متارنج ===");
+
+            System.Type managerType = FindTypeByName(managerTypeName);
+            System.Type clientType = FindTypeByName(clientTypeName);
+            System.Type lobbyControllerType = FindTypeByName("Network_A.Lobby.Lobby1RealtimeSceneController");
+            System.Type itemViewType = FindTypeByName("Network_A.Lobby.CompletedBuildingRoomListItemView");
+
+            report.AppendLine(MemberRow("RealtimeRoomGameServerManager", managerType == null, "کلاس مدیر ریل‌تایم"));
+            report.AppendLine(MemberRow("Lobby1RealtimeSceneController", lobbyControllerType == null, "کنترلر صحنهٔ لابی (سازندهٔ دکمه‌ها)"));
+            report.AppendLine(MemberRow("CompletedBuildingRoomListItemView", itemViewType == null, "ویوی آیتم روم (کلیک دکمه)"));
+
+            if (managerType != null)
+            {
+                System.Reflection.EventInfo joined = managerType.GetEvent("OnRoomJoinedFor3D",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                System.Reflection.EventInfo left = managerType.GetEvent("OnRoomLeftFor3D",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                System.Reflection.PropertyInfo roomName = managerType.GetProperty("CurrentRoomName",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+
+                report.AppendLine(MemberRow("OnRoomJoinedFor3D (static event)", joined == null, "رویداد ورود به محیط"));
+                report.AppendLine(MemberRow("OnRoomLeftFor3D (static event)", left == null, "رویداد خروج از محیط"));
+                report.AppendLine(MemberRow("CurrentRoomName", roomName == null, "کد ساختمان = نام محیط متارنج"));
+            }
+
+            if (clientType != null)
+            {
+                System.Reflection.PropertyInfo userId = clientType.GetProperty("userId",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                report.AppendLine(MemberRow("MetaverseNetworkClient.userId", userId == null, "انتخاب نقطهٔ اسپان بین بازیکنان"));
+            }
+
+            System.Type bridgeType = FindTypeByName("MetaRange.Avatar.MetaRangeLobbyEnvironmentBridge");
+            MonoBehaviour instanceInScene = bridgeType == null
+                ? null
+                : UnityEngine.Object.FindAnyObjectByType(bridgeType) as MonoBehaviour;
+
+            report.AppendLine(MemberRow("MetaRangeLobbyEnvironmentBridge (کلاس)", bridgeType == null, "بریج لابی"));
+            report.AppendLine(MemberRow("MetaRangeLobbyEnvironmentBridge (نمونه در صحنه)", instanceInScene == null,
+                "اگر نبود، خودش هنگام اجرا ساخته می‌شود"));
+
+            report.AppendLine();
+            report.AppendLine(LobbyNetworkHooks.Describe());
+            report.AppendLine("نگاشت: env = کد ساختمان (CurrentRoomName)  |  spawn = یکی از نقاط /api/list-positions?env=<کد ساختمان>");
+
+            Debug.Log(report.ToString());
+        }
+
+        static string MemberRow(string member, bool missing, string role)
+        {
+            return "  " + (missing ? "MISS" : "OK  ") + "  " + member + "  ← " + role;
+        }
+
+        static System.Type FindTypeByName(string fullName)
+        {
+            foreach (System.Reflection.Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                System.Type t = asm.GetType(fullName);
+                if (t != null) return t;
+            }
+            return null;
         }
 
         // =====================================================================
@@ -1016,6 +1118,145 @@ namespace MetaRange.Avatar.EditorLayer
                 if (t != null) return t;
             }
             return null;
+        }
+
+        /// <summary>نوع بریج ادغام با Network_A (اختیاری)</summary>
+        static System.Type FindBridgeType()
+        {
+            foreach (System.Reflection.Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                System.Type t = asm.GetType("MetaRange.Avatar.MetaRangeNetworkSpawnBridge");
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        /// <summary>نوع بریج دکمهٔ محیط لابی (اختیاری)</summary>
+        static System.Type FindLobbyBridgeType()
+        {
+            foreach (System.Reflection.Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                System.Type t = asm.GetType("MetaRange.Avatar.MetaRangeLobbyEnvironmentBridge");
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        // =====================================================================
+        // نگهبان قرارداد Network_A — اگر تیم شبکه امضایی را عوض کرد، لوگراهگی نشود
+        // =====================================================================
+
+        [MenuItem("Tools/متارنگ/بررسی قرارداد Network_A (gRPC)")]
+        public static void VerifyNetworkContract()
+        {
+            // (نوع، نام عضو، پارامترها، باید استاتیک باشد؟)
+            var required = new System.Collections.Generic.List<object[]>
+            {
+                new object[] { "MetaverseNetworkClient",      "TryGetLocalPlayer",       new string[]{"MetaverseNetworkIdentity&"}, true },
+                new object[] { "MetaverseNetworkClient",      "isReady",                 new string[0],                  true },
+                new object[] { "MetaverseNetworkClient",      "userId",                  new string[0],                  true },
+                new object[] { "MetaverseNetworkClient",      "playerId",                new string[0],                  true },
+                new object[] { "MetaverseSpawnManager",       "GetSpawnedObjects",       new string[0],                  false },
+                new object[] { "MetaverseNetworkIdentity",    "get_IsLocalPlayer",       new string[0],                  false },
+                new object[] { "MetaverseNetworkIdentity",    "get_IsLocalOwner",        new string[0],                  false },
+                new object[] { "MetaverseNetworkIdentity",    "get_HasAuthority",        new string[0],                  false },
+                new object[] { "MetaverseNetworkIdentity",    "get_NetId",               new string[0],                  false },
+            };
+
+            int ok = 0, missing = 0;
+            var report = new System.Text.StringBuilder();
+            report.AppendLine("=== قرارداد MetaRange ⇄ Network_A ===");
+
+            // پیدا کردن کلاس‌ها در اسمبلی‌های بارگذاری‌شده یا در سورس پروژه
+            foreach (object[] row in required)
+            {
+                string typeName = (string)row[0];
+                string member = (string)row[1];
+                string[] paramTypes = (string[])row[2];
+                bool wantStatic = (bool)row[3];
+
+                string detail;
+                if (FindTypeOrSource(typeName, member, paramTypes, wantStatic, out detail))
+                {
+                    ok++;
+                    report.AppendLine("  OK    " + typeName + "." + member + "  " + detail);
+                }
+                else
+                {
+                    missing++;
+                    report.AppendLine("  MISS  " + typeName + "." + member + "  ← " + detail);
+                }
+            }
+
+            report.AppendLine("نتیجه: " + ok + " OK / " + missing + " MISS");
+            if (missing == 0)
+                report.AppendLine("✓ بریج می‌تواند local player شبکه را پیدا کند.");
+            else
+                report.AppendLine("✗ قرارداد ناسازگار است — MetaRange به حالت fallback می‌رود. " +
+                                   "نسخهٔ Network_A را با برنج gRPC هم‌تراز کنید.");
+            report.AppendLine(MetaverseNetworkHooks.Describe());
+
+            Debug.Log(report.ToString());
+        }
+
+        /// <summary>عضو موردنیاز را در اسمبلی‌ها یا (در صورت کامپایل نشدن) در سورس پروژه پیدا می‌کند</summary>
+        static bool FindTypeOrSource(string typeName, string member, string[] paramTypes,
+                                     bool wantStatic, out string detail)
+        {
+            System.Type t = null;
+            foreach (System.Reflection.Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                t = asm.GetType(typeName);
+                if (t != null) break;
+            }
+
+            if (t != null)
+            {
+                const System.Reflection.BindingFlags flags =
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static |
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.FlattenHierarchy;
+
+                if (member.StartsWith("get_"))
+                {
+                    System.Reflection.PropertyInfo pi = t.GetProperty(member.Substring(4), flags);
+                    detail = "property (کلاس کامپایل‌شده)";
+                    if (pi == null) { detail = "property یافت نشد در کلاس کامپایل‌شده"; return false; }
+                    return true;
+                }
+
+                System.Reflection.MethodInfo[] all = t.GetMethods(flags);
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i].Name != member) continue;
+                    if (wantStatic && !all[i].IsStatic) continue;
+                    detail = all[i].ReturnType.Name + "(" + all[i].GetParameters().Length + " پارامتر)";
+                    return true;
+                }
+                detail = "متد یافت نشد در کلاس کامپایل‌شده";
+                return false;
+            }
+
+            // کلاس کامپایل نشده ⇒ جست‌وجوی متنی در سورس پروژه (حالت Editor که Network_A هنوز کامپایل نشده)
+            string[] roots = { "Assets/Scripts/Network_A", "Assets/Scripts" };
+            foreach (string root in roots)
+            {
+                if (!AssetDatabase.IsValidFolder(root)) continue;
+                string[] guids = AssetDatabase.FindAssets("t:TextAsset", new string[] { root });
+                for (int i = 0; i < guids.Length; i++)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                    if (!path.EndsWith(".cs")) continue;
+                    string text = System.IO.File.ReadAllText(path);
+                    if (text.IndexOf("class " + typeName, StringComparison.Ordinal) < 0 &&
+                        text.IndexOf(typeName, StringComparison.Ordinal) < 0) continue;
+                    if (text.IndexOf(member, StringComparison.Ordinal) < 0) continue;
+                    detail = "در سورس یافت شد: " + path;
+                    return true;
+                }
+            }
+
+            detail = "کلاس/عضو یافت نشد (نه در اسمبلی، نه در سورس)";
+            return false;
         }
 
         static bool CardPrefabIsBound(GameObject prefab)

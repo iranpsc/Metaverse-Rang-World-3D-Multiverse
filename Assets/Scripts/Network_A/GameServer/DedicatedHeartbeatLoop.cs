@@ -245,6 +245,8 @@ namespace Network_A.GameServer
                     LogPlayerCountIfChanged(currentPlayers, "scheduled_heartbeat");
 
                     await controlClient.RenewServiceTokenIfNeededAsync(cancellationToken);
+                    Debug.Log("[DedicatedHeartbeatLoop] HEARTBEAT_MULTIROOM_V2 snapshot | currentPlayers=" +
+                              currentPlayers + " | " + BuildActiveRoomsDebugText());
                     await controlClient.SendHeartbeatAsync(currentPlayers, cancellationToken);
                     await DelaySeconds(config.heartbeatIntervalSeconds, cancellationToken);
                 }
@@ -314,6 +316,9 @@ namespace Network_A.GameServer
                     if (runtime == null || !runtime.IsRunning) continue;
 
                     await controlClient.RenewServiceTokenIfNeededAsync();
+                    Debug.Log("[DedicatedHeartbeatLoop] HEARTBEAT_MULTIROOM_V2 immediate snapshot | reason=" +
+                              item.reason + " | currentPlayers=" + item.currentPlayers +
+                              " | " + BuildActiveRoomsDebugText());
                     await controlClient.SendHeartbeatAsync(item.currentPlayers);
                     Debug.Log("[DedicatedHeartbeatLoop] Immediate heartbeat sent | reason=" +
                               item.reason + " | currentPlayers=" + item.currentPlayers);
@@ -349,6 +354,45 @@ namespace Network_A.GameServer
 
             Debug.Log("[DedicatedHeartbeatLoop] Current players changed | count=" +
                       currentPlayers + " | reason=" + SafeReason(reason));
+        }
+
+        //* این تابع لیست روم های فعال را برای لاگ هارت بیت چند رومی آماده می کند.
+        private string BuildActiveRoomsDebugText()
+        {
+            EnsureReferences();
+
+            if (playerRegistry == null)
+            {
+                return "roomCount=0 | rooms=";
+            }
+
+            List<string> list_roomIds = playerRegistry.CreateActiveRoomIdSnapshot();
+
+            if (list_roomIds == null || list_roomIds.Count <= 0)
+            {
+                string primaryRoomId = playerRegistry.GetPrimaryRoomId();
+
+                if (string.IsNullOrWhiteSpace(primaryRoomId))
+                {
+                    return "roomCount=0 | rooms=";
+                }
+
+                int primaryCount = playerRegistry.GetCurrentPlayerCountInRoom(primaryRoomId);
+                return "roomCount=1 | rooms=" + primaryRoomId + ":" + Mathf.Max(0, primaryCount);
+            }
+
+            List<string> list_parts = new List<string>();
+
+            for (int index = 0; index < list_roomIds.Count; index++)
+            {
+                string roomId = list_roomIds[index];
+                if (string.IsNullOrWhiteSpace(roomId)) continue;
+
+                int roomPlayers = playerRegistry.GetCurrentPlayerCountInRoom(roomId);
+                list_parts.Add(roomId + ":" + Mathf.Max(0, roomPlayers));
+            }
+
+            return "roomCount=" + list_parts.Count + " | rooms=" + string.Join(",", list_parts);
         }
 
         //* این تابع تاخیر قابل کنسل برای فاصله بین هارت بیت ها می سازد.

@@ -15,12 +15,6 @@ MonoBehaviour:
   m_GroupName: Remote Content
   m_GUID: e7ebc1d2777614a468d8bf9b0eb137dc
   m_SerializeEntries:
-  - m_GUID: 0227e7ac74b88d14fb10e4ebaf3a1e48
-    m_Address: Bubble
-    m_ReadOnly: 0
-    m_SerializedLabels:
-    - Bubble
-    FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: 0a331ff13aef58347b06d54f11c1e3a2
     m_Address: Bubble Model
     m_ReadOnly: 0
@@ -44,24 +38,6 @@ MonoBehaviour:
     m_ReadOnly: 0
     m_SerializedLabels:
     - Scene
-    FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: 2ab34027ebc55da4db8e469c1b3fc757
-    m_Address: Vehicle
-    m_ReadOnly: 0
-    m_SerializedLabels:
-    - Vehicle
-    FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: 2f33f7b830b0e0f46806f1f3d1a1686a
-    m_Address: Namayeshgah
-    m_ReadOnly: 0
-    m_SerializedLabels:
-    - Environment
-    FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: 6626add92d7730b4e80a62e0ec2afa11
-    m_Address: Mazar
-    m_ReadOnly: 0
-    m_SerializedLabels:
-    - Environment
     FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: 6b9909658950ce64d90fdaf138cc248f
     m_Address: Pedal_Boat
@@ -98,12 +74,6 @@ MonoBehaviour:
     m_ReadOnly: 0
     m_SerializedLabels:
     - Vehicle
-    FlaggedDuringContentUpdateRestriction: 0
-  - m_GUID: eee70fc319ce89e4c883d140c972c2ab
-    m_Address: Stand
-    m_ReadOnly: 0
-    m_SerializedLabels:
-    - Environment
     FlaggedDuringContentUpdateRestriction: 0
   m_ReadOnly: 0
   m_Settings: {fileID: 11400000, guid: 51e44f7fff558404b831c8e147e86e0f, type: 2}

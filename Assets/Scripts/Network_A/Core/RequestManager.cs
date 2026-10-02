@@ -12,22 +12,72 @@ namespace Network_A.Core
 {
     public static class RequestManager
     {
+        private static readonly object _stateLock = new object();
         private static CancellationTokenSource _globalCts = new CancellationTokenSource();
-        static readonly ConcurrentQueue<IRequestItem> _queue = new ConcurrentQueue<IRequestItem>();
-        static int _isProcessing;
+        private static ConcurrentQueue<IRequestItem> _queue = new ConcurrentQueue<IRequestItem>();
+        private static int _isProcessing;
+        private static int _runtimeGeneration;
+
+        //* در شروع هر اجرای جدید، وضعیت باقی‌مانده صف و پردازشگر اجرای قبلی را به‌طور کامل پاک می‌کند.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRuntimeState()
+        {
+            ResetState();
+        }
+
+        //* صف قبلی را جدا می‌کند، درخواست‌های منتظر را لغو می‌کند و یک نسل تازه برای اجرای جدید می‌سازد.
+        private static void ResetState()
+        {
+            CancellationTokenSource previousGlobalCts;
+            ConcurrentQueue<IRequestItem> previousQueue;
+
+            lock (_stateLock)
+            {
+                Interlocked.Increment(ref _runtimeGeneration);
+                previousGlobalCts = _globalCts;
+                previousQueue = _queue;
+                _globalCts = new CancellationTokenSource();
+                _queue = new ConcurrentQueue<IRequestItem>();
+                Interlocked.Exchange(ref _isProcessing, 0);
+            }
+
+            if (previousGlobalCts != null)
+            {
+                try { previousGlobalCts.Cancel(); }
+                catch (ObjectDisposedException) { }
+                finally { previousGlobalCts.Dispose(); }
+            }
+
+            IRequestItem staleItem;
+            while (previousQueue != null && previousQueue.TryDequeue(out staleItem)) staleItem.Cancel();
+        }
+
+        //* فقط برای نسل فعال اجازه شروع پردازشگر صف را صادر می‌کند.
+        private static bool TryStartProcessor(int generation)
+        {
+            lock (_stateLock)
+            {
+                if (generation != _runtimeGeneration) return false;
+                return Interlocked.CompareExchange(ref _isProcessing, 1, 0) == 0;
+            }
+        }
+
+        //* فقط پردازشگر نسل فعال را آزاد می‌کند تا پردازشگر قدیمی نتواند وضعیت اجرای جدید را تغییر دهد.
+        private static bool TryStopProcessor(int generation)
+        {
+            lock (_stateLock)
+            {
+                if (generation != _runtimeGeneration) return false;
+                Interlocked.Exchange(ref _isProcessing, 0);
+                return true;
+            }
+        }
 
         //* Cancels all network requests when the application quits.
         public static void OnApplicationQuit()
         {
             NetworkFileLogger.Info("REQUEST_MANAGER", "OnApplicationQuit called. Global cancellation requested.");
-
-            if (_globalCts != null)
-            {
-                _globalCts.Cancel();
-                _globalCts.Dispose();
-            }
-
-            _globalCts = new CancellationTokenSource();
+            ResetState();
         }
 
         //* Main unified entry point for all network requests.
@@ -40,53 +90,73 @@ namespace Network_A.Core
         public static Task<ApiResult<T>> Send<T>(string url, string method, object payload, bool auth, Dictionary<string, string> headers, CancellationToken ct = default(CancellationToken), string logTag = "")
         {
             string requestId = Guid.NewGuid().ToString("N");
-            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_globalCts.Token, ct);
+            CancellationTokenSource linkedCts;
+            ConcurrentQueue<IRequestItem> activeQueue;
+            int generation;
+
+            lock (_stateLock)
+            {
+                generation = _runtimeGeneration;
+                activeQueue = _queue;
+                linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_globalCts.Token, ct);
+            }
+
             var item = new RequestItem<T>
             {
-                Action = delegate { return SendInternal<T>(url, method, payload, auth, headers, linkedCts.Token, 0, logTag, requestId); },
-                Tcs = new TaskCompletionSource<ApiResult<T>>()
+                Action = async delegate
+                {
+                    try { return await SendInternal<T>(url, method, payload, auth, headers, linkedCts.Token, 0, logTag, requestId); }
+                    finally { linkedCts.Dispose(); }
+                },
+                CancelAction = delegate
+                {
+                    try { linkedCts.Cancel(); }
+                    catch (ObjectDisposedException) { }
+                    finally { linkedCts.Dispose(); }
+                },
+                Tcs = new TaskCompletionSource<ApiResult<T>>(TaskCreationOptions.RunContinuationsAsynchronously)
             };
 
-            _queue.Enqueue(item);
-            NetworkFileLogger.Request(requestId, "ENQUEUED", url, method, 0, "auth=" + auth + " logTag=" + logTag + " queueCount=" + _queue.Count);
-            var ignored = Process();
+            activeQueue.Enqueue(item);
+            NetworkFileLogger.Request(requestId, "ENQUEUED", url, method, 0, "auth=" + auth + " logTag=" + logTag + " queueCount=" + activeQueue.Count + " generation=" + generation);
+            var ignored = Process(activeQueue, generation);
             return item.Tcs.Task;
         }
 
         //* Processes queued requests one by one.
-        static async Task Process()
+        static async Task Process(ConcurrentQueue<IRequestItem> activeQueue, int generation)
         {
-            if (Interlocked.CompareExchange(ref _isProcessing, 1, 0) != 0)
+            if (!TryStartProcessor(generation))
             {
-                NetworkFileLogger.Info("REQUEST_MANAGER", "Process already running. QueueCount=" + _queue.Count);
+                if (generation == _runtimeGeneration) NetworkFileLogger.Info("REQUEST_MANAGER", "Process already running. QueueCount=" + activeQueue.Count + " generation=" + generation);
                 return;
             }
 
-            NetworkFileLogger.Info("REQUEST_MANAGER", "Queue processor started. QueueCount=" + _queue.Count);
+            NetworkFileLogger.Info("REQUEST_MANAGER", "Queue processor started. QueueCount=" + activeQueue.Count + " generation=" + generation);
 
             try
             {
-                while (true)
+                while (generation == _runtimeGeneration)
                 {
                     IRequestItem item;
-                    while (_queue.TryDequeue(out item))
+                    while (generation == _runtimeGeneration && activeQueue.TryDequeue(out item))
                     {
-                        NetworkFileLogger.Info("REQUEST_MANAGER", "Dequeued item. RemainingQueue=" + _queue.Count);
+                        NetworkFileLogger.Info("REQUEST_MANAGER", "Dequeued item. RemainingQueue=" + activeQueue.Count + " generation=" + generation);
                         await item.Execute();
                     }
 
-                    Interlocked.Exchange(ref _isProcessing, 0);
-                    NetworkFileLogger.Info("REQUEST_MANAGER", "Queue processor idle. QueueEmpty=" + _queue.IsEmpty);
-                    if (_queue.IsEmpty) return;
-                    if (Interlocked.CompareExchange(ref _isProcessing, 1, 0) != 0) return;
+                    if (!TryStopProcessor(generation)) return;
+                    NetworkFileLogger.Info("REQUEST_MANAGER", "Queue processor idle. QueueEmpty=" + activeQueue.IsEmpty + " generation=" + generation);
+                    if (activeQueue.IsEmpty) return;
+                    if (!TryStartProcessor(generation)) return;
                 }
             }
             catch (Exception ex)
             {
                 Debug.LogError("[Network_A.RequestManager.Process] " + ex);
                 NetworkFileLogger.Exception("REQUEST_MANAGER_PROCESS", ex);
-                Interlocked.Exchange(ref _isProcessing, 0);
-                if (!_queue.IsEmpty) Process();
+                if (!TryStopProcessor(generation)) return;
+                if (!activeQueue.IsEmpty) Process(activeQueue, generation);
             }
         }
 
