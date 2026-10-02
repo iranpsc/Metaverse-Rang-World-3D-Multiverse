@@ -1,6 +1,6 @@
 # CHANGELOG — سیستم مدیریت موقعیت ریسپان آواتار (متارنج)
 
-نسخهٔ جاری: **v3.9.5**
+نسخهٔ جاری: **v3.9.6**
 
 ---
 
@@ -55,6 +55,25 @@
 - `ShowResult`: اسلش انتهاییِ پایه یک‌بار حذف می‌شود ⇒ `game/?env=…` و نه `game//?env=…`.
 - ساخت لینک، نام فیلدها، QR و رفتار کپی/دانلود **بدون تغییر** ماند.
 - آدرس‌های نمونه در مستندات به‌روز شد.
+
+### v3.9.6 — تنظیم مرکزی: آدرس سرور و لینک فقط در یک جا
+- فایل جدید `Scripts/MetaRangeConfig.cs`:
+  - `MetaRangeConfig` (static): `ServerUrl`، `PlayBaseUrl`، `Apply()`، `TrimTrailingSlash()`، `Describe()`
+  - `MetaRangeConfigSource` (MonoBehaviour): تنها آبجکتی که در Inspector ویرایش می‌شود؛
+    در `Awake` مقدارها را به `MetaRangeConfig` می‌دهد و `DontDestroyOnLoad` می‌شود
+    تا با تعویض صحنه گم نشود.
+- **فیلدهای تکراری حذف شد** از ۵ اسکریپت — دیگر هیچ `serverUrl`/`playBaseUrl`
+  در `EnvironmentCreator`، `OwnerPanel`، `SpawnFromURL`، `MetaRangeNetworkSpawnBridge`
+  و `MetaRangeLobbyEnvironmentBridge` نیست و همه از `MetaRangeConfig` می‌خوانند:
+  ⇒ دیگر لازم نیست چند Inspector جدا عوض شود.
+- Setup Tool متد جدید `EnsureConfigSource()`: کامپوننت Config را روی
+  `MetaRange_SpawnSystem` می‌سازد (تک‌نمونه) و با `SetString` مقداردهی می‌کند؛
+  پنج خط `SetString(so, "serverUrl"/"playBaseUrl", …)` حذف شد.
+- مقدار پیش‌فرض سرور از `http://localhost:3000` به `http://217.218.238.201:4000` تغییر کرد
+  (دیگر 127.0.0.1 پنهان نداریم).
+- اگر Config صحنه پیدا نشود: یک‌بار `LogWarning` راهنما با نمایش مقدار پیش‌فرضِ در حال استفاده
+  ⇒ نه سکوت، نه آدرس اشتباه پنهان.
+- منطق ثبت / لینک / QR / API **دست‌نخورده**؛ `Network_A` بدون تغییر.
 
 ## v3.8.0 - اتصال دکمهٔ محیط لابی به متارنج
 - فایل جدید `Scripts/MetaRangeLobbyEnvironmentBridge.cs`:

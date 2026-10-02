@@ -27,7 +27,7 @@ namespace MetaRange.Avatar.EditorLayer
         const string CreatePanelName = "MetaRange_LeftCreatePanel";    // پنل چپ — ساخت فایل محیط
         const string AvatarName = "MetaRangeAvatar";
         const string PrefabPath = PackageRoot + "/Prefabs/PositionCard.prefab";
-        const string ServerUrl = "http://localhost:3000";
+        const string ServerUrl = MetaRangeConfig.DefaultServerUrl;
         const string PlayBaseUrl = "https://dev-world-3d.metarang.com/game";
 
         // نام صحنه‌های قطعی پروژه (از DedicatedGameServerRealtimeRoomBinderWebGL استخراج شده:
@@ -46,6 +46,11 @@ namespace MetaRange.Avatar.EditorLayer
 
             // ریشه منطقی (بدون UI)
             GameObject systemRoot = FindOrCreateSceneObject(SystemRootName);
+
+            // =============================================================
+            // تنظیم مرکزی — تنها جایی که آدرس سرور و لینک در آن ویرایش می‌شود
+            // =============================================================
+            MetaRangeConfigSource configSource = EnsureConfigSource(systemRoot);
 
             // =============================================================
             // بخش چپ — ساخت فایل JSON محیط (EnvironmentCreator)
@@ -146,8 +151,7 @@ namespace MetaRange.Avatar.EditorLayer
                 Component bridge = systemRoot.GetComponent(bridgeType) ?? Undo.AddComponent(systemRoot, bridgeType);
                 var bso = new SerializedObject(bridge);
                 SetRef(bso, "ownerPanel", ownerPanel);
-                SetString(bso, "serverUrl", ServerUrl);
-                bso.ApplyModifiedPropertiesWithoutUndo();
+                    bso.ApplyModifiedPropertiesWithoutUndo();
                 LogNulls(bso, "MetaRangeNetworkSpawnBridge");
                 Debug.Log("[متارنج] بریج شبکه (Network_A) به MetaRange_SpawnSystem اضافه شد.");
 
@@ -160,8 +164,7 @@ namespace MetaRange.Avatar.EditorLayer
                     Component lobbyBridge = systemRoot.GetComponent(lobbyBridgeType) ?? Undo.AddComponent(systemRoot, lobbyBridgeType);
                     var lso = new SerializedObject(lobbyBridge);
                     SetRef(lso, "networkSpawnBridge", bridge);
-                    SetString(lso, "serverUrl", ServerUrl);
-                    lso.ApplyModifiedPropertiesWithoutUndo();
+                            lso.ApplyModifiedPropertiesWithoutUndo();
                     LogNulls(lso, "MetaRangeLobbyEnvironmentBridge");
                     Debug.Log("[متارنج] بریج لابی (دکمهٔ محیط) به MetaRange_SpawnSystem اضافه شد.");
                 }
@@ -179,6 +182,7 @@ namespace MetaRange.Avatar.EditorLayer
                       "پنل راست (مالک): " + PanelName + "\n" +
                       "بریج لابی (create-env + Context.env): " +
                           (FindLobbyBridgeType() != null ? "نصب‌شده" : "★ موجود نیست") +
+                          "   |   تنظیم مرکزی: " + MetaRangeConfig.Describe() +
                           "   |   Context.env فعلی: " +
                           (string.IsNullOrEmpty(EnvironmentCreator.StoredEnvironmentName)
                               ? "(قفل نشده — از دکمهٔ لابی پر می‌شود)"
@@ -215,13 +219,12 @@ namespace MetaRange.Avatar.EditorLayer
             SetRef(so, "nameInput", input);
             SetRef(so, "createButton", btn);
             SetRef(so, "resultText", result);
-            SetString(so, "serverUrl", ServerUrl);
             so.ApplyModifiedPropertiesWithoutUndo();
             LogNulls(so, "EnvironmentCreator");
         }
 
-        static void BindOwnerPanel(
-            OwnerPanel c,
+static void BindOwnerPanel(
+              OwnerPanel c,
             Toggle toggle, Transform avatar, RTLTextMeshPro livePos,
             TMP_InputField posNameInput, Button register, RTLTextMeshPro registerStatus,
             GameObject sectionResult, RTLTextMeshPro linkText, RawImage qr, Button downloadQr,
@@ -246,8 +249,6 @@ namespace MetaRange.Avatar.EditorLayer
             SetRef(so, "emptyListText", emptyList);
             SetRef(so, "cardContainer", content);
             SetRef(so, "cardPrefab", cardPrefab);
-            SetString(so, "serverUrl", ServerUrl);
-            SetString(so, "playBaseUrl", PlayBaseUrl);
             so.ApplyModifiedPropertiesWithoutUndo();
             LogNulls(so, "OwnerPanel");
         }
@@ -257,7 +258,6 @@ namespace MetaRange.Avatar.EditorLayer
             var so = new SerializedObject(c);
             SetRef(so, "avatarTransform", avatar);
             SetRef(so, "avatar", avatar);
-            SetString(so, "serverUrl", ServerUrl);
             so.ApplyModifiedPropertiesWithoutUndo();
             LogNulls(so, "SpawnFromURL");
         }
@@ -369,7 +369,7 @@ namespace MetaRange.Avatar.EditorLayer
 
             report.AppendLine();
             report.AppendLine("— سرور لوکال متارنج —");
-            report.AppendLine("  پیش‌فرض serverUrl: http://localhost:3000   (GET /api/health باید {\"ok\":true} بدهد)");
+            report.AppendLine("  تنظیم مرکزی (تنها جای ویرایش): " + MetaRangeConfig.Describe());
 
             report.AppendLine();
             report.AppendLine("— منبع آواتار —");
@@ -463,6 +463,33 @@ namespace MetaRange.Avatar.EditorLayer
             GameObject go = new GameObject(name);
             Undo.RegisterCreatedObjectUndo(go, "Create " + name);
             return go;
+        }
+
+        /// <summary>
+        /// تنظیم مرکزی متارنج را روی ریشهٔ دائمی می‌سازد/به‌روز می‌کند.
+        /// همهٔ اسکریپت‌ها آدرس سرور و لینک را از همین می‌خوانند، پس
+        /// «Tools ▸ متارنج ▸ راه‌اندازی» تنها جایی است که آدرس تعیین می‌شود.
+        /// </summary>
+        static MetaRangeConfigSource EnsureConfigSource(GameObject systemRoot)
+        {
+            MetaRangeConfigSource src = systemRoot.GetComponent<MetaRangeConfigSource>();
+            if (src == null)
+            {
+                // اگر جای دیگری در صحنه هست، همان را بردار (تک‌نمونه)
+                src = UnityEngine.Object.FindAnyObjectByType<MetaRangeConfigSource>();
+                if (src == null)
+                {
+                    src = Undo.AddComponent<MetaRangeConfigSource>(systemRoot);
+                }
+            }
+
+            var so = new SerializedObject(src);
+            SetString(so, "serverUrl", ServerUrl);
+            SetString(so, "playBaseUrl", PlayBaseUrl);
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            EditorUtility.SetDirty(src);
+            return src;
         }
 
         static void DestroyAllByName(string name)

@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Text;
 using TMPro;
-using RTLTMPro;   // پکیج com.nosuchstudio.rtltmpro — نمایش صحیح فارسی
+using RTLTMPro;   
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -16,8 +16,7 @@ namespace MetaRange.Avatar
         [SerializeField] private Button createButton;
         [SerializeField] private RTLTextMeshPro resultText;
 
-        [Header("Config")]
-        [SerializeField] private string serverUrl = "http://localhost:3000";
+        // آدرس سرور از تنظیم مرکزی می‌آید: MetaRangeConfigSource در صحنه (Tools ▸ متارنج ▸ راه‌اندازی)
 
         public static string StoredEnvironmentName { get; private set; } = string.Empty;
 
@@ -159,7 +158,7 @@ namespace MetaRange.Avatar
 
             // POST با بدنه JSON واقعی + هدر application/json
             // (در صورت شکست localhost، توسط MetarangeNet یک بار با 127.0.0.1 تلاش می‌شود)
-            yield return MetarangeNet.PostJson(serverUrl, "/api/create-env", json, reply);
+            yield return MetarangeNet.PostJson(MetaRangeConfig.ServerUrl, "/api/create-env", json, reply);
 
             if (createButton != null) createButton.interactable = true;
 

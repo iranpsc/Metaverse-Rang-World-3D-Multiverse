@@ -563,8 +563,7 @@ namespace MetaRange.Avatar
 
         const string RootName = "MetaRange_Lobby_Environment_Bridge";
 
-        [Header("MetaRange (Node)")]
-        [SerializeField] private string serverUrl = "http://localhost:3000";
+        // آدرس سرور از تنظیم مرکزی: MetaRangeConfigSource
 
         [Header("Bindings")]
         [SerializeField] private MetaRangeNetworkSpawnBridge networkSpawnBridge;
@@ -666,7 +665,7 @@ namespace MetaRange.Avatar
         {
             // ① تضمین وجود محیط روی سرور Node (اگر بود 409 ⇒ موفقیت)
             var createReply = new MetarangeNet.Reply();
-            yield return EnvironmentCreator.EnsureEnvironment(serverUrl, env, createReply);
+            yield return EnvironmentCreator.EnsureEnvironment(MetaRangeConfig.ServerUrl, env, createReply);
 
             if (!createReply.ok)
             {
@@ -699,7 +698,7 @@ namespace MetaRange.Avatar
         {
             string path = "/api/list-positions?env=" + UnityWebRequest.EscapeURL(env);
             var listReply = new MetarangeNet.Reply();
-            yield return MetarangeNet.Get(serverUrl, path, listReply);
+            yield return MetarangeNet.Get(MetaRangeConfig.ServerUrl, path, listReply);
 
             List<KeyValuePair<string, PositionEntry>> entries;
             if (!listReply.ok || !MetaRangeSpawnList.TryParseEntries(listReply.body, out entries) || entries.Count == 0)
@@ -736,7 +735,7 @@ namespace MetaRange.Avatar
                           "&spawn=" + UnityWebRequest.EscapeURL(spawnId);
 
             var reply = new MetarangeNet.Reply();
-            yield return MetarangeNet.Get(serverUrl, path, reply);
+            yield return MetarangeNet.Get(MetaRangeConfig.ServerUrl, path, reply);
 
             PositionEntry entry = null;
             if (reply.ok)

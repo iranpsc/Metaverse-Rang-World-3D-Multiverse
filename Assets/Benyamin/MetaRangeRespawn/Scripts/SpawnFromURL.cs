@@ -7,8 +7,7 @@ namespace MetaRange.Avatar
 {
     public class SpawnFromURL : MonoBehaviour
     {
-        [Header("Config")]
-        [SerializeField] private string serverUrl = "http://localhost:3000";
+        // آدرس سرور از تنظیم مرکزی: MetaRangeConfigSource
         [SerializeField] private Transform avatarTransform;
         [SerializeField] private Vector3 defaultPosition = new Vector3(0f, 1f, 0f);
         [SerializeField] private Quaternion defaultRotation = Quaternion.identity;
@@ -127,7 +126,7 @@ namespace MetaRange.Avatar
                           + UnityWebRequest.EscapeURL(spawn);
 
             var reply = new MetarangeNet.Reply();
-            yield return MetarangeNet.Get(serverUrl, path, reply);
+            yield return MetarangeNet.Get(MetaRangeConfig.ServerUrl, path, reply);
 
             if (reply.ok)
             {

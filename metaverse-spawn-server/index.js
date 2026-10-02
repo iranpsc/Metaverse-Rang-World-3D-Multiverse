@@ -1,7 +1,7 @@
 /**
  * متارنج v3.1 — سرور مدیریت موقعیت ریسپان آواتار
  * ------------------------------------------------------------
- * Base: http://localhost:3000
+ * Base: http://localhost:4000
  *
  *   POST /api/create-env        { environmentName }                  → 201 | 409 | 400
  *   POST /api/add-position      { environmentName, positionId,
@@ -24,7 +24,7 @@ const cors = require('cors');
 const QRCode = require('qrcode');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
 // بدون host → Node روی :: (dual-stack) بسته می‌شود؛ هم localhost/IPv6 و هم 127.0.0.1/IPv4 کار می‌کند
 const HOST = process.env.HOST; // فقط اگر صراحاً ست شود محدود می‌شود
 const ENV_DIR = path.join(__dirname, 'data', 'environments');

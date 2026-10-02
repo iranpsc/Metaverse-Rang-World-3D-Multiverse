@@ -379,8 +379,7 @@ public static string Describe()
     [AddComponentMenu("MetaRange/Network Spawn Bridge")]
     public class MetaRangeNetworkSpawnBridge : MonoBehaviour
     {
-        [Header("MetaRange (Node)")]
-        [SerializeField] private string serverUrl = "http://localhost:3000";
+        // آدرس سرور از تنظیم مرکزی: MetaRangeConfigSource
         [Tooltip("اگر سرور پاسخ نداد، اصلاً آواتار را جابه‌جا نکن (برای شبکه بهتر است)")]
         [SerializeField] private bool applyDefaultOnFailure = false;
         [SerializeField] private Vector3 defaultPosition = new Vector3(0f, 1f, 0f);
@@ -576,7 +575,7 @@ public static string Describe()
                           + UnityWebRequest.EscapeURL(spawn);
 
             var reply = new MetarangeNet.Reply();
-            yield return MetarangeNet.Get(serverUrl, path, reply);
+            yield return MetarangeNet.Get(MetaRangeConfig.ServerUrl, path, reply);
 
             bool ok = false;
 

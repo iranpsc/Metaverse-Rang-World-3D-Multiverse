@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;   // UTF8Encoding برای ذخیرهٔ فایل لینک
@@ -41,15 +41,8 @@ namespace MetaRange.Avatar
         [SerializeField] private Transform cardContainer;
         [SerializeField] private GameObject cardPrefab;
 
-        [Header("Config")]
-        [SerializeField] private string serverUrl = "http://localhost:3000";
-        /// <summary>
-        /// پایهٔ لینک ورود به بازی.
-        /// اگر این مقدار قبلاً در صحنه serialize شده باشد، پیش‌فرض کد بی‌اثر است؛
-        /// با یک‌بار اجرای «Tools ▸ متارنج ▸ راه‌اندازی سیستم ریسپان آواتار» هم مقدار
-        /// Inspector هم به‌روز می‌شود (Tool این فیلد را با SetString مقداردهی می‌کند).
-        /// </summary>
-        [SerializeField] private string playBaseUrl = "https://dev-world-3d.metarang.com/game";
+        // آدرس سرور و پایهٔ لینک از تنظیم مرکزی می‌آیند: MetaRangeConfigSource
+        // (تنها جای ویرایش در صحنه — یک‌بار با Tools ▸ متارنج ▸ راه‌اندازی ساخته می‌شود)
 
         [Header("QR Service")]
         [Tooltip("منبع اول: QR روی سرور خودمان (پیشنهادی — بدون وابستگی به سرویس بیرونی)")]
@@ -562,7 +555,7 @@ namespace MetaRange.Avatar
             var reply = new MetarangeNet.Reply();
 
             // POST + Content-Type: application/json (بدنه واقعی، نه query)
-            yield return MetarangeNet.PostJson(serverUrl, "/api/add-position", json, reply);
+            yield return MetarangeNet.PostJson(MetaRangeConfig.ServerUrl, "/api/add-position", json, reply);
 
             // اگر سرور محیط را ندارد (ری‌استارت/پاک شدن data) → یک‌بار ساخت و تلاش مجدد
             if (reply.code == 404 &&
@@ -572,7 +565,7 @@ namespace MetaRange.Avatar
                 EnvironmentCreator.ClearStoredName();
 
                 var ensure = new MetarangeNet.Reply();
-                yield return EnvironmentCreator.EnsureEnvironment(serverUrl, ensure);
+                yield return EnvironmentCreator.EnsureEnvironment(MetaRangeConfig.ServerUrl, ensure);
 
                 if (ensure.ok && !string.IsNullOrEmpty(EnvironmentCreator.StoredEnvironmentName))
                 {
@@ -581,7 +574,7 @@ namespace MetaRange.Avatar
                     json = JsonUtility.ToJson(body);
                     Debug.Log("[OwnerPanel] تلاش مجدد ثبت: env=" + env + "  posId=" + posId);
                     var retry = new MetarangeNet.Reply();
-                    yield return MetarangeNet.PostJson(serverUrl, "/api/add-position", json, retry);
+                    yield return MetarangeNet.PostJson(MetaRangeConfig.ServerUrl, "/api/add-position", json, retry);
                     reply = retry;
                 }
             }
@@ -601,9 +594,9 @@ namespace MetaRange.Avatar
         {
             currentSpawnId = posId;
 
-            // اسلش انتهایی فقط یک‌بار ⇒ لینک «game/?env=…» یا «game?env=…» و نه «game//?env=…»
-            string baseUrl = string.IsNullOrEmpty(playBaseUrl) ? "" : playBaseUrl.Trim();
-            while (baseUrl.EndsWith("/")) baseUrl = baseUrl.Substring(0, baseUrl.Length - 1);
+            // نرمال‌سازی اسلش انتهایی در خودِ تنظیم مرکزی انجام می‌شود
+            // ⇒ «game?env=…» و نه «game//?env=…»
+            string baseUrl = MetaRangeConfig.TrimTrailingSlash(MetaRangeConfig.PlayBaseUrl);
 
             currentLink = baseUrl + "?env=" + env + "&spawn=" + posId;
 
@@ -625,7 +618,7 @@ namespace MetaRange.Avatar
             // ① QR روی سرور خودمان
             if (useLocalServerQr)
             {
-                string localUrl = serverUrl + "/api/qr?data=" + UnityWebRequest.EscapeURL(data);
+                string localUrl = MetaRangeConfig.ServerUrl + "/api/qr?data=" + UnityWebRequest.EscapeURL(data);
                 bool okLocal = false;
 
                 using (UnityWebRequest req = UnityWebRequestTexture.GetTexture(localUrl))
@@ -835,7 +828,7 @@ namespace MetaRange.Avatar
             };
 
             var reply = new MetarangeNet.Reply();
-            yield return MetarangeNet.PutJson(serverUrl, "/api/rename-position", JsonUtility.ToJson(body), reply);
+            yield return MetarangeNet.PutJson(MetaRangeConfig.ServerUrl, "/api/rename-position", JsonUtility.ToJson(body), reply);
 
             if (reply.ok)
             {
@@ -871,7 +864,7 @@ namespace MetaRange.Avatar
             string json = JsonUtility.ToJson(body);
             var reply = new MetarangeNet.Reply();
 
-            yield return MetarangeNet.PutJson(serverUrl, "/api/update-position", json, reply);
+            yield return MetarangeNet.PutJson(MetaRangeConfig.ServerUrl, "/api/update-position", json, reply);
 
             if (reply.ok)
             {
@@ -959,7 +952,7 @@ namespace MetaRange.Avatar
             if (string.IsNullOrEmpty(env)) yield break;
 
             var reply = new MetarangeNet.Reply();
-            yield return MetarangeNet.Get(serverUrl,
+            yield return MetarangeNet.Get(MetaRangeConfig.ServerUrl,
                 "/api/list-positions?env=" + UnityWebRequest.EscapeURL(env), reply);
 
             if (!reply.ok)
