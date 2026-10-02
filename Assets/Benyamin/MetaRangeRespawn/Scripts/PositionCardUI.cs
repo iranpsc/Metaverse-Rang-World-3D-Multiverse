@@ -41,14 +41,7 @@ namespace MetaRange.Avatar
             entry = e;
             owner = panel;
 
-            if (idLabel != null) idLabel.text = id;
-
-            if (posLabel != null && e != null && e.position != null)
-                posLabel.text = string.Format("X:{0:F2}  Y:{1:F2}  Z:{2:F2}",
-                    e.position.x, e.position.y, e.position.z);
-
-            if (dateLabel != null)
-                dateLabel.text = !string.IsNullOrEmpty(e?.updatedAt) ? e.updatedAt : "";
+            RefreshView();
 
             if (editButton != null)
             {
@@ -67,6 +60,80 @@ namespace MetaRange.Avatar
             }
 
             SetMode(false);
+        }
+
+        /// <summary>
+        /// نمایش کامل کارت در حالت view: **نام + مختصات + چرخش**.
+        /// بعد از هر تغییری (ثبت، ویرایش، تغییر نام) صدا زده می‌شود تا کارت همان لحظه تازه شود.
+        /// </summary>
+        public void RefreshView()
+        {
+            // ⛔ هر دو برچسب باید حتماً فعال و پر باشند (وگرنه کارت خالی دیده می‌شود)
+            if (idLabel != null) idLabel.gameObject.SetActive(true);
+            if (posLabel != null) posLabel.gameObject.SetActive(true);
+
+            if (idLabel == null || posLabel == null)
+            {
+                Debug.LogError("[PositionCardUI] برچسب‌ها bind نشده‌اند (idLabel=" +
+                               (idLabel == null ? "null" : "ok") + " , posLabel=" +
+                               (posLabel == null ? "null" : "ok") +
+                               ") ⇒ یک‌بار Tools ▸ متارنج ▸ راه‌اندازی سیستم ریسپان آواتار را اجرا کنید.");
+            }
+
+            // خط ۱ — نام/شناسهٔ موقعیت (چیزی که کاربر وارد کرده یا pos_xxxx)
+            if (idLabel != null) idLabel.text = string.IsNullOrEmpty(posId) ? "(بدون نام)" : posId;
+
+            // خط ۲ و ۳ — مختصات و چرخش با ۲ رقم اعشار، لاتین‌رقم برای RTL
+            if (posLabel != null)
+            {
+                if (entry != null && entry.position != null)
+                {
+                    string line = string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "موقعیت:  X: {0:F2}   Y: {1:F2}   Z: {2:F2}",
+                        entry.position.x, entry.position.y, entry.position.z);
+
+                    Vector3 rotEuler = entry.rotation != null
+                        ? entry.rotation.ToQuaternion().eulerAngles
+                        : Vector3.zero;
+                    line += string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "\nچرخش:  Rx: {0:F1}   Ry: {1:F1}   Rz: {2:F1}",
+                        rotEuler.x, rotEuler.y, rotEuler.z);
+
+                    posLabel.text = line;
+                }
+                else
+                {
+                    posLabel.text = "موقعیت: —";
+                }
+            }
+
+            if (dateLabel != null)
+            {
+                // تاریخ: اول به‌روزرسانی، وگرنه ساخت
+                string when = !string.IsNullOrEmpty(entry?.updatedAt) ? entry.updatedAt
+                            : !string.IsNullOrEmpty(entry?.createdAt) ? entry.createdAt
+                            : "";
+                dateLabel.text = when;
+            }
+        }
+
+        private void Start()
+        {
+            // شبکهٔ ایمنی: اگر به هر دلیلی Setup صدا نخورده باشد،
+            // برچسب‌ها نباید خالی/غیرفعال بمانند.
+            if (idLabel != null && string.IsNullOrEmpty(idLabel.text)) RefreshView();
+        }
+
+        /// <summary>به‌روزرسانی داده‌های محلی کارت پس از ذخیره (بدون درخواست شبکه)</summary>
+        void ApplyLocalValues(string newId, Vector3 position, Quaternion rotation)
+        {
+            if (!string.IsNullOrEmpty(newId)) posId = newId;
+
+            if (entry == null) entry = new PositionEntry();
+            entry.position = Vec3Data.From(position);
+            entry.rotation = QuatData.From(rotation);
         }
 
         private void OnDestroy()
@@ -168,6 +235,7 @@ namespace MetaRange.Avatar
                     yield break;   // خطا — در حالت ویرایش می‌مانیم
                 }
                 posId = typedName;
+                RefreshView();   // نام جدید همان لحظه روی کارت دیده شود
             }
 
             // ---------- ۲) مختصات ----------
@@ -181,11 +249,15 @@ namespace MetaRange.Avatar
 
             yield return owner.UpdatePositionRoutine(env, posId, new Vector3(x, y, z), rot, moveAvatarOnConfirm);
 
+            // مقادیر ذخیره‌شده را محلی اعمال کن تا کارت بدون انتظارِ رفرش لیست تازه شود
+            ApplyLocalValues(posId, new Vector3(x, y, z), rot);
+            RefreshView();
+
             isBusy = false;
             if (confirmButton != null) confirmButton.interactable = true;
 
             if (owner != null) owner.NotifyEditEnded(this);
-            SetMode(false);   // لیست با مقادیر جدید دوباره ساخته می‌شود
+            SetMode(false);   // کارت با مقادیر جدید در حالت نمایش می‌ماند
         }
 
         /// <summary>
@@ -232,7 +304,8 @@ namespace MetaRange.Avatar
 
             // نام موقعیت در حالت ویرایش هم دیده شود (بالای فیلدها)
             if (idLabel != null) idLabel.gameObject.SetActive(true);
-            if (posLabel != null) posLabel.gameObject.SetActive(!edit);
+            // مختصات/چرخش همیشه دیده شود (هم view و هم ویرایش) — فقط تاریخ در ویرایش مخفی
+            if (posLabel != null) posLabel.gameObject.SetActive(true);
             if (dateLabel != null) dateLabel.gameObject.SetActive(!edit);
 
             // هایلایت کارتِ در حال ویرایش

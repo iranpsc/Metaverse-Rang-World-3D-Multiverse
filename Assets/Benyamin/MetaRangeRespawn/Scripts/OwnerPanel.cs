@@ -93,6 +93,20 @@ namespace MetaRange.Avatar
         /// </summary>
         void EnsureAvatar(string reason)
         {
+            // ⛔ اگر مرجع فعلی یک Canvas/UI است (مثلاً MainCanvas که مختصات صفحه می‌دهد)،
+            //    فوراً باطل می‌شود تا دوباره درست resolve شود.
+            if (avatar != null && MetaverseNetworkHooks.IsUiTransform(avatar))
+            {
+                Debug.LogWarning("[OwnerPanel] مرجع آواتار نامعتبر بود (UI/Canvas): " + avatar.name +
+                                 " ⇒ invalidate و resolve دوباره (" + reason + ")");
+                avatar = null;
+                waitSince = -1f;
+                lastLivePos = Vector3.zero;
+                lastLiveRot = Vector3.zero;
+                livePosIdleTime = 0f;
+                livePosStaleLogged = false;
+            }
+
             // ① local player شبکه — منبع حقیقت (لایهٔ A و B)
             bool networkReady = MetaverseNetworkHooks.TryGetLocalPlayerDeep(out Transform netPlayer, out string src);
             if (networkReady)
@@ -163,11 +177,19 @@ namespace MetaRange.Avatar
             try { found = GameObject.FindWithTag("Player"); }
             catch { /* تگ Player تعریف نشده */ }
 
+            // تگ Player ممکن است روی Canvas/UI باشد ⇒ رد کن
+            if (found != null && MetaverseNetworkHooks.IsUiTransform(found.transform)) found = null;
+
             if (found == null)
             {
                 string[] names = { "Player", "MetaRangeAvatar", "Avatar", "LocalPlayer", "XR Origin", "XR Rig" };
                 for (int i = 0; i < names.Length && found == null; i++)
-                    found = GameObject.Find(names[i]);
+                {
+                    GameObject candidate = GameObject.Find(names[i]);
+                    if (candidate == null) continue;
+                    if (MetaverseNetworkHooks.IsUiTransform(candidate.transform)) continue;   // ← رد UI
+                    found = candidate;
+                }
             }
             return found;
         }
@@ -197,6 +219,13 @@ namespace MetaRange.Avatar
             if (livePosText == null || avatar == null) return;
             if (livePosText.gameObject == null) return;
 
+            // throttle را دور بزن تا پنل همان لحظه مختصات تازه را نشان دهد
+            livePosNextAt = 0f;
+            lastLivePos = avatar.position;
+            lastLiveRot = avatar.eulerAngles;
+            livePosIdleTime = 0f;
+            livePosStaleLogged = false;
+
             Vector3 p = avatar.position;
             Vector3 e = avatar.eulerAngles;
             livePosText.text = string.Format(
@@ -212,6 +241,10 @@ namespace MetaRange.Avatar
         static bool IsOfflineAvatar(Transform t)
         {
             if (t == null) return false;
+
+            // Canvas/UI همیشه «نیازمند resolve مجدد» است، حتی اگر نامش کپسول/تست نباشد
+            if (MetaverseNetworkHooks.IsUiTransform(t)) return true;
+
             string n = t.name.ToLowerInvariant();
             return n.Contains("capsule") || n.Contains("کپسول") || n.Contains("placeholder") ||
                    n.Contains("test") || n.Contains("temp") || n.Contains("dummy");
@@ -224,6 +257,15 @@ namespace MetaRange.Avatar
         public void AdoptAvatar(Transform t, string reason)
         {
             if (t == null) return;
+
+            // Canvas/UI را هرگز به‌عنوان آواتار نپذیر
+            if (MetaverseNetworkHooks.IsUiTransform(t))
+            {
+                Debug.LogWarning("[OwnerPanel] AdoptAvatar نادیده گرفته شد (UI/Canvas): " + t.name +
+                                 "  ⇒ این مختصات صفحه است، نه آواتار.");
+                return;
+            }
+
             if (avatar == t) return;
 
             if (avatar != null)
@@ -297,11 +339,7 @@ namespace MetaRange.Avatar
             bool ownerOn = ownerToggle != null ? ownerToggle.isOn : isOwner;
             if (!ownerOn) return;
 
-            // اگر آواتار در زمان اجرا نامعتبر شد (حذف/تعویض صحنه توسط بازی)، دوباره پیدایش کن
-            //
-            // join با تأخیر: Network_A آواتار را *بعداً* می‌سازد. تا وقتی local player شبکه
-            // نیامده، هر ~0.35 ثانیه دوباره امتحان می‌کنیم (بدون لاگ تکراری)
-            // تا حداکثر ~۱ ثانیه بعد از join، موقعیت زنده ظاهر شود.
+            // مرجع نامعتبر ⇒ همان لحظه دوباره پیدا شود (بدون throttle تا UI یخ نزند)
             if (avatar == null || IsOfflineAvatar(avatar))
             {
                 avatarRetryAt -= Time.unscaledDeltaTime;
@@ -313,26 +351,84 @@ namespace MetaRange.Avatar
                 }
             }
 
-            if (avatar == null)
+            TickLivePosition();
+        }
+
+        /// <summary>بازهٔ به‌روزرسانی متن زنده (۱۰ بار در ثانیه ⇒ نرم و ارزان)</summary>
+        const float LivePositionInterval = 0.1f;
+        float livePosNextAt;
+        Vector3 lastLivePos;
+        Vector3 lastLiveRot;
+        float livePosIdleTime;
+        bool livePosStaleLogged;
+
+        /// <summary>
+        /// خواندن مختصات/چرخش از Transform آواتار و نوشتن در متن پنل.
+        /// - خواندن پوز هر فریم (ارزان) تا «یخ‌زدگی» قابل تشخیص باشد.
+        /// - نوشتن متن حداکثر هر ۰٫۱ ثانیه تا TMP بی‌جهت کار نکند.
+        /// - کل بدنه داخل try/catch است تا یک استثنای گذرا نتواند نمایش را برای همیشه متوقف کند.
+        /// </summary>
+        void TickLivePosition()
+        {
+            try
             {
-                // بعد از ~۶ ثانیه، پیام دقیق با وضعیت hooks به‌جای «منتظر» بی‌پایان
-                bool verbose = waitSince >= 0f && Time.time - waitSince > 6f;
-                livePosText.text = verbose
-                    ? "موقعیت زنده: local player شبکه پیدا نشد\n" +
-                      "(نه تگ Player، نه نام رایج، نه CharacterController یکتا)\n" +
-                      "hooks: " + MetaverseNetworkHooks.Describe()
-                    : "موقعیت زنده: منتظر آواتار شبکه…\n(بعد از join خودکار وصل می‌شود)";
-                return;
+                if (avatar == null)
+                {
+                    livePosIdleTime = 0f;
+
+                    // بعد از ~۶ ثانیه، پیام دقیق با وضعیت hooks به‌جای «منتظر» بی‌پایان
+                    bool verbose = waitSince >= 0f && Time.time - waitSince > 6f;
+                    livePosText.text = verbose
+                        ? "موقعیت زنده: local player شبکه پیدا نشد\n" +
+                          "(نه تگ Player، نه نام رایج، نه CharacterController یکتا)\n" +
+                          "hooks: " + MetaverseNetworkHooks.Describe()
+                        : "موقعیت زنده: منتظر آواتار شبکه…\n(بعد از join خودکار وصل می‌شود)";
+                    return;
+                }
+
+                Vector3 p = avatar.position;
+                Vector3 e = avatar.eulerAngles;
+
+                // ── تشخیص یخ‌زدگی: مرجع معتبر است ولی حرکتی نمی‌کند ──
+                bool moved = (p - lastLivePos).sqrMagnitude > 0.000001f ||
+                             (e - lastLiveRot).sqrMagnitude > 0.0001f;
+                if (moved)
+                {
+                    lastLivePos = p;
+                    lastLiveRot = e;
+                    livePosIdleTime = 0f;
+                    livePosStaleLogged = false;
+                }
+                else
+                {
+                    livePosIdleTime += Time.unscaledDeltaTime;
+                    if (!livePosStaleLogged && livePosIdleTime > 2f)
+                    {
+                        livePosStaleLogged = true;
+                        Debug.LogWarning("[OwnerPanel] مرجع آواتار «" + avatar.name +
+                                         "» بیش از ۲ ثانیه تغییری نکرد | pos=" + p.ToString("F2") +
+                                         " | hooks: " + MetaverseNetworkHooks.Describe() +
+                                         "  ⇒ اگر آواتار روی صفحه حرکت می‌کند ولی عددها ثابت است، " +
+                                         "Transform متحرک احتمالاً والد این آبجکت است.");
+                    }
+                }
+
+                // نوشتن متن با throttle (بعد از تازه‌شدن مرجع، فوری)
+                if (Time.unscaledTime < livePosNextAt) return;
+                livePosNextAt = Time.unscaledTime + LivePositionInterval;
+
+                // InvariantCulture ⇒ همیشه نقطهٔ اعشار و رقم لاتین (بدون به‌هم‌ریختگی RTL)
+                livePosText.text = string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "موقعیت زنده ({0})\nX: {1:F2}   Y: {2:F2}   Z: {3:F2}\nچرخش: {4:F1} / {5:F1} / {6:F1}",
+                    avatar.name, p.x, p.y, p.z, e.x, e.y, e.z);
             }
-
-            Vector3 p = avatar.position;
-            Vector3 e = avatar.eulerAngles;
-
-            // InvariantCulture ⇒ همیشه نقطهٔ اعشار و رقم لاتین (بدون به‌هم‌ریختگی RTL)
-            livePosText.text = string.Format(
-                System.Globalization.CultureInfo.InvariantCulture,
-                "موقعیت زنده ({0})\nX: {1:F2}   Y: {2:F2}   Z: {3:F2}\nچرخش: {4:F1} / {5:F1} / {6:F1}",
-                avatar.name, p.x, p.y, p.z, e.x, e.y, e.z);
+            catch (System.Exception ex)
+            {
+                if (livePosStaleLogged) return;
+                livePosStaleLogged = true;
+                Debug.LogError("[OwnerPanel] خطا در به‌روزرسانی موقعیت زنده (یک‌بار گزارش شد): " + ex.Message);
+            }
         }
 
         private void OnOwnerChanged(bool on)

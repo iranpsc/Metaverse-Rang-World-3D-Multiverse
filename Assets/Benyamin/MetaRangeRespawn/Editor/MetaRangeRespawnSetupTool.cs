@@ -509,10 +509,10 @@ static readonly float LivePosHeight = 140f;  // سه خط مختصات زنده
 static readonly float StatusHeight = 62f;    // متن وضعیت (دو خط)
 static readonly float SectionMinHeight = 330f;
 static readonly float ScrollMinHeight = 260f;
-static readonly float ScrollPreferredHeight = 320f;
+static readonly float ScrollPreferredHeight = 340f;
 static readonly float QrSize = 156f;
 static readonly float CardWidth = 420f;
-static readonly float CardHeight = 170f;
+static readonly float CardHeight = 250f;   // نام + مختصات + چرخش (۳ خط) + دکمه
 static readonly float CreatePanelWidth = 470f;
 static readonly float CreatePanelHeight = 300f;
 static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر راست و جمع‌وجور)
@@ -619,9 +619,11 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
             rt.anchoredPosition = new Vector2(-16f, 0f);
             rt.sizeDelta = new Vector2(PanelWidth, -32f);   // ارتفاع ثابت = اندازهٔ اسکرول
 
-            // viewport خودِ پنل است؛ Mask محتوای اضافه را می‌بُرد
-            Mask mask = panel.AddComponent<Mask>();
-            mask.showMaskGraphic = true;
+            // ⛔ نه Mask و نه هیچ Graphic اضافه برای بریدن: RectMask2D هیچ‌چیز رسم نمی‌کند.
+            // (Mask از Graphic خودش به‌عنوان stencil استفاده می‌کند و می‌تواند
+            //  مستطیل سفید/رنگی روی صفحه بگذارد و کلیک را هم خراب کند.)
+            RectMask2D rectMask = panel.AddComponent<RectMask2D>();
+            rectMask.padding = new Vector4(0f, 0f, 0f, 0f);
 
             // ── Content: ارتفاعش با محتوا رشد می‌کند (PrefSize) ──
             GameObject contentGo = CreateUi("PanelContent", panel.transform);
@@ -1006,9 +1008,9 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
 
             GameObject viewport = CreateUi("Viewport", scrollGo.transform);
             Image vpImg = viewport.AddComponent<Image>();
-            vpImg.color = new Color(1f, 1f, 1f, 0.02f);
-            Mask mask = viewport.AddComponent<Mask>();
-            mask.showMaskGraphic = false;
+            vpImg.color = new Color(0f, 0f, 0f, 0f);      // کاملاً شفاف؛ فقط برای raycast نیست
+            vpImg.raycastTarget = true;
+            RectMask2D rectMask = viewport.AddComponent<RectMask2D>();   // ← نه Mask
             SetStretch(viewport.GetComponent<RectTransform>(), 2f);
 
             GameObject contentGo = CreateUi("Content", viewport.transform);
@@ -1201,9 +1203,11 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
 
         static GameObject EnsureCardPrefab()
         {
-            GameObject existing = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
-            if (existing != null && CardPrefabIsBound(existing)) return existing;
-
+            // ⚠ کارت همیشه از نو ساخته می‌شود.
+            // دلیل: اگر پریفبِ روی دیسک کهنه باشد (ارتفاع/فونت/رنگ قدیمی)،
+            // شرط CardPrefabIsBound آن را «سالم» می‌داند و اصلاح‌ها اعمال نمی‌شود
+            // ⇒ کارت در Play Mode فقط تاریخ و دکمهٔ ویرایش نشان می‌داد.
+            // ساخت قطعی یعنی یک‌بار اجرای Tools = کارت درست.
             EnsureFolders();
 
             GameObject card = new GameObject("PositionCard", typeof(RectTransform));
@@ -1221,9 +1225,18 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
             vlg.childForceExpandWidth = true;
             vlg.childForceExpandHeight = false;
 
-            RTLTextMeshPro idLabel = CreateRtlTmp(card.transform, "IdLabel", "pos_xxxxxx", FontSizeCard, TextAlignmentOptions.MidlineRight);
-            RTLTextMeshPro posLabel = CreateRtlTmp(card.transform, "PosLabel", "X:0 Y:0 Z:0", FontSizeCard, TextAlignmentOptions.MidlineRight);
+            RTLTextMeshPro idLabel = CreateRtlTmp(card.transform, "IdLabel", "pos_xxxxxx", FontSizeCard + 2, TextAlignmentOptions.MidlineRight);
+            idLabel.color = Color.white;              // کنتراست بالا روی زمینهٔ کارت
+            idLabel.fontStyle = FontStyles.Bold;
+            SetFixedHeight(idLabel, 38f);
+
+            RTLTextMeshPro posLabel = CreateRtlTmp(card.transform, "PosLabel", "موقعیت:  X: 0.00   Y: 0.00   Z: 0.00\nچرخش:  Rx: 0.0   Ry: 0.0   Rz: 0.0", FontSizeCard, TextAlignmentOptions.TopRight);
+            posLabel.color = Color.white;
+            SetFixedHeight(posLabel, 88f);            // دو خط: مختصات + چرخش
+
             RTLTextMeshPro dateLabel = CreateRtlTmp(card.transform, "DateLabel", "", FontSizeCardSmall, TextAlignmentOptions.MidlineRight);
+            dateLabel.color = new Color(0.72f, 0.75f, 0.82f, 1f);
+            SetFixedHeight(dateLabel, 30f);
 
             Button editBtn = CreateButton(card.transform, "EditButton", "ویرایش", new Color(0.25f, 0.45f, 0.75f));
             Button confirm = CreateButton(card.transform, "ConfirmButton", "تأیید", new Color(0.20f, 0.65f, 0.35f));
@@ -1279,12 +1292,20 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
             so.ApplyModifiedPropertiesWithoutUndo();
             LogNulls(so, "PositionCardUI");
 
-            if (AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath) != null)
-                AssetDatabase.DeleteAsset(PrefabPath);
+            // روی همان مسیر overwrite می‌شود ⇒ GUID پریفب ثابت می‌ماند و
+            // رفرنس کارت در صحنه (cardPrefab) نمی‌شکند.
+            // (حذف asset با DeleteAsset باعث GUID جدید و از‌کارافتادن رفرنس صحنه می‌شد)
             GameObject prefab = PrefabUtility.SaveAsPrefabAsset(card, PrefabPath);
             UnityEngine.Object.DestroyImmediate(card);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+
+            // گزارش شفاف: اگر بعد از ساخت چیزی bind نشده باشد، لوگ می‌شود
+            GameObject built = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+            if (built != null && !CardPrefabIsBound(built))
+                Debug.LogWarning("[متارنج] پریفب کارت ساخته شد ولی برخی رفرنس‌ها کامل bind نشدند — " +
+                                 "کارت ممکن است ناقص دیده شود. یک‌بار صحنه را باز و دوباره Tool را اجرا کنید.");
+
             return prefab;
         }
 

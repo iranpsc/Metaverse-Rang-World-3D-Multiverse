@@ -118,6 +118,32 @@ namespace MetaRange.Avatar
             }
         }
 
+        /// <summary>
+        /// آیا این Transform یک آبجکت UI است (Canvas / RectTransform خالص / EventSystem)؟
+        /// چنین چیزی **هرگز** نباید مرجع آواتار باشد — مختصاتش مختصات صفحه است، نه جهان.
+        /// (Canvas معمولاً مختصاتی مثل 960/540 می‌دهد که دقیقاً نشانهٔ همین اشتباه است.)
+        /// </summary>
+        public static bool IsUiTransform(Transform t)
+        {
+            if (t == null) return false;
+
+            string n = t.name.ToLowerInvariant();
+            if (n.Contains("canvas") || n.Contains("eventsystem") || n.Contains("overlay") ||
+                n.Contains("hud") || n.Contains("panel") || n.Contains("tooltip") ||
+                n == "ui" || n == "gui" || n == "hudcanvas") return true;
+
+            try
+            {
+                if (t.GetComponent<Canvas>() != null) return true;
+                if (t.GetComponent<UnityEngine.UI.GraphicRaycaster>() != null) return true;
+                // RectTransform خالص + Graphic ⇒ عنصر UI است، نه آواتار سه‌بعدی
+                if (t is RectTransform && t.GetComponent<UnityEngine.UI.Graphic>() != null) return true;
+            }
+            catch { }
+
+            return false;
+        }
+
         /// <summary>آیا همین حالا local player شبکه وجود دارد؟</summary>
         public static bool LocalPlayerReady => TryGetLocalPlayer(out Transform _);
 
@@ -147,6 +173,7 @@ namespace MetaRange.Avatar
                 Component comp = all[i] as Component;
                 if (comp == null) continue;
                 if (!comp.gameObject.scene.IsValid()) continue;   // حذف prefab/asset
+                if (IsUiTransform(comp.transform)) continue;        // Canvas/UI ⇒ آواتار نیست
                 live++;
 
                 if (firstIsLocal == null && IsLocalIdentity(comp)) firstIsLocal = comp.transform;
@@ -237,6 +264,9 @@ namespace MetaRange.Avatar
 
             Transform t = GetTransform(identity);
             if (t == null) return false;
+
+            // Canvas/UI هیچ‌وقت آواتار نیست
+            if (IsUiTransform(t)) return false;
 
             playerTransform = t;
             return true;
