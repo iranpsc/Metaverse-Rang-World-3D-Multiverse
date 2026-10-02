@@ -240,7 +240,7 @@ Invoke-RestMethod "$B/api/rename-position" -Method Put -ContentType 'application
   environmentName = 'demo_hall'; positionId = 'ورودی_اصلی'; newPositionId = 'ورودی_شمالی'
 } | ConvertTo-Json)
 
-Invoke-WebRequest "$B/api/qr?data=$([uri]::EscapeDataString('https://metarange.adfam.com/play?env=demo_hall&spawn=pos_4F7A21'))" -OutFile qr.png
+Invoke-WebRequest "$B/api/qr?data=$([uri]::EscapeDataString('https://dev-world-3d.metarang.com/game?env=demo_hall&spawn=pos_4F7A21'))" -OutFile qr.png
 ```
 
 نمونهٔ خطاها:

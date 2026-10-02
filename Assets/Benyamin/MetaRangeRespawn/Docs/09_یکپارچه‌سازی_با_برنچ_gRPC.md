@@ -29,7 +29,7 @@
 ## ۲) جریان runtime
 
 ```
-① لینک بازیکن:  https://metarange.adfam.com/play?env=test_webgl&spawn=ورودی_شمالی
+① لینک بازیکن:  https://dev-world-3d.metarang.com/game?env=test_webgl&spawn=ورودی_شمالی
         │
 ② MetaRangeNetworkSpawnBridge (متارنج)
         │  SpawnFromURL.TryGetUrlParams(env, spawn)      ← همان پارسر URL قبلی

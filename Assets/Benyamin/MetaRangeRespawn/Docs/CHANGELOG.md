@@ -1,6 +1,6 @@
 # CHANGELOG — سیستم مدیریت موقعیت ریسپان آواتار (متارنج)
 
-نسخهٔ جاری: **v3.9.4**
+نسخهٔ جاری: **v3.9.5**
 
 ---
 
@@ -44,6 +44,18 @@
 - **منطق ثبت موقعیت، ساخت لینک، QR و ویرایش کارت‌ها اصلاً تغییر نکرد**
   (`OwnerPanel.cs` و `PositionCardUI.cs` دست‌نخورده‌اند؛ فقط `MetaRangeRespawnSetupTool.cs` layout).
 - **صریح:** هیچ فایلی از `Assets/Scripts/Network_A` تغییر نکرد.
+### v3.9.5 — تغییر پایهٔ لینک به دامنهٔ dev
+- `playBaseUrl` از `https://metarange.adfam.com/play` به **`https://dev-world-3d.metarang.com/game`** تغییر کرد.
+  لینک خروجی: `https://dev-world-3d.metarang.com/game?env=<env>&spawn=<id>`
+- در **دو جا** ست شد (لازم است، چون مقدار قبلی در صحنه serialize شده بود):
+  1. `OwnerPanel.playBaseUrl` — پیش‌فرض فیلد
+  2. `MetaRangeRespawnSetupTool.PlayBaseUrl` — که با `SetString` هنگام اجرای
+     «Tools ▸ متارنج ▸ راه‌اندازی سیستم ریسپان آواتار» مقدارِ Inspector را هم به‌روز می‌کند.
+  ⇒ **بدون اجرای دوبارهٔ Tool، مقدارِ ذخیره‌شدهٔ صحنه همچنان آدرس قدیمی می‌ماند.**
+- `ShowResult`: اسلش انتهاییِ پایه یک‌بار حذف می‌شود ⇒ `game/?env=…` و نه `game//?env=…`.
+- ساخت لینک، نام فیلدها، QR و رفتار کپی/دانلود **بدون تغییر** ماند.
+- آدرس‌های نمونه در مستندات به‌روز شد.
+
 ## v3.8.0 - اتصال دکمهٔ محیط لابی به متارنج
 - فایل جدید `Scripts/MetaRangeLobbyEnvironmentBridge.cs`:
   - `MetaRangeSpawnList`: پارسر مستقل `GET /api/list-positions` (چون `JsonUtility` دیکشنری نمی‌خواند).

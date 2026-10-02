@@ -28,7 +28,7 @@ namespace MetaRange.Avatar.EditorLayer
         const string AvatarName = "MetaRangeAvatar";
         const string PrefabPath = PackageRoot + "/Prefabs/PositionCard.prefab";
         const string ServerUrl = "http://localhost:3000";
-        const string PlayBaseUrl = "https://metarange.adfam.com/play";
+        const string PlayBaseUrl = "https://dev-world-3d.metarang.com/game";
 
         // نام صحنه‌های قطعی پروژه (از DedicatedGameServerRealtimeRoomBinderWebGL استخراج شده:
         // WebGLLobbySceneName / WebGLGameplaySceneName). مبنای تشخیص و لاگ هستند.

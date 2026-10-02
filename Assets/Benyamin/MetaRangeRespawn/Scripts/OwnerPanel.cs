@@ -43,7 +43,13 @@ namespace MetaRange.Avatar
 
         [Header("Config")]
         [SerializeField] private string serverUrl = "http://localhost:3000";
-        [SerializeField] private string playBaseUrl = "https://metarange.adfam.com/play";
+        /// <summary>
+        /// پایهٔ لینک ورود به بازی.
+        /// اگر این مقدار قبلاً در صحنه serialize شده باشد، پیش‌فرض کد بی‌اثر است؛
+        /// با یک‌بار اجرای «Tools ▸ متارنج ▸ راه‌اندازی سیستم ریسپان آواتار» هم مقدار
+        /// Inspector هم به‌روز می‌شود (Tool این فیلد را با SetString مقداردهی می‌کند).
+        /// </summary>
+        [SerializeField] private string playBaseUrl = "https://dev-world-3d.metarang.com/game";
 
         [Header("QR Service")]
         [Tooltip("منبع اول: QR روی سرور خودمان (پیشنهادی — بدون وابستگی به سرویس بیرونی)")]
@@ -594,7 +600,12 @@ namespace MetaRange.Avatar
         private void ShowResult(string env, string posId)
         {
             currentSpawnId = posId;
-            currentLink = playBaseUrl + "?env=" + env + "&spawn=" + posId;
+
+            // اسلش انتهایی فقط یک‌بار ⇒ لینک «game/?env=…» یا «game?env=…» و نه «game//?env=…»
+            string baseUrl = string.IsNullOrEmpty(playBaseUrl) ? "" : playBaseUrl.Trim();
+            while (baseUrl.EndsWith("/")) baseUrl = baseUrl.Substring(0, baseUrl.Length - 1);
+
+            currentLink = baseUrl + "?env=" + env + "&spawn=" + posId;
 
             if (linkText != null) linkText.text = currentLink;
             if (sectionResult != null) sectionResult.SetActive(true);
