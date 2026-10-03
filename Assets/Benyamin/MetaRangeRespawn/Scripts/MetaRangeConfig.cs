@@ -12,8 +12,10 @@ namespace MetaRange.Avatar
     /// </summary>
     public static class MetaRangeConfig
     {
-        /// <summary>پیش‌فرض ساخت (آخرین fallback اگر هیچ Config صحنه‌ای نبود)</summary>
-        public const string DefaultServerUrl = "http://217.218.238.201:4000";
+        /// <summary>پیش‌فرض ساخت (آخرین fallback اگر هیچ Config صحنه‌ای نبود).
+        /// Editor/لوکال → http://127.0.0.1:4000 (هم‌خوان با PORT پیش‌فرض metaverse-spawn-server).
+        /// Production WebGL → حتماً HTTPS در ConfigSource صحنه ست شود (Mixed Content).</summary>
+        public const string DefaultServerUrl = "http://127.0.0.1:4000";
 
         /// <summary>پایهٔ لینک ورود به بازی</summary>
         public const string DefaultPlayBaseUrl = "https://dev-world-3d.metarang.com/game";
@@ -75,12 +77,12 @@ namespace MetaRange.Avatar
         {
             if (configuredFromScene || warnedMissing) return;
             warnedMissing = true;
-            Debug.LogWarning(
-                "[متارنج] MetaRangeConfigSource در صحنه پیدا نشد ⇒ از مقدار پیش‌فرض ساخت استفاده می‌شود:\n" +
+            Debug.LogError(
+                "[متارنج] MetaRangeConfigSource نیست؛ از پیش‌فرض لوکال استفاده می‌شود. " +
+                "یک‌بار «Tools ▸ متارنج ▸ راه‌اندازی سیستم ریسپان آواتار» اجرا کنید یا دستی Config بسازید.\n" +
                 "  serverUrl    = " + serverUrl + "\n" +
                 "  playBaseUrl  = " + playBaseUrl + "\n" +
-                "  برای تغییر فقط یک‌بار: یک GameObject با MetaRangeConfigSource بسازید و مقادیرش را " +
-                "در Inspector ست کنید (یا یک‌بار «Tools ▸ متارنج ▸ راه‌اندازی سیستم ریسپان آواتار» را اجرا کنید).");
+                "  منبع=پیش‌فرض ساخت");
         }
 
         /// <summary>خلاصهٔ وضعیت برای لاگ/منوی تشخیصی</summary>

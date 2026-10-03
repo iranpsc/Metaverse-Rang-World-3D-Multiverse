@@ -144,6 +144,41 @@ namespace MetaRange.Avatar
             return false;
         }
 
+        /// <summary>
+        /// لیست سیاه مرجع آواتار: هرگز Directional Light / هر Light / Camera / AudioListener /
+        /// Canvas / EventSystem به‌عنوان local player قبول نمی‌شود — حتی اگر شبکه آن را برگرداند.
+        /// </summary>
+        public static bool IsInvalidAvatar(Transform t)
+        {
+            if (t == null) return false;
+            if (IsUiTransform(t)) return true;
+
+            try
+            {
+                if (t.GetComponent<Light>() != null) return true;   // Directional Light و هر نوع دیگر
+                if (t.GetComponent<UnityEngine.EventSystems.EventSystem>() != null) return true;
+
+                // Camera / AudioListener فقط وقتی رد می‌شوند که هویت شبکه یا CharacterController نداشته باشند
+                // (خود آواتار سه‌بعدی ممکن است آبجکت فرزند Camera داشته باشد، اما این چک فقط روی خودِ ترنسفرم است)
+                bool hasIdentity = false, hasCharacter = false;
+                try { ResolveTypes(); if (tIdentity != null) hasIdentity = t.GetComponent(tIdentity) != null; } catch { }
+                try { hasCharacter = t.GetComponent<CharacterController>() != null; } catch { }
+                if (!hasIdentity && !hasCharacter)
+                {
+                    if (t.GetComponent<Camera>() != null) return true;
+                    if (t.GetComponent<AudioListener>() != null) return true;
+                }
+            }
+            catch { }
+
+            string n = t.name;
+            if (n.IndexOf("directional light", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (n.IndexOf("main camera", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (n.IndexOf("event system", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (n.IndexOf(" eventsystem", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
+
         /// <summary>آیا همین حالا local player شبکه وجود دارد؟</summary>
         public static bool LocalPlayerReady => TryGetLocalPlayer(out Transform _);
 
@@ -173,7 +208,7 @@ namespace MetaRange.Avatar
                 Component comp = all[i] as Component;
                 if (comp == null) continue;
                 if (!comp.gameObject.scene.IsValid()) continue;   // حذف prefab/asset
-                if (IsUiTransform(comp.transform)) continue;        // Canvas/UI ⇒ آواتار نیست
+                if (IsInvalidAvatar(comp.transform)) continue;   // Light/Camera/Canvas/UI ⇒ آواتار نیست
                 live++;
 
                 if (firstIsLocal == null && IsLocalIdentity(comp)) firstIsLocal = comp.transform;
@@ -265,8 +300,8 @@ namespace MetaRange.Avatar
             Transform t = GetTransform(identity);
             if (t == null) return false;
 
-            // Canvas/UI هیچ‌وقت آواتار نیست
-            if (IsUiTransform(t)) return false;
+            // Canvas/UI و Light/Camera هرگز آواتار نیست
+            if (IsInvalidAvatar(t)) return false;
 
             playerTransform = t;
             return true;

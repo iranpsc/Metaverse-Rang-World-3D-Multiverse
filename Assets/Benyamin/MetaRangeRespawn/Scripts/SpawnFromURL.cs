@@ -53,6 +53,12 @@ namespace MetaRange.Avatar
             }
 
             Debug.LogWarning("[SpawnFromURL] پارامتر env/spawn در URL یافت نشد — اسپان در موقعیت پیش‌فرض.");
+            // اگر بریج شبکه فعال است، خودش اسپان را مدیریت می‌کند — پوز پیش‌فرض مضاعف نخور
+            if (MetaRangeNetworkSpawnBridge.IsActive)
+            {
+                Debug.Log("[SpawnFromURL] بریج شبکه فعال است ⇒ پوز پیش‌فرض اعمال نشد.");
+                return false;
+            }
             Spawn(defaultPosition, defaultRotation);
             return false;
         }
@@ -115,6 +121,7 @@ namespace MetaRange.Avatar
         {
             // در پروژه‌های شبکه (Network_A / برنچ gRPC)، بریج متارنج مسئول جای‌گذاری
             // local player است. اینجا نباید آواتار آفلاین/کپسول را جابه‌جا کنیم.
+            // (هم هنگام شکست fetch و هم fallback پیش‌فرض، این منطق یکسان است)
             if (MetaRangeNetworkSpawnBridge.IsActive)
             {
                 Debug.Log("[SpawnFromURL] بریج شبکه فعال است ⇒ ادغام با هوک Network_A انجام می‌شود.");
@@ -158,6 +165,12 @@ namespace MetaRange.Avatar
 
         private void Spawn(Vector3 pos, Quaternion rot)
         {
+            if (MetaRangeNetworkSpawnBridge.IsActive)
+            {
+                Debug.Log("[SpawnFromURL] بریج شبکه فعال است ⇒ پوز fallback اعمال نشد.");
+                return;
+            }
+
             if (avatarTransform != null)
             {
                 avatarTransform.SetPositionAndRotation(pos, rot);

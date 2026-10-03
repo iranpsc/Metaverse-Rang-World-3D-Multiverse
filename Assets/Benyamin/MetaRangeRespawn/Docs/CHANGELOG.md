@@ -1,6 +1,33 @@
 # CHANGELOG — سیستم مدیریت موقعیت ریسپان آواتار (متارنج)
 
-نسخهٔ جاری: **v3.9.6**
+نسخهٔ جاری: **v3.9.8**
+
+---
+
+## v3.9.8 - resolve آواتار فقط local player شبکه (حذف Light/Camera از مرجع)
+- `MetaverseNetworkHooks.IsInvalidAvatar` جدید: Light (هر نوع)، Camera/AudioListener
+  (بدون identity/CharacterController)، Canvas، EventSystem و نام‌های «Directional Light»/«Main Camera»
+  همیشه از مرجع آواتار رد می‌شوند.
+- `OwnerPanel`: EnsureAvatar / RefreshLivePositionNow / TickLivePosition / AdoptAvatar / SetAvatar
+  حالا از IsInvalidAvatar استفاده می‌کنند؛ مرجع نامعتبر فوراً باطل و دوباره resolve می‌شود.
+- fallback آفلاین (تگ Player/نام/CharacterController) فقط وقتی شبکه Available نیست
+  یا بعد از ۵ ثانیه انتظار؛ متن پنل = «منتظر آواتار شبکه…».
+- `MetaRangeRespawnSetupTool.ResolveAvatar`: انتخاب Directional Light/Camera/UI
+  دیگر به‌عنوان آواتار bind نمی‌شود.
+
+---
+
+## v3.9.7 - حذف IP هاردکد سرور از پیش‌فرض ساخت
+- `MetaRangeConfig.DefaultServerUrl`: از `http://217.218.238.201:4000` به
+  `http://127.0.0.1:4000` تغییر کرد (پیش‌فرض لوکال، هم‌خوان با PORT سرور).
+- `MetaRangeConfig.DefaultPlayBaseUrl` بدون تغییر ماند:
+  `https://dev-world-3d.metarang.com/game`
+- وقتی `MetaRangeConfigSource` در صحنه نیست، هشدار از `LogWarning` به
+  `LogError` ارتقا یافت و صراحتاً می‌گوید از پیش‌فرض لوکال استفاده می‌شود.
+- `MetaRangeRespawnSetupTool.EnsureConfigSource`: مقدارهای موجود کاربر دیگر
+  بازنویسی نمی‌شوند؛ فقط فیلدهای خالی با پیش‌فرض پر می‌شوند.
+- هیچ فایل SerializeField اضافی برای serverUrl در اسکریپت‌های دیگر برگشت داده نشد.
+- `MetaRangeConfigSource.Awake` منبع تنظیم (Config صحنه / پیش‌فرض ساخت) را لاگ می‌کند.
 
 ---
 

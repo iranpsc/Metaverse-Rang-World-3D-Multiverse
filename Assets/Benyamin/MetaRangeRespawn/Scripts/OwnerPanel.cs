@@ -94,9 +94,9 @@ namespace MetaRange.Avatar
         {
             // ⛔ اگر مرجع فعلی یک Canvas/UI است (مثلاً MainCanvas که مختصات صفحه می‌دهد)،
             //    فوراً باطل می‌شود تا دوباره درست resolve شود.
-            if (avatar != null && MetaverseNetworkHooks.IsUiTransform(avatar))
+            if (avatar != null && MetaverseNetworkHooks.IsInvalidAvatar(avatar))
             {
-                Debug.LogWarning("[OwnerPanel] مرجع آواتار نامعتبر بود (UI/Canvas): " + avatar.name +
+                Debug.LogWarning("[OwnerPanel] مرجع آواتار نامعتبر بود (Light/Camera/UI): " + avatar.name +
                                  " ⇒ invalidate و resolve دوباره (" + reason + ")");
                 avatar = null;
                 waitSince = -1f;
@@ -131,11 +131,24 @@ namespace MetaRange.Avatar
                 return;
             }
 
-            // ② fallback آفلاین: تگ Player، سپس نام‌های رایج
+            // ② fallback آفلاین: فقط وقتی شبکه در دسترس نیست، یا بعد از timeout ۵ ثانیه‌ای
+            //    (join شبکه با تاخیر عادی است — نباید فوراً کپسول/آبجکت صحنه قفل شود)
+            bool firstWait = waitSince < 0f;
+            if (waitSince < 0f) waitSince = Time.time;
+            bool allowOfflineFallback = !MetaverseNetworkHooks.Available ||
+                                        (Time.time - waitSince) > 5f;
+            if (!allowOfflineFallback)
+            {
+                if (avatar == null && firstWait)
+                    Debug.Log("[OwnerPanel] منتظر local player شبکه… (بعد از join سوییچ می‌شود) | hooks: " +
+                              MetaverseNetworkHooks.Describe());
+                return;
+            }
+
             if (avatar != null && !IsOfflineAvatar(avatar)) return;
 
             GameObject found = FindOfflineAvatar();
-            if (found != null)
+            if (found != null && !MetaverseNetworkHooks.IsInvalidAvatar(found.transform))
             {
                 avatar = found.transform;
                 waitSince = -1f;
@@ -149,8 +162,9 @@ namespace MetaRange.Avatar
 
             // ③ آخرین راه برای رفع بن‌بست UI (نه آواتار جدید):
             //    اگر دقیقاً یک CharacterController فعال در صحنه باشد، همان را می‌گیریم.
-            CharacterController cc = FindSoleCharacterController();
-            if (cc != null)
+            //    (فقط در همان حالت allowOfflineFallback — همچنان که شبکه local player دارد اولویت با شبکه است)
+            CharacterController cc = allowOfflineFallback ? FindSoleCharacterController() : null;
+            if (cc != null && !MetaverseNetworkHooks.IsInvalidAvatar(cc.transform))
             {
                 avatar = cc.transform;
                 waitSince = -1f;
@@ -177,7 +191,7 @@ namespace MetaRange.Avatar
             catch { /* تگ Player تعریف نشده */ }
 
             // تگ Player ممکن است روی Canvas/UI باشد ⇒ رد کن
-            if (found != null && MetaverseNetworkHooks.IsUiTransform(found.transform)) found = null;
+            if (found != null && MetaverseNetworkHooks.IsInvalidAvatar(found.transform)) found = null;
 
             if (found == null)
             {
@@ -186,7 +200,7 @@ namespace MetaRange.Avatar
                 {
                     GameObject candidate = GameObject.Find(names[i]);
                     if (candidate == null) continue;
-                    if (MetaverseNetworkHooks.IsUiTransform(candidate.transform)) continue;   // ← رد UI
+                    if (MetaverseNetworkHooks.IsInvalidAvatar(candidate.transform)) continue;   // ← رد UI/Light/Camera
                     found = candidate;
                 }
             }
@@ -217,6 +231,14 @@ namespace MetaRange.Avatar
         {
             if (livePosText == null || avatar == null) return;
             if (livePosText.gameObject == null) return;
+            // مرجع نامعتبر (مثلاً Light) هر فریم دوباره باطل شود، نه اینکه مختصاتش چاپ شود
+            if (MetaverseNetworkHooks.IsInvalidAvatar(avatar))
+            {
+                Debug.LogWarning("[OwnerPanel] مرجع نامعتبر (Light/Camera/UI): " + avatar.name + " ⇒ باطل شد");
+                avatar = null;
+                livePosText.text = "موقعیت زنده: منتظر آواتار شبکه…\n(بعد از join خودکار وصل می‌شود)";
+                return;
+            }
 
             // throttle را دور بزن تا پنل همان لحظه مختصات تازه را نشان دهد
             livePosNextAt = 0f;
@@ -242,7 +264,7 @@ namespace MetaRange.Avatar
             if (t == null) return false;
 
             // Canvas/UI همیشه «نیازمند resolve مجدد» است، حتی اگر نامش کپسول/تست نباشد
-            if (MetaverseNetworkHooks.IsUiTransform(t)) return true;
+            if (MetaverseNetworkHooks.IsInvalidAvatar(t)) return true;
 
             string n = t.name.ToLowerInvariant();
             return n.Contains("capsule") || n.Contains("کپسول") || n.Contains("placeholder") ||
@@ -257,11 +279,11 @@ namespace MetaRange.Avatar
         {
             if (t == null) return;
 
-            // Canvas/UI را هرگز به‌عنوان آواتار نپذیر
-            if (MetaverseNetworkHooks.IsUiTransform(t))
+            // Canvas/UI و Light/Camera را هرگز به‌عنوان آواتار نپذیر
+            if (MetaverseNetworkHooks.IsInvalidAvatar(t))
             {
-                Debug.LogWarning("[OwnerPanel] AdoptAvatar نادیده گرفته شد (UI/Canvas): " + t.name +
-                                 "  ⇒ این مختصات صفحه است، نه آواتار.");
+                Debug.LogWarning("[OwnerPanel] AdoptAvatar نادیده گرفته شد (Light/Camera/UI): " + t.name +
+                                 "  ⇒ این مرجع، آواتار شبکه نیست.");
                 return;
             }
 
@@ -302,6 +324,11 @@ namespace MetaRange.Avatar
         /// <summary>اتصال دستی آواتار در زمان اجرا (یا از اسکریپت بازی)</summary>
         public void SetAvatar(Transform t)
         {
+            if (t != null && MetaverseNetworkHooks.IsInvalidAvatar(t))
+            {
+                Debug.LogWarning("[OwnerPanel] SetAvatar رد شد (Light/Camera/UI): " + t.name);
+                return;
+            }
             avatar = t;
             Debug.Log("[OwnerPanel] آواتار دستی ست شد: " + (t != null ? t.name : "null"));
         }
@@ -371,6 +398,12 @@ namespace MetaRange.Avatar
         {
             try
             {
+                if (avatar != null && MetaverseNetworkHooks.IsInvalidAvatar(avatar))
+                {
+                    Debug.LogWarning("[OwnerPanel] مرجع آواتار نامعتبر (Light/Camera/UI): " + avatar.name + " ⇒ باطل شد");
+                    avatar = null;
+                }
+
                 if (avatar == null)
                 {
                     livePosIdleTime = 0f;

@@ -484,8 +484,11 @@ static void BindOwnerPanel(
             }
 
             var so = new SerializedObject(src);
-            SetString(so, "serverUrl", ServerUrl);
-            SetString(so, "playBaseUrl", PlayBaseUrl);
+            // مقدار موجود کاربر حفظ می‌شود؛ فقط فیلدِ خالی با پیش‌فرض پر می‌شود
+            string currentServer = so.FindProperty("serverUrl") != null ? so.FindProperty("serverUrl").stringValue : "";
+            string currentPlay = so.FindProperty("playBaseUrl") != null ? so.FindProperty("playBaseUrl").stringValue : "";
+            if (string.IsNullOrWhiteSpace(currentServer)) SetString(so, "serverUrl", ServerUrl);
+            if (string.IsNullOrWhiteSpace(currentPlay)) SetString(so, "playBaseUrl", PlayBaseUrl);
             so.ApplyModifiedPropertiesWithoutUndo();
 
             EditorUtility.SetDirty(src);
@@ -1142,20 +1145,28 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
         /// </summary>
         static Transform ResolveAvatar()
         {
-            // ۱) انتخاب فعلی کاربر در ادیتور
+            // ۱) انتخاب فعلی کاربر در ادیتور — ولی Directional Light/Camera/UI هرگز به‌عنوان آواتار bind نمی‌شود
             GameObject selected = Selection.activeGameObject;
             if (selected != null && selected.scene.IsValid())
             {
-                TrySetPlayerTag(selected);
-                Debug.Log("[متارنگ] آواتار از انتخاب شما: " + selected.name);
-                return selected.transform;
+                if (MetaverseNetworkHooks.IsInvalidAvatar(selected.transform))
+                {
+                    Debug.LogWarning("[متارنگ] انتخاب شما (" + selected.name +
+                        ") آواتار نیست (Light/Camera/UI) ⇒ به‌عنوان آواتار bind نشد.");
+                }
+                else
+                {
+                    TrySetPlayerTag(selected);
+                    Debug.Log("[متارنگ] آواتار از انتخاب شما: " + selected.name);
+                    return selected.transform;
+                }
             }
 
             // ۲) Tag = Player
             try
             {
                 GameObject tagged = GameObject.FindGameObjectWithTag("Player");
-                if (tagged != null)
+                if (tagged != null && !MetaverseNetworkHooks.IsInvalidAvatar(tagged.transform))
                 {
                     Debug.Log("[متارنگ] آواتار با تگ Player پیدا شد: " + tagged.name);
                     return tagged.transform;
@@ -1168,7 +1179,7 @@ static readonly float PanelWidth = 520f;     // عرض پنل (هنوز لنگر
             for (int i = 0; i < names.Length; i++)
             {
                 GameObject go = GameObject.Find(names[i]);
-                if (go != null)
+                if (go != null && !MetaverseNetworkHooks.IsInvalidAvatar(go.transform))
                 {
                     TrySetPlayerTag(go);
                     Debug.Log("[متارنگ] آواتار با نام «" + names[i] + "» پیدا شد.");
