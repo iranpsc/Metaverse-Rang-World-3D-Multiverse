@@ -10,6 +10,8 @@ namespace Network_A.Voice.Client.Playback
     {
         private readonly Dictionary<string, PlaybackStream> streams =
             new Dictionary<string, PlaybackStream>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Transform> peerTransformByUserId =
+            new Dictionary<string, Transform>(StringComparer.Ordinal);
 
         private bool speakerOff;
 
@@ -21,10 +23,10 @@ namespace Network_A.Voice.Client.Playback
             string normalizedSessionId = sessionId.Trim();
             string normalizedSenderConnectionId = senderConnectionId.Trim();
             string streamKey = normalizedSessionId + "|" + normalizedSenderConnectionId;
-            Transform peerTransform = FindPeerTransform(peerUserId);
 
             if (!streams.TryGetValue(streamKey, out PlaybackStream stream))
             {
+                Transform peerTransform = FindPeerTransform(peerUserId);
                 stream = new PlaybackStream(streamKey, peerTransform, transform);
                 streams.Add(streamKey, stream);
 
@@ -35,9 +37,11 @@ namespace Network_A.Voice.Client.Playback
                     " | streamKey=" + streamKey
                 );
             }
-            else
+            else if (stream.ShouldRefreshSpatialTarget())
             {
-                stream.UpdateSpatialTarget(peerTransform);
+                // A scene-wide identity search on every 20 ms audio frame is too expensive.
+                // Spatial target resolution is refreshed at a low frequency instead.
+                stream.UpdateSpatialTarget(FindPeerTransform(peerUserId));
             }
 
             stream.Enqueue(opusPacket);
@@ -104,17 +108,49 @@ namespace Network_A.Voice.Client.Playback
             stream.Dispose();
         }
 
-        private static Transform FindPeerTransform(string peerUserId)
+        private Transform FindPeerTransform(string peerUserId)
         {
             if (string.IsNullOrWhiteSpace(peerUserId)) return null;
-            MetaverseNetworkIdentity[] identities = FindObjectsOfType<MetaverseNetworkIdentity>(true);
+
+            string normalizedUserId = peerUserId.Trim();
+
+            Transform cachedTransform;
+            if (peerTransformByUserId.TryGetValue(
+                    normalizedUserId,
+                    out cachedTransform))
+            {
+                if (
+                    cachedTransform != null &&
+                    cachedTransform.gameObject.activeInHierarchy
+                )
+                {
+                    return cachedTransform;
+                }
+
+                peerTransformByUserId.Remove(
+                    normalizedUserId);
+            }
+
+            MetaverseNetworkIdentity[] identities =
+                FindObjectsOfType<MetaverseNetworkIdentity>(true);
+
             for (int index = 0; index < identities.Length; index++)
             {
                 MetaverseNetworkIdentity identity = identities[index];
                 if (identity == null) continue;
                 if (!identity.gameObject.activeInHierarchy) continue;
-                if (identity.IsOwnedByUser(peerUserId)) return identity.transform;
+                if (!identity.IsOwnedByUser(normalizedUserId)) continue;
+
+                Transform resolvedTransform =
+                    identity.transform;
+
+                peerTransformByUserId[
+                    normalizedUserId
+                ] = resolvedTransform;
+
+                return resolvedTransform;
             }
+
             return null;
         }
 
@@ -122,6 +158,7 @@ namespace Network_A.Voice.Client.Playback
         {
             foreach (PlaybackStream stream in streams.Values) stream.Dispose();
             streams.Clear();
+            peerTransformByUserId.Clear();
         }
 
         private sealed class PlaybackStream : IDisposable
@@ -129,6 +166,7 @@ namespace Network_A.Voice.Client.Playback
             private const int MaximumQueuedFrames = 64;
             private const int MinimumBufferedFramesBeforePlayback = 10;
             private const int FadeToSilenceSamples = 480;
+            private const float SpatialTargetRefreshSeconds = 1f;
             private readonly ConcurrentQueue<float[]> pcmFrames = new ConcurrentQueue<float[]>();
             private readonly VoiceNativeOpusCodec codec;
             private readonly GameObject playbackObject;
@@ -137,6 +175,7 @@ namespace Network_A.Voice.Client.Playback
             private float[] currentFrame;
             private int currentOffset;
             private bool buffering = true;
+            private float nextSpatialTargetRefreshAt;
 
             //* Ø§ÛŒÙ† Ø³Ø§Ø²Ù†Ø¯Ù‡ AudioSource Ø³Ù‡â€ŒØ¨Ø¹Ø¯ÛŒ Stream Ø±Ø§ Ø±ÙˆÛŒ Transform ÙØ¹Ø§Ù„ Ù‡Ù…ØªØ§ Ù…ÛŒâ€ŒØ³Ø§Ø²Ø¯Ø› Ø§Ú¯Ø± Transform Ù‡Ù…ØªØ§ ØºÛŒØ±ÙØ¹Ø§Ù„ Ø¨Ø§Ø´Ø¯ Ø±ÙˆÛŒ Root ÙØ¹Ø§Ù„ Voice Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯.
             public PlaybackStream(string sessionId, Transform peerTransform, Transform fallbackParent)
@@ -172,6 +211,14 @@ namespace Network_A.Voice.Client.Playback
                 EnsurePlayable();
             }
 
+            public bool ShouldRefreshSpatialTarget()
+            {
+                float now = Time.unscaledTime;
+                if (now < nextSpatialTargetRefreshAt) return false;
+                nextSpatialTargetRefreshAt = now + SpatialTargetRefreshSeconds;
+                return true;
+            }
+
             public void UpdateSpatialTarget(Transform peerTransform)
             {
                 Transform targetParent = ResolvePlaybackParent(peerTransform);
@@ -195,6 +242,14 @@ namespace Network_A.Voice.Client.Playback
             private void ApplySpatialMode(Transform resolvedParent, Transform peerTransform)
             {
                 if (audioSource == null) return;
+
+                if (Network_A.Voice.Client.Spatial.VoiceWindowsSpatialPlaybackPolicy.TryApply(
+                        audioSource,
+                        resolvedParent,
+                        peerTransform))
+                {
+                    return;
+                }
 
                 // G.4 live validation: the server already enforces distance/session audibility.
                 // Keep playback 2D and high-priority so Unity spatial distance, listener movement,

@@ -14,6 +14,7 @@ namespace Network_A.Voice.Client.Transport
     {
         private const string ServiceName = "metaverse.voice.transport.v1.VoiceTransport";
         private const string MethodName = "Connect";
+        private const int WriteTimeoutMs = 5000;
 
 #if !UNITY_WEBGL || UNITY_EDITOR
         private static readonly Marshaller<byte[]> PacketMarshaller =
@@ -25,6 +26,9 @@ namespace Network_A.Voice.Client.Transport
 
         private readonly SemaphoreSlim sendLock = new SemaphoreSlim(1, 1);
         private CancellationTokenSource connectionCts;
+        private Timer writeWatchdog;
+        private long activeWriteStartedAtMs;
+        private int writeTimeoutTriggered;
         private bool disconnecting;
 
         public event Action Connected;
@@ -66,6 +70,13 @@ namespace Network_A.Voice.Client.Transport
                     null,
                     new CallOptions(null, null, connectionCts.Token));
 
+                Interlocked.Exchange(ref activeWriteStartedAtMs, 0);
+                Interlocked.Exchange(ref writeTimeoutTriggered, 0);
+                writeWatchdog = new Timer(
+                    InspectWriteDeadline,
+                    null,
+                    1000,
+                    1000);
                 IsConnected = true;
                 Connected?.Invoke();
                 _ = ReceiveLoopAsync(connectionCts.Token);
@@ -93,16 +104,21 @@ namespace Network_A.Voice.Client.Transport
             {
                 await sendLock.WaitAsync(cancellationToken);
                 lockTaken = true;
+                Interlocked.Exchange(
+                    ref activeWriteStartedAtMs,
+                    UtcNowMs());
                 await streamCall.RequestStream.WriteAsync(packet);
                 return true;
             }
             catch (Exception exception)
             {
-                Failed?.Invoke("Voice gRPC send failed: " + exception.Message);
+                if (Volatile.Read(ref writeTimeoutTriggered) == 0)
+                    Failed?.Invoke("Voice gRPC send failed: " + exception.Message);
                 return false;
             }
             finally
             {
+                Interlocked.Exchange(ref activeWriteStartedAtMs, 0);
                 if (lockTaken) sendLock.Release();
             }
 #endif
@@ -116,6 +132,11 @@ namespace Network_A.Voice.Client.Transport
             IsConnected = false;
 
 #if !UNITY_WEBGL || UNITY_EDITOR
+            Timer activeWriteWatchdog = writeWatchdog;
+            writeWatchdog = null;
+            try { activeWriteWatchdog?.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
+            try { activeWriteWatchdog?.Dispose(); } catch { }
+            Interlocked.Exchange(ref activeWriteStartedAtMs, 0);
             try { connectionCts?.Cancel(); } catch { }
             try
             {
@@ -140,6 +161,29 @@ namespace Network_A.Voice.Client.Transport
         }
 
 #if !UNITY_WEBGL || UNITY_EDITOR
+        private void InspectWriteDeadline(object state)
+        {
+            if (!IsConnected || disconnecting) return;
+
+            long startedAtMs = Interlocked.Read(ref activeWriteStartedAtMs);
+            if (startedAtMs <= 0 || UtcNowMs() - startedAtMs < WriteTimeoutMs) return;
+
+            if (Interlocked.CompareExchange(ref writeTimeoutTriggered, 1, 0) != 0) return;
+
+            IsConnected = false;
+            try { connectionCts?.Cancel(); } catch { }
+            Failed?.Invoke(
+                "Voice gRPC send timed out after " +
+                WriteTimeoutMs +
+                "ms; the blocked stream was cancelled.");
+            _ = DisconnectAsync("send_timeout", CancellationToken.None);
+        }
+
+        private static long UtcNowMs()
+        {
+            return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        }
+
         //* این تابع بسته‌های protobuf دریافتی را به Envelope خام برمی‌گرداند.
         private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
         {
@@ -147,7 +191,9 @@ namespace Network_A.Voice.Client.Transport
             {
                 while (!cancellationToken.IsCancellationRequested && streamCall != null)
                 {
-                    bool hasNext = await streamCall.ResponseStream.MoveNext(cancellationToken);
+                    bool hasNext = await streamCall.ResponseStream
+                        .MoveNext(cancellationToken)
+                        .ConfigureAwait(false);
                     if (!hasNext) break;
                     byte[] packet = streamCall.ResponseStream.Current;
                     if (packet != null && packet.Length > 0) PacketReceived?.Invoke(packet);

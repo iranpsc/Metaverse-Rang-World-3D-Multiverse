@@ -73,24 +73,24 @@ namespace Network_A.GameServer.WebSocket
                 CancellationToken connectionToken = connectionCts.Token;
                 stream = tcpClient.GetStream();
 
-                await PerformHandshakeAsync(connectionToken);
+                await PerformHandshakeAsync(connectionToken).ConfigureAwait(false);
 
                 IsOpen = true;
                 MarkInboundActivity();
                 Opened?.Invoke(this);
 
-                await SendServerHelloAsync(connectionToken);
+                await SendServerHelloAsync(connectionToken).ConfigureAwait(false);
 
                 if (enableLivenessCheck) livenessTask = RunLivenessLoopAsync(connectionToken);
-                await ReceiveLoopAsync(connectionToken);
+                await ReceiveLoopAsync(connectionToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                await CloseInternalAsync("cancelled");
+                await CloseInternalAsync("cancelled").ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                await CloseInternalAsync(ex.Message);
+                await CloseInternalAsync(ex.Message).ConfigureAwait(false);
             }
             finally
             {
@@ -106,7 +106,7 @@ namespace Network_A.GameServer.WebSocket
                 {
                     try
                     {
-                        await livenessTask;
+                        await livenessTask.ConfigureAwait(false);
                     }
                     catch
                     {
@@ -120,26 +120,26 @@ namespace Network_A.GameServer.WebSocket
         {
             string payloadJson = "{\"message\":\"unity_dedicated_websocket_ready\"}";
             string envelopeJson = DedicatedRealtimeEnvelopeCodec.WrapSystemPayload(RealtimeMessageTypes.ServerHello, payloadJson);
-            await SendTextAsync(envelopeJson, cancellationToken);
+            await SendTextAsync(envelopeJson, cancellationToken).ConfigureAwait(false);
         }
 
         //* این تابع یک پیام متنی را با قفل ارسال برای جلوگیری از تداخل فریم ها می فرستد.
         public async Task SendTextAsync(string text, CancellationToken cancellationToken = default)
         {
             if (!IsOpen || stream == null) return;
-            await SendFrameAsync(DedicatedWebSocketFrameCodec.BuildTextFrame(text), cancellationToken);
+            await SendFrameAsync(DedicatedWebSocketFrameCodec.BuildTextFrame(text), cancellationToken).ConfigureAwait(false);
         }
 
         //* این تابع کانکشن را با ارسال فریم کلوز می بندد.
         public async Task CloseAsync(string reason)
         {
-            await CloseInternalAsync(reason);
+            await CloseInternalAsync(reason).ConfigureAwait(false);
         }
 
         //* این تابع هندشیک اچ تی تی پی آپگرید وب سوکت را انجام می دهد.
         private async Task PerformHandshakeAsync(CancellationToken cancellationToken)
         {
-            string requestText = await ReadHttpHeaderAsync(cancellationToken);
+            string requestText = await ReadHttpHeaderAsync(cancellationToken).ConfigureAwait(false);
             Dictionary<string, string> headers = ParseHeaders(requestText);
 
             if (!headers.TryGetValue("sec-websocket-key", out string websocketKey)) throw new InvalidOperationException("Missing Sec-WebSocket-Key.");
@@ -153,8 +153,8 @@ namespace Network_A.GameServer.WebSocket
                 "\r\n";
 
             byte[] responseBytes = Encoding.ASCII.GetBytes(response);
-            await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken);
-            await stream.FlushAsync(cancellationToken);
+            await stream.WriteAsync(responseBytes, 0, responseBytes.Length, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
 
         //* این تابع حلقه دریافت پیام های وب سوکت را اجرا و زمان آخرین فعالیت ورودی را تازه می کند.
@@ -162,18 +162,18 @@ namespace Network_A.GameServer.WebSocket
         {
             while (!cancellationToken.IsCancellationRequested && IsOpen)
             {
-                DedicatedWebSocketFrame frame = await DedicatedWebSocketFrameCodec.ReadFrameAsync(stream, cancellationToken);
+                DedicatedWebSocketFrame frame = await DedicatedWebSocketFrameCodec.ReadFrameAsync(stream, cancellationToken).ConfigureAwait(false);
                 MarkInboundActivity();
 
                 if (frame.IsClose())
                 {
-                    await CloseInternalAsync("client_closed");
+                    await CloseInternalAsync("client_closed").ConfigureAwait(false);
                     return;
                 }
 
                 if (frame.IsPing())
                 {
-                    await SendFrameAsync(DedicatedWebSocketFrameCodec.BuildPongFrame(frame.payload), cancellationToken);
+                    await SendFrameAsync(DedicatedWebSocketFrameCodec.BuildPongFrame(frame.payload), cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -192,19 +192,19 @@ namespace Network_A.GameServer.WebSocket
         {
             while (!cancellationToken.IsCancellationRequested && IsOpen)
             {
-                await Task.Delay(pingIntervalMilliseconds, cancellationToken);
+                await Task.Delay(pingIntervalMilliseconds, cancellationToken).ConfigureAwait(false);
                 if (cancellationToken.IsCancellationRequested || !IsOpen) return;
 
                 long inactiveMilliseconds = GetInactiveMilliseconds();
 
                 if (inactiveMilliseconds >= livenessTimeoutMilliseconds)
                 {
-                    await CloseInternalAsync("websocket_liveness_timeout:inactive_ms=" + inactiveMilliseconds);
+                    await CloseInternalAsync("websocket_liveness_timeout:inactive_ms=" + inactiveMilliseconds).ConfigureAwait(false);
                     return;
                 }
 
                 byte[] pingPayload = Encoding.ASCII.GetBytes(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString());
-                await SendFrameAsync(DedicatedWebSocketFrameCodec.BuildPingFrame(pingPayload), cancellationToken);
+                await SendFrameAsync(DedicatedWebSocketFrameCodec.BuildPingFrame(pingPayload), cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -213,13 +213,13 @@ namespace Network_A.GameServer.WebSocket
         {
             if (frame == null || frame.Length == 0 || !IsOpen || stream == null) return;
 
-            await sendGate.WaitAsync(cancellationToken);
+            await sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
             try
             {
                 if (!IsOpen || stream == null) return;
-                await stream.WriteAsync(frame, 0, frame.Length, cancellationToken);
-                await stream.FlushAsync(cancellationToken);
+                await stream.WriteAsync(frame, 0, frame.Length, cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -249,22 +249,38 @@ namespace Network_A.GameServer.WebSocket
             return (float)(elapsedMilliseconds / 1000.0);
         }
 
-        //* این تابع هدر اچ تی تی پی اولیه کلاینت را تا پایان هدر می خواند.
+        //* این تابع هدر اچ تی تی پی اولیه کلاینت را تا پایان هدر به صورت بافری می خواند تا هندشیک به فریم های Unity وابسته نشود.
         private async Task<string> ReadHttpHeaderAsync(CancellationToken cancellationToken)
         {
-            List<byte> bytes = new List<byte>();
-            byte[] buffer = new byte[1];
+            const int maxHeaderBytes = 8192;
+            const int readBufferBytes = 2048;
+
+            List<byte> bytes = new List<byte>(1024);
+            byte[] buffer = new byte[readBufferBytes];
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                int read = await stream.ReadAsync(buffer, 0, 1, cancellationToken);
+                int remainingBytes = maxHeaderBytes - bytes.Count;
+                if (remainingBytes <= 0) throw new InvalidOperationException("Websocket handshake header is too large.");
+
+                int requestedBytes = Math.Min(buffer.Length, remainingBytes);
+                int read = await stream.ReadAsync(buffer, 0, requestedBytes, cancellationToken).ConfigureAwait(false);
                 if (read <= 0) throw new InvalidOperationException("Client disconnected during websocket handshake.");
 
-                bytes.Add(buffer[0]);
-                int count = bytes.Count;
+                for (int i = 0; i < read; i++)
+                {
+                    bytes.Add(buffer[i]);
+                    int count = bytes.Count;
 
-                if (count >= 4 && bytes[count - 4] == '\r' && bytes[count - 3] == '\n' && bytes[count - 2] == '\r' && bytes[count - 1] == '\n') return Encoding.ASCII.GetString(bytes.ToArray());
-                if (bytes.Count > 8192) throw new InvalidOperationException("Websocket handshake header is too large.");
+                    if (count >= 4 &&
+                        bytes[count - 4] == '\r' &&
+                        bytes[count - 3] == '\n' &&
+                        bytes[count - 2] == '\r' &&
+                        bytes[count - 1] == '\n')
+                    {
+                        return Encoding.ASCII.GetString(bytes.ToArray());
+                    }
+                }
             }
 
             throw new OperationCanceledException();
@@ -326,13 +342,13 @@ namespace Network_A.GameServer.WebSocket
                 {
                     using (CancellationTokenSource closeCts = new CancellationTokenSource(1000))
                     {
-                        await sendGate.WaitAsync(closeCts.Token);
+                        await sendGate.WaitAsync(closeCts.Token).ConfigureAwait(false);
 
                         try
                         {
                             byte[] closeFrame = DedicatedWebSocketFrameCodec.BuildCloseFrame();
-                            await stream.WriteAsync(closeFrame, 0, closeFrame.Length, closeCts.Token);
-                            await stream.FlushAsync(closeCts.Token);
+                            await stream.WriteAsync(closeFrame, 0, closeFrame.Length, closeCts.Token).ConfigureAwait(false);
+                            await stream.FlushAsync(closeCts.Token).ConfigureAwait(false);
                         }
                         finally
                         {

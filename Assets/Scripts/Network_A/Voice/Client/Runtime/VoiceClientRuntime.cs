@@ -14,11 +14,17 @@ namespace Network_A.Voice.Client.Runtime
 {
     public sealed class VoiceClientRuntime : MonoBehaviour
     {
-        private const int MaxPendingVoiceFrames = 30;
-        private const ulong MaxQueuedVoiceFrameAgeMs = 300;
+        private const int OutboundMediaCapacity = 6;
+        private const ulong OutboundMediaMaxAgeMs = 120;
+        private const int InboundMediaCapacity = 24;
+        private const ulong InboundMediaMaxAgeMs = 200;
+        private const ulong InboundMediaTransportMaxAgeMs = 1000;
+        private const string VoiceNotEligibleReason = "voice_not_eligible_mic_and_speaker_off";
 
-        private readonly ConcurrentQueue<byte[]> receivedPackets = new ConcurrentQueue<byte[]>();
-        private readonly ConcurrentQueue<PendingVoiceFrame> pendingVoiceFrames = new ConcurrentQueue<PendingVoiceFrame>();
+        private readonly ConcurrentQueue<ReceivedTransportPacket> receivedPackets =
+            new ConcurrentQueue<ReceivedTransportPacket>();
+        private readonly ConcurrentDictionary<uint, byte> fastHeartbeatAcks =
+            new ConcurrentDictionary<uint, byte>();
         private readonly Dictionary<string, ActiveVoiceSession> sessions =
             new Dictionary<string, ActiveVoiceSession>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> peerConnectionByUserId =
@@ -27,9 +33,9 @@ namespace Network_A.Voice.Client.Runtime
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> recordingConsentSendInFlightSessionIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private readonly SemaphoreSlim sendLock = new SemaphoreSlim(1, 1);
         private readonly object gracefulDisconnectSync = new object();
-        private readonly object voiceFramePumpSync = new object();
+        private readonly VoiceInboundMediaFreshnessGuard inboundMediaFreshnessGuard =
+            new VoiceInboundMediaFreshnessGuard(InboundMediaTransportMaxAgeMs);
 
         private IVoiceClientTransport transport;
         private VoiceMicrophonePublisher microphonePublisher;
@@ -48,9 +54,13 @@ namespace Network_A.Voice.Client.Runtime
         private TaskCompletionSource<bool> transportDisconnectCompletion;
         private Task<bool> gracefulDisconnectTask;
         private Task<bool> playerUnavailableDisconnectTask;
-        private Task voiceFramePumpTask;
-        private int pendingVoiceFrameDrops;
-        private int staleVoiceFrameDrops;
+        private Task<bool> voiceEligibilityDisconnectTask;
+        private VoiceOutboundScheduler outboundScheduler;
+        private int pendingInboundMediaPackets;
+        private int inboundMediaQueueDrops;
+        private int inboundMediaStaleDrops;
+        private int inboundMediaTransportStaleDrops;
+        private int lastLoggedInboundMediaDrops;
         private bool connecting;
         private bool reconnecting;
         private bool shuttingDown;
@@ -59,10 +69,13 @@ namespace Network_A.Voice.Client.Runtime
         private bool publishingAllowed;
         private bool firstVoiceFrameSendLogged;
         private bool recordingConsentDesired;
+        private bool speakerOff;
         private int bitrateKbps = 40;
 
         public event Action<string> StatusChanged;
         public event Action<string> Failed;
+        public event Action<string> SessionClosed;
+        public event Action<string, VoiceClientRecordingState, byte> RecordingStateChanged;
 
         public bool IsAuthenticated { get; private set; }
         public bool IsMicrophoneMuted { get { return microphonePublisher == null || microphonePublisher.IsMuted; } }
@@ -74,11 +87,14 @@ namespace Network_A.Voice.Client.Runtime
                        runtimeResourcesDisposed ||
                        reconnecting ||
                        gracefulDisconnectTask != null ||
-                       (playerUnavailableDisconnectTask != null && !playerUnavailableDisconnectTask.IsCompleted);
+                       (playerUnavailableDisconnectTask != null && !playerUnavailableDisconnectTask.IsCompleted) ||
+                       (voiceEligibilityDisconnectTask != null && !voiceEligibilityDisconnectTask.IsCompleted);
             }
         }
         public string VoiceConnectionId { get { return voiceConnectionId; } }
         public int ActiveSessionCount { get { return sessions.Count; } }
+        public bool IsSpeakerOff { get { return speakerOff; } }
+        public bool IsVoiceEligible { get { return !IsMicrophoneMuted || !speakerOff; } }
 
         //* این تابع وابستگی‌های Capture و Playback را بدون Inspector آماده می‌کند.
         public void Initialize()
@@ -86,6 +102,11 @@ namespace Network_A.Voice.Client.Runtime
             if (lifetimeCts != null) return;
             lifetimeCts = new CancellationTokenSource();
             clientInstanceId = ResolveClientInstanceId();
+            outboundScheduler = new VoiceOutboundScheduler(
+                SendScheduledEnvelopeAsync,
+                OutboundMediaCapacity,
+                OutboundMediaMaxAgeMs);
+            outboundScheduler.MediaSent += HandleOutboundMediaSent;
 
             Debug.Log(
                 "VOICE_CLIENT_INSTANCE_CREATED=PASS" +
@@ -108,6 +129,19 @@ namespace Network_A.Voice.Client.Runtime
         {
             if (shuttingDown || runtimeResourcesDisposed) return false;
             if (!MetaverseNetworkClient.isReady) return false;
+
+            if (!IsVoiceEligible)
+            {
+                StatusChanged?.Invoke("VOICE_CLIENT_NOT_ELIGIBLE");
+
+                Debug.Log(
+                    "VOICE_CLIENT_CONNECT_SKIPPED=PASS" +
+                    " | reason=" + VoiceNotEligibleReason +
+                    " | micMuted=" + IsMicrophoneMuted +
+                    " | speakerOff=" + speakerOff);
+
+                return false;
+            }
 
             if (IsAuthenticated)
             {
@@ -160,6 +194,7 @@ namespace Network_A.Voice.Client.Runtime
                 outgoingSequence = 0;
                 lastReceivedSequence = 0;
                 firstVoiceFrameSendLogged = false;
+                inboundMediaFreshnessGuard.Reset();
                 authenticationCompletion = new TaskCompletionSource<bool>();
 
                 string endpoint = ResolveEndpoint();
@@ -626,10 +661,15 @@ namespace Network_A.Voice.Client.Runtime
             }
 
             while (receivedPackets.TryDequeue(out _)) { }
-            while (pendingVoiceFrames.TryDequeue(out _)) { }
+            Interlocked.Exchange(ref pendingInboundMediaPackets, 0);
+            Interlocked.Exchange(ref inboundMediaQueueDrops, 0);
+            Interlocked.Exchange(ref inboundMediaStaleDrops, 0);
+            Interlocked.Exchange(ref inboundMediaTransportStaleDrops, 0);
+            lastLoggedInboundMediaDrops = 0;
+            inboundMediaFreshnessGuard.Reset();
+            fastHeartbeatAcks.Clear();
+            outboundScheduler?.Clear("reset_" + Safe(reason));
             recordingConsentSendInFlightSessionIds.Clear();
-            pendingVoiceFrameDrops = 0;
-            staleVoiceFrameDrops = 0;
 
             IsAuthenticated = false;
             publishingAllowed = false;
@@ -659,24 +699,74 @@ namespace Network_A.Voice.Client.Runtime
 
         private void Update()
         {
-            while (receivedPackets.TryDequeue(out byte[] packet))
+            while (receivedPackets.TryDequeue(out ReceivedTransportPacket received))
             {
-                try { ProcessPacket(packet); }
+                if (received.IsMedia)
+                {
+                    Interlocked.Decrement(ref pendingInboundMediaPackets);
+
+                    ulong ageMs = UnixTimeMs() >= received.EnqueuedAtMs
+                        ? UnixTimeMs() - received.EnqueuedAtMs
+                        : 0;
+
+                    if (ageMs > InboundMediaMaxAgeMs)
+                    {
+                        Interlocked.Increment(ref inboundMediaStaleDrops);
+                        continue;
+                    }
+                }
+
+                try { ProcessPacket(received.Packet); }
                 catch (Exception exception) { HandleFailure("Voice packet failed: " + exception.Message); }
             }
+
+            LogInboundMediaDropsIfNeeded();
         }
 
         //* این تابع Mic Mute را به Capture واقعی و PUBLISH_START/STOP متصل می‌کند.
         public void SetMicrophoneMuted(bool muted)
         {
             microphonePublisher?.SetMuted(muted);
+
+            bool consented = !muted;
+            SetRecordingConsentForAll(consented);
+
+            Debug.Log(
+                "VOICE_CLIENT_MIC_RECORDING_CONSENT_SYNC=PASS" +
+                " | muted=" + muted +
+                " | consented=" + consented +
+                " | speakerOff=" + speakerOff +
+                " | voiceEligible=" + IsVoiceEligible +
+                " | activeSessions=" + sessions.Count);
+
+            EvaluateVoiceEligibilityAfterLocalControlChange("microphone");
         }
 
         //* این تابع Speaker Off را هم روی سرور و هم صف Playback محلی اعمال می‌کند.
         public async void SetSpeakerOff(bool disabled)
         {
+            speakerOff = disabled;
             playbackManager?.SetSpeakerOff(disabled);
-            await SendMuteAsync(VoiceClientMuteKind.SpeakerOff, disabled, VoiceClientEnvelope.EmptyUuid);
+
+            bool muteSent = false;
+            if (IsAuthenticated && !string.IsNullOrWhiteSpace(voiceConnectionId))
+            {
+                await SendMuteAsync(
+                    VoiceClientMuteKind.SpeakerOff,
+                    disabled,
+                    VoiceClientEnvelope.EmptyUuid);
+                muteSent = true;
+            }
+
+            Debug.Log(
+                "VOICE_CLIENT_SPEAKER_STATE_SYNC=PASS" +
+                " | speakerOff=" + speakerOff +
+                " | muteSent=" + muteSent +
+                " | micMuted=" + IsMicrophoneMuted +
+                " | voiceEligible=" + IsVoiceEligible +
+                " | authenticated=" + IsAuthenticated);
+
+            EvaluateVoiceEligibilityAfterLocalControlChange("speaker");
         }
 
         //* این تابع Mute All Incoming را بدون تغییر مسیر برگشت اعمال می‌کند.
@@ -695,6 +785,98 @@ namespace Network_A.Voice.Client.Runtime
             }
 
             await SendMuteAsync(VoiceClientMuteKind.PerUser, muted, targetConnectionId);
+        }
+
+        //* این تابع فقط نتیجه شرط Mic/Speaker را اعلام می‌کند و Voice Transport را برای Join/Leave مستقل Session حفظ می‌کند.
+        private void EvaluateVoiceEligibilityAfterLocalControlChange(string source)
+        {
+            bool eligible = IsVoiceEligible;
+
+            StatusChanged?.Invoke(eligible
+                ? "VOICE_CLIENT_ELIGIBLE"
+                : "VOICE_CLIENT_NOT_ELIGIBLE");
+
+            Debug.Log(
+                "VOICE_CLIENT_ELIGIBILITY_EVALUATED=PASS" +
+                " | source=" + Safe(source) +
+                " | micMuted=" + IsMicrophoneMuted +
+                " | speakerOff=" + speakerOff +
+                " | eligible=" + eligible +
+                " | authenticated=" + IsAuthenticated +
+                " | activeSessions=" + sessions.Count +
+                " | transportPreserved=true");
+        }
+
+        //* این تابع فقط وقتی هر دو مسیر Mic و Speaker خاموش‌اند اتصال Voice را می‌بندد و Runtime را برای اتصال بعدی نگه می‌دارد.
+        private Task<bool> DisconnectForVoiceNotEligibleAsync(string source)
+        {
+            if (voiceEligibilityDisconnectTask != null &&
+                !voiceEligibilityDisconnectTask.IsCompleted)
+            {
+                return voiceEligibilityDisconnectTask;
+            }
+
+            voiceEligibilityDisconnectTask = RunVoiceNotEligibleDisconnectAsync(source);
+            return voiceEligibilityDisconnectTask;
+        }
+
+        private async Task<bool> RunVoiceNotEligibleDisconnectAsync(string source)
+        {
+            string safeSource = string.IsNullOrWhiteSpace(source)
+                ? "local_control"
+                : source.Trim();
+
+            try
+            {
+                SetRecordingConsentForAll(false);
+
+                bool disconnectRequired =
+                    IsAuthenticated ||
+                    transport != null ||
+                    !string.IsNullOrWhiteSpace(voiceConnectionId) ||
+                    sessions.Count > 0;
+
+                if (!disconnectRequired)
+                {
+                    Debug.Log(
+                        "VOICE_CLIENT_NOT_ELIGIBLE_DISCONNECT=PASS" +
+                        " | reason=no_active_voice_transport" +
+                        " | source=" + safeSource +
+                        " | micMuted=" + IsMicrophoneMuted +
+                        " | speakerOff=" + speakerOff);
+
+                    return true;
+                }
+
+                bool disconnected = await DisconnectForPlayerUnavailableAsync(
+                    VoiceNotEligibleReason + "_" + safeSource,
+                    1500,
+                    CancellationToken.None);
+
+                Debug.Log(
+                    "VOICE_CLIENT_NOT_ELIGIBLE_DISCONNECT=" +
+                    (disconnected ? "PASS" : "FAIL") +
+                    " | reason=" + VoiceNotEligibleReason +
+                    " | source=" + safeSource +
+                    " | micMuted=" + IsMicrophoneMuted +
+                    " | speakerOff=" + speakerOff);
+
+                return disconnected;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    "VOICE_CLIENT_NOT_ELIGIBLE_DISCONNECT=FAIL" +
+                    " | reason=" + VoiceNotEligibleReason +
+                    " | source=" + safeSource +
+                    " | error=" + exception.Message);
+
+                return false;
+            }
+            finally
+            {
+                voiceEligibilityDisconnectTask = null;
+            }
         }
 
         //* این تابع رضایت ضبط همان Session را با Envelope دارای sessionId ارسال می‌کند و انتخاب کاربر را برای Sessionهای بعدی همین اتصال نگه می‌دارد.
@@ -819,7 +1001,155 @@ namespace Network_A.Voice.Client.Runtime
 
         private void HandleTransportPacket(byte[] packet)
         {
-            if (packet != null) receivedPackets.Enqueue(packet);
+            if (packet == null || packet.Length == 0) return;
+
+            ulong receivedAtMs = UnixTimeMs();
+            bool isMedia =
+                packet.Length >= VoiceClientEnvelope.FixedHeaderBytes &&
+                packet[5] == (byte)VoiceClientMessageType.VoiceFrame;
+
+            if (packet.Length >= VoiceClientEnvelope.FixedHeaderBytes)
+            {
+                ulong serverTimestampMs = VoiceClientEnvelope.ReadUInt64(packet, 20);
+
+                if (!isMedia)
+                {
+                    inboundMediaFreshnessGuard.ObserveServerControlTimestamp(
+                        serverTimestampMs,
+                        receivedAtMs);
+                }
+                else
+                {
+                    ulong estimatedTransportAgeMs;
+                    if (!inboundMediaFreshnessGuard.IsFresh(
+                            serverTimestampMs,
+                            receivedAtMs,
+                            out estimatedTransportAgeMs))
+                    {
+                        int totalDropped = Interlocked.Increment(
+                            ref inboundMediaTransportStaleDrops);
+
+                        if (totalDropped == 1 || totalDropped % 25 == 0)
+                        {
+                            Debug.LogWarning(
+                                "VOICE_CLIENT_INBOUND_MEDIA_END_TO_END_STALE_DROP=PASS" +
+                                " | transportSequence=" + VoiceClientEnvelope.ReadUInt32(packet, 16) +
+                                " | serverRoutedAtMs=" + serverTimestampMs +
+                                " | receivedAtMs=" + receivedAtMs +
+                                " | estimatedAgeMs=" + estimatedTransportAgeMs +
+                                " | maxAgeMs=" + inboundMediaFreshnessGuard.MaximumMediaAgeMs +
+                                " | totalDropped=" + totalDropped);
+                        }
+
+                        return;
+                    }
+                }
+            }
+
+            if (isMedia)
+            {
+                int pending =
+                    Interlocked.Increment(
+                        ref pendingInboundMediaPackets);
+
+                if (pending > InboundMediaCapacity)
+                {
+                    Interlocked.Decrement(
+                        ref pendingInboundMediaPackets);
+
+                    Interlocked.Increment(
+                        ref inboundMediaQueueDrops);
+
+                    return;
+                }
+            }
+
+            // Heartbeat ACK is scheduled directly from the transport callback.
+            // The original packet remains in the ordered main-thread queue so
+            // protocol state continues to advance in the same receive order.
+            try
+            {
+                if (packet.Length >= VoiceClientEnvelope.FixedHeaderBytes &&
+                    packet[5] == (byte)VoiceClientMessageType.Heartbeat)
+                {
+                    VoiceClientEnvelope heartbeat = VoiceClientEnvelope.Decode(packet);
+                    if (heartbeat.Sequence > 0 && fastHeartbeatAcks.TryAdd(heartbeat.Sequence, 0))
+                    {
+                        CancellationTokenSource activeLifetime = lifetimeCts;
+                        if (activeLifetime != null && !activeLifetime.IsCancellationRequested)
+                        {
+                            _ = SendEnvelopeAsync(
+                                VoiceClientMessageType.HeartbeatAck,
+                                VoiceClientMessageFlags.None,
+                                VoiceClientEnvelope.EmptyUuid,
+                                voiceConnectionId,
+                                VoiceClientControlPayload.EncodeHeartbeatAck(heartbeat.Sequence),
+                                activeLifetime.Token);
+                        }
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                HandleFailure("Voice heartbeat fast-path failed: " + exception.Message);
+            }
+
+            receivedPackets.Enqueue(
+                new ReceivedTransportPacket(
+                    packet,
+                    isMedia,
+                    receivedAtMs));
+        }
+
+        private void LogInboundMediaDropsIfNeeded()
+        {
+            int queueDrops =
+                Volatile.Read(
+                    ref inboundMediaQueueDrops);
+
+            int staleDrops =
+                Volatile.Read(
+                    ref inboundMediaStaleDrops);
+
+            int transportStaleDrops =
+                Volatile.Read(
+                    ref inboundMediaTransportStaleDrops);
+
+            int totalDrops =
+                queueDrops + staleDrops + transportStaleDrops;
+
+            if (
+                totalDrops == 0 ||
+                totalDrops ==
+                    lastLoggedInboundMediaDrops
+            )
+            {
+                return;
+            }
+
+            if (
+                totalDrops != 1 &&
+                totalDrops % 50 != 0
+            )
+            {
+                return;
+            }
+
+            lastLoggedInboundMediaDrops =
+                totalDrops;
+
+            Debug.LogWarning(
+                "VOICE_CLIENT_INBOUND_MEDIA_DROP=PASS" +
+                " | totalDropped=" + totalDrops +
+                " | queueDrops=" + queueDrops +
+                " | staleDrops=" + staleDrops +
+                " | transportStaleDrops=" + transportStaleDrops +
+                " | pendingMedia=" +
+                    Volatile.Read(
+                        ref pendingInboundMediaPackets) +
+                " | capacity=" + InboundMediaCapacity +
+                " | localQueueMaxAgeMs=" + InboundMediaMaxAgeMs +
+                " | transportMaxAgeMs=" + InboundMediaTransportMaxAgeMs);
         }
 
         //* این تابع پیام‌های Auth، Session، Heartbeat و Frame را روی Thread اصلی پردازش می‌کند.
@@ -838,13 +1168,73 @@ namespace Network_A.Voice.Client.Runtime
 
             if (envelope.MessageType == VoiceClientMessageType.Heartbeat)
             {
-                _ = SendEnvelopeAsync(
-                    VoiceClientMessageType.HeartbeatAck,
-                    VoiceClientMessageFlags.None,
-                    VoiceClientEnvelope.EmptyUuid,
-                    voiceConnectionId,
-                    VoiceClientControlPayload.EncodeHeartbeatAck(envelope.Sequence),
-                    lifetimeCts.Token);
+                // The transport callback normally schedules this ACK immediately.
+                // If that fast-path was unavailable, fall back to the main-thread path.
+                if (!fastHeartbeatAcks.TryRemove(envelope.Sequence, out _))
+                {
+                    _ = SendEnvelopeAsync(
+                        VoiceClientMessageType.HeartbeatAck,
+                        VoiceClientMessageFlags.None,
+                        VoiceClientEnvelope.EmptyUuid,
+                        voiceConnectionId,
+                        VoiceClientControlPayload.EncodeHeartbeatAck(envelope.Sequence),
+                        lifetimeCts.Token);
+                }
+                return;
+            }
+
+            if (envelope.MessageType == VoiceClientMessageType.RecordingStateChanged)
+            {
+                string recordingSessionId = Safe(envelope.SessionId);
+                VoiceClientRecordingStateChange stateChange =
+                    VoiceClientControlPayload.DecodeRecordingState(envelope.Payload);
+
+                if (recordingSessionId.Length > 0)
+                {
+                    RecordingStateChanged?.Invoke(
+                        recordingSessionId,
+                        stateChange.State,
+                        stateChange.Reason);
+
+                    Debug.Log(
+                        "VOICE_CLIENT_RECORDING_STATE_CHANGED=PASS" +
+                        " | sessionId=" + recordingSessionId +
+                        " | state=" + stateChange.State +
+                        " | reason=" + stateChange.Reason);
+                }
+
+                return;
+            }
+
+            if (envelope.MessageType == VoiceClientMessageType.PublishStop)
+            {
+                string stoppedSessionId = Safe(envelope.SessionId);
+                string stoppedSenderId = Safe(envelope.SenderId);
+
+                if (
+                    stoppedSessionId.Length > 0 &&
+                    stoppedSenderId.Length > 0 &&
+                    !string.Equals(
+                        stoppedSenderId,
+                        VoiceClientEnvelope.EmptyUuid,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(
+                        stoppedSenderId,
+                        voiceConnectionId,
+                        StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    playbackManager?.RemoveSender(
+                        stoppedSessionId,
+                        stoppedSenderId);
+
+                    Debug.Log(
+                        "VOICE_CLIENT_REMOTE_PUBLISH_STOP_APPLIED=PASS" +
+                        " | sessionId=" + stoppedSessionId +
+                        " | senderConnectionId=" + stoppedSenderId +
+                        " | playbackStreamReset=True");
+                }
+
                 return;
             }
 
@@ -931,7 +1321,18 @@ namespace Network_A.Voice.Client.Runtime
 
             if (envelope.MessageType == VoiceClientMessageType.SessionClosed)
             {
-                RemoveCompleteSession(envelope.SessionId);
+                string closedSessionId = Safe(envelope.SessionId);
+                RemoveCompleteSession(closedSessionId);
+
+                if (closedSessionId.Length > 0)
+                {
+                    SessionClosed?.Invoke(closedSessionId);
+
+                    Debug.Log(
+                        "VOICE_CLIENT_SESSION_CLOSED_EVENT=PASS" +
+                        " | sessionId=" + closedSessionId);
+                }
+
                 return;
             }
 
@@ -1061,6 +1462,11 @@ namespace Network_A.Voice.Client.Runtime
                     lifetimeCts.Token);
             }
 
+            _ = SendMuteAsync(
+                VoiceClientMuteKind.SpeakerOff,
+                speakerOff,
+                VoiceClientEnvelope.EmptyUuid);
+
             if (microphonePublisher != null && !microphonePublisher.IsMuted)
             {
                 HandleMicrophoneMuteChanged(false);
@@ -1075,7 +1481,7 @@ namespace Network_A.Voice.Client.Runtime
 
             if (muted)
             {
-                while (pendingVoiceFrames.TryDequeue(out _)) { }
+                outboundScheduler?.ClearMedia("mic_muted");
 
                 bool stopSent = await SendEnvelopeAsync(
                     VoiceClientMessageType.PublishStop,
@@ -1115,141 +1521,34 @@ namespace Network_A.Voice.Client.Runtime
 
         private void HandleFrameEncoded(byte[] packet, bool dtx)
         {
-            if (!MetaverseNetworkClient.isReady || !IsAuthenticated || !publishingAllowed) return;
+            if (!MetaverseNetworkClient.isReady || !IsAuthenticated || !publishingAllowed || !IsVoiceEligible) return;
             if (packet == null || packet.Length == 0) return;
 
-            while (pendingVoiceFrames.Count >= MaxPendingVoiceFrames &&
-                   pendingVoiceFrames.TryDequeue(out _))
-            {
-                int dropped = Interlocked.Increment(ref pendingVoiceFrameDrops);
-                if (dropped == 1 || dropped % 25 == 0)
-                {
-                    Debug.LogWarning(
-                        "VOICE_CLIENT_VOICE_FRAME_QUEUE_DROP=PASS" +
-                        " | reason=queue_full" +
-                        " | totalDropped=" + dropped +
-                        " | pending=" + pendingVoiceFrames.Count +
-                        " | maxPending=" + MaxPendingVoiceFrames);
-                }
-            }
-
-            pendingVoiceFrames.Enqueue(new PendingVoiceFrame
-            {
-                Packet = packet,
-                Dtx = dtx,
-                EnqueuedAtMs = UnixTimeMs()
-            });
-
-            EnsureVoiceFramePumpRunning();
-        }
-
-        private void EnsureVoiceFramePumpRunning()
-        {
-            lock (voiceFramePumpSync)
-            {
-                if (voiceFramePumpTask != null && !voiceFramePumpTask.IsCompleted) return;
-
-                CancellationToken cancellationToken = lifetimeCts != null
-                    ? lifetimeCts.Token
-                    : CancellationToken.None;
-
-                voiceFramePumpTask = Task.Run(() => PumpVoiceFramesAsync(cancellationToken), cancellationToken);
-
-                Debug.Log(
-                    "VOICE_CLIENT_VOICE_FRAME_PUMP_STARTED=PASS" +
-                    " | maxPending=" + MaxPendingVoiceFrames +
-                    " | maxAgeMs=" + MaxQueuedVoiceFrameAgeMs);
-            }
-        }
-
-        private async Task PumpVoiceFramesAsync(CancellationToken cancellationToken)
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                if (!MetaverseNetworkClient.isReady ||
-                    !IsAuthenticated ||
-                    !publishingAllowed ||
-                    shuttingDown ||
-                    runtimeResourcesDisposed)
-                {
-                    while (pendingVoiceFrames.TryDequeue(out _)) { }
-                    break;
-                }
-
-                if (!pendingVoiceFrames.TryDequeue(out PendingVoiceFrame frame))
-                {
-                    lock (voiceFramePumpSync)
-                    {
-                        if (pendingVoiceFrames.IsEmpty)
-                        {
-                            voiceFramePumpTask = null;
-                            return;
-                        }
-                    }
-
-                    continue;
-                }
-
-                ulong nowMs = UnixTimeMs();
-                ulong queueAgeMs = nowMs >= frame.EnqueuedAtMs ? nowMs - frame.EnqueuedAtMs : 0UL;
-                if (queueAgeMs > MaxQueuedVoiceFrameAgeMs)
-                {
-                    int dropped = Interlocked.Increment(ref staleVoiceFrameDrops);
-                    if (dropped == 1 || dropped % 25 == 0)
-                    {
-                        Debug.LogWarning(
-                            "VOICE_CLIENT_VOICE_FRAME_QUEUE_DROP=PASS" +
-                            " | reason=stale" +
-                            " | ageMs=" + queueAgeMs +
-                            " | totalDropped=" + dropped +
-                            " | pending=" + pendingVoiceFrames.Count);
-                    }
-
-                    continue;
-                }
-
-                bool sent = await SendQueuedVoiceFrameAsync(frame, queueAgeMs, cancellationToken);
-                if (!sent && (!IsAuthenticated || !publishingAllowed || shuttingDown || runtimeResourcesDisposed))
-                {
-                    while (pendingVoiceFrames.TryDequeue(out _)) { }
-                    break;
-                }
-            }
-
-            lock (voiceFramePumpSync)
-            {
-                if (pendingVoiceFrames.IsEmpty) voiceFramePumpTask = null;
-            }
-        }
-
-        private async Task<bool> SendQueuedVoiceFrameAsync(
-            PendingVoiceFrame frame,
-            ulong queueAgeMs,
-            CancellationToken cancellationToken)
-        {
-            bool sent = await SendEnvelopeAsync(
+            outboundScheduler?.TryEnqueueMedia(
                 VoiceClientMessageType.VoiceFrame,
-                frame.Dtx ? VoiceClientMessageFlags.Dtx : VoiceClientMessageFlags.None,
+                dtx ? VoiceClientMessageFlags.Dtx : VoiceClientMessageFlags.None,
                 VoiceClientEnvelope.EmptyUuid,
                 voiceConnectionId,
-                frame.Packet,
-                cancellationToken);
-            if (!sent) return false;
+                packet,
+                dtx);
+        }
 
-            lastPublishedSequence = outgoingSequence;
+        private void HandleOutboundMediaSent(VoiceOutboundMediaSentInfo info)
+        {
+            lastPublishedSequence = info.Sequence;
 
             if (!firstVoiceFrameSendLogged)
             {
                 firstVoiceFrameSendLogged = true;
                 Debug.Log(
                     "VOICE_CLIENT_FIRST_FRAME_SENT=PASS" +
-                    " | bytes=" + frame.Packet.Length +
-                    " | dtx=" + frame.Dtx +
-                    " | queueAgeMs=" + queueAgeMs +
-                    " | pending=" + pendingVoiceFrames.Count);
+                    " | bytes=" + info.PayloadBytes +
+                    " | dtx=" + info.Dtx +
+                    " | queueAgeMs=" + info.QueueAgeMs +
+                    " | pending=" + info.PendingMedia +
+                    " | writeMs=" + info.WriteDurationMs +
+                    " | scheduler=control_priority_media_bounded");
             }
-
-            return true;
         }
 
         //* این تابع پس از بسته‌شدن راه انتقال فقط وضعیت صوت را پاک می‌کند؛ تصمیم اتصال دوباره فقط از وضعیت آماده بازیکن گرفته می‌شود.
@@ -1321,45 +1620,73 @@ namespace Network_A.Voice.Client.Runtime
             byte[] payload,
             CancellationToken cancellationToken)
         {
-            IVoiceClientTransport targetTransport = transport;
-            if (targetTransport == null || !targetTransport.IsConnected) return false;
+            VoiceOutboundScheduler scheduler = outboundScheduler;
+            if (scheduler == null) return false;
 
-            bool lockTaken = false;
+            VoiceOutboundSendResult result = await scheduler.EnqueueControlAsync(
+                messageType,
+                flags,
+                sessionId,
+                senderId,
+                payload,
+                cancellationToken);
+
+            return result.Success;
+        }
+
+        private async Task<VoiceOutboundSendResult> SendScheduledEnvelopeAsync(
+            VoiceOutboundMessage message,
+            CancellationToken cancellationToken)
+        {
+            IVoiceClientTransport targetTransport = transport;
+            if (targetTransport == null || !targetTransport.IsConnected)
+                return VoiceOutboundSendResult.Failed;
 
             try
             {
-                await sendLock.WaitAsync(cancellationToken);
-                lockTaken = true;
-
                 if (!ReferenceEquals(transport, targetTransport) || !targetTransport.IsConnected)
-                    return false;
+                    return VoiceOutboundSendResult.Failed;
 
                 uint sequence = ++outgoingSequence;
                 VoiceClientEnvelope envelope = new VoiceClientEnvelope
                 {
-                    MessageType = messageType,
-                    Flags = flags,
+                    MessageType = message.MessageType,
+                    Flags = message.Flags,
                     Sequence = sequence,
                     TimestampMs = UnixTimeMs(),
-                    SessionId = sessionId,
-                    SenderId = senderId,
-                    Payload = payload
+                    SessionId = message.SessionId,
+                    SenderId = message.SenderId,
+                    Payload = message.Payload
                 };
 
-                return await targetTransport.SendAsync(envelope.Encode(), cancellationToken);
+                bool sent = await targetTransport.SendAsync(envelope.Encode(), cancellationToken);
+                return new VoiceOutboundSendResult(sent, sent ? sequence : 0);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return false;
+                return VoiceOutboundSendResult.Failed;
             }
             catch (Exception exception)
             {
                 HandleFailure("Voice send failed: " + exception.Message);
-                return false;
+                return VoiceOutboundSendResult.Failed;
             }
-            finally
+        }
+
+        private sealed class ReceivedTransportPacket
+        {
+            public readonly byte[] Packet;
+            public readonly bool IsMedia;
+            public readonly ulong EnqueuedAtMs;
+
+            public ReceivedTransportPacket(
+                byte[] packet,
+                bool isMedia,
+                ulong enqueuedAtMs)
             {
-                if (lockTaken) sendLock.Release();
+                Packet = packet;
+                IsMedia = isMedia;
+                EnqueuedAtMs = enqueuedAtMs;
             }
         }
 
@@ -1490,13 +1817,6 @@ namespace Network_A.Voice.Client.Runtime
             }
         }
 
-        private struct PendingVoiceFrame
-        {
-            public byte[] Packet;
-            public bool Dtx;
-            public ulong EnqueuedAtMs;
-        }
-
         private static VoiceClientPlatform ResolvePlatform()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -1582,7 +1902,13 @@ namespace Network_A.Voice.Client.Runtime
             runtimeResourcesDisposed = true;
             shuttingDown = true;
             publishingAllowed = false;
-            while (pendingVoiceFrames.TryDequeue(out _)) { }
+
+            if (outboundScheduler != null)
+            {
+                outboundScheduler.MediaSent -= HandleOutboundMediaSent;
+                outboundScheduler.Dispose();
+                outboundScheduler = null;
+            }
 
             if (microphonePublisher != null)
             {

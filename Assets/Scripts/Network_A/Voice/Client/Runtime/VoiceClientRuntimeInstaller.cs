@@ -361,6 +361,14 @@ namespace Network_A.Voice.Client.Runtime
 
             playerWasReady = true;
 
+            if (!runtime.IsVoiceEligible)
+            {
+                nextAttemptAt = 0f;
+                attempted = false;
+                LogWaitReason("voice_not_eligible_mic_and_speaker_off");
+                return;
+            }
+
             if (runtime.IsAuthenticated)
             {
                 attempted = false;
@@ -521,7 +529,9 @@ namespace Network_A.Voice.Client.Runtime
                 "VOICE_V9_LIVE_CLIENT_STATUS" +
                 " | authenticated=" + runtime.IsAuthenticated +
                 " | sessions=" + runtime.ActiveSessionCount +
-                " | micMuted=" + runtime.IsMicrophoneMuted);
+                " | micMuted=" + runtime.IsMicrophoneMuted +
+                " | speakerOff=" + runtime.IsSpeakerOff +
+                " | voiceEligible=" + runtime.IsVoiceEligible);
         }
     }
 }

@@ -52,6 +52,22 @@ namespace Network_A.Voice.Client.Protocol
         PerUser = 3
     }
 
+    public enum VoiceClientRecordingState : byte
+    {
+        WaitingConsent = 1,
+        Recording = 2,
+        Finalizing = 3,
+        Ready = 4,
+        Declined = 5,
+        Failed = 6
+    }
+
+    public sealed class VoiceClientRecordingStateChange
+    {
+        public VoiceClientRecordingState State;
+        public byte Reason;
+    }
+
     public sealed class VoiceClientAuthResult
     {
         public bool Success;
@@ -299,6 +315,30 @@ namespace Network_A.Voice.Client.Protocol
         public static byte[] EncodeRecordingConsent(bool consented)
         {
             return new[] { (byte)1, consented ? (byte)1 : (byte)0, (byte)0, (byte)0 };
+        }
+
+        //* این تابع وضعیت ضبط سرور را از قرارداد چهار بایتی نسخه یک می‌خواند.
+        public static VoiceClientRecordingStateChange DecodeRecordingState(byte[] payload)
+        {
+            if (payload == null || payload.Length != 4)
+                throw new InvalidDataException("Voice recording state payload length is invalid.");
+
+            if (payload[0] != 1 || payload[3] != 0)
+                throw new InvalidDataException("Voice recording state payload is invalid.");
+
+            VoiceClientRecordingState state = (VoiceClientRecordingState)payload[1];
+            if (!Enum.IsDefined(typeof(VoiceClientRecordingState), state))
+                throw new InvalidDataException("Voice recording state value is invalid.");
+
+            byte reason = payload[2];
+            if (reason > 4)
+                throw new InvalidDataException("Voice recording stop reason is invalid.");
+
+            return new VoiceClientRecordingStateChange
+            {
+                State = state,
+                Reason = reason
+            };
         }
 
         //* این تابع ACK چهار بایتی Heartbeat را می‌سازد.

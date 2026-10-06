@@ -572,7 +572,6 @@ namespace Network_A.Voice.Dedicated
 
                 VoiceDedicatedGroupPairEdge edge;
                 if (!pairGraph.TryGetEdge(candidate, member, out edge) ||
-                    !edge.IsEntered ||
                     edge.DistanceMeters > enterDistanceMeters)
                 {
                     scoreMeters = 0.0f;

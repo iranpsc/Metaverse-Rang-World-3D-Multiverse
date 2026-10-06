@@ -2030,8 +2030,12 @@ namespace Network_A.DedicatedGameServer.Client
         {
             string realtimeUserName = ResolveRealtimeUserName();
             if (!string.IsNullOrWhiteSpace(realtimeUserName)) return realtimeUserName.Trim();
-            if (wsClient != null && !string.IsNullOrWhiteSpace(wsClient.PlayerId)) return wsClient.PlayerId.Trim();
-            if (wsClient != null && !string.IsNullOrWhiteSpace(wsClient.UserId)) return wsClient.UserId.Trim();
+
+            if (wsClient != null && !string.IsNullOrWhiteSpace(wsClient.UserName))
+            {
+                return wsClient.UserName.Trim();
+            }
+
             return "You";
         }
 

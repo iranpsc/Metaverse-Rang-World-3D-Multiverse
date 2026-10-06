@@ -14,26 +14,17 @@ namespace Network_A.Voice.Client.Runtime
 
         [Header("Microphone")]
         [SerializeField] private Button microphoneButton;
-        [SerializeField] private RTLTextMeshPro microphoneButtonText;
-
-        [Header("Recording Consent")]
-        [SerializeField] private Button recordingConsentButton;
-        [SerializeField] private RTLTextMeshPro recordingConsentButtonText;
+        [SerializeField] private Sprite micOnSprite;
+        [SerializeField] private Sprite micOffSprite;
 
         [Header("Speaker")]
         [SerializeField] private Button speakerButton;
-        [SerializeField] private RTLTextMeshPro speakerButtonText;
-
-        [Header("Mute All")]
-        [SerializeField] private Button muteAllButton;
-        [SerializeField] private RTLTextMeshPro muteAllButtonText;
+        [SerializeField] private Sprite speakerOnSprite;
+        [SerializeField] private Sprite speakerOffSprite;
 
         private VoiceClientRuntime runtime;
         private bool microphonePermissionRequestRunning;
-        private bool recordingConsentWanted;
         private bool speakerOff;
-        private bool muteAllIncoming;
-        private int lastConsentAppliedSessionCount = -1;
 
         //* این تابع هنگام فعال شدن پنل، دکمه‌های دستی صحنه را به کنترل‌های صوت وصل می‌کند.
         private void OnEnable()
@@ -42,29 +33,24 @@ namespace Network_A.Voice.Client.Runtime
 
             if (microphoneButton != null)
             {
-                microphoneButton.onClick.RemoveListener(HandleMicrophoneButtonClicked);
-                microphoneButton.onClick.AddListener(HandleMicrophoneButtonClicked);
-            }
+                microphoneButton.onClick.RemoveListener(
+                    HandleMicrophoneButtonClicked);
 
-            if (recordingConsentButton != null)
-            {
-                recordingConsentButton.onClick.RemoveListener(HandleRecordingConsentButtonClicked);
-                recordingConsentButton.onClick.AddListener(HandleRecordingConsentButtonClicked);
+                microphoneButton.onClick.AddListener(
+                    HandleMicrophoneButtonClicked);
             }
 
             if (speakerButton != null)
             {
-                speakerButton.onClick.RemoveListener(HandleSpeakerButtonClicked);
-                speakerButton.onClick.AddListener(HandleSpeakerButtonClicked);
-            }
+                speakerButton.onClick.RemoveListener(
+                    HandleSpeakerButtonClicked);
 
-            if (muteAllButton != null)
-            {
-                muteAllButton.onClick.RemoveListener(HandleMuteAllButtonClicked);
-                muteAllButton.onClick.AddListener(HandleMuteAllButtonClicked);
+                speakerButton.onClick.AddListener(
+                    HandleSpeakerButtonClicked);
             }
 
             Debug.Log("VOICE_V6_SCENE_USER_CONSENT_PANEL=READY");
+
             UpdateUi();
         }
 
@@ -73,57 +59,34 @@ namespace Network_A.Voice.Client.Runtime
         {
             if (microphoneButton != null)
             {
-                microphoneButton.onClick.RemoveListener(HandleMicrophoneButtonClicked);
-            }
-
-            if (recordingConsentButton != null)
-            {
-                recordingConsentButton.onClick.RemoveListener(HandleRecordingConsentButtonClicked);
+                microphoneButton.onClick.RemoveListener(
+                    HandleMicrophoneButtonClicked);
             }
 
             if (speakerButton != null)
             {
-                speakerButton.onClick.RemoveListener(HandleSpeakerButtonClicked);
-            }
-
-            if (muteAllButton != null)
-            {
-                muteAllButton.onClick.RemoveListener(HandleMuteAllButtonClicked);
+                speakerButton.onClick.RemoveListener(
+                    HandleSpeakerButtonClicked);
             }
         }
 
-        //* این تابع وضعیت Runtime را پیدا می‌کند، رضایت ضبط را برای نشست‌های تازه اعمال می‌کند و نوشته‌های پنل را به‌روز نگه می‌دارد.
+        //* این تابع وضعیت Runtime را پیدا می‌کند و ظاهر پنل را با وضعیت واقعی Voice هماهنگ نگه می‌دارد.
         private void Update()
         {
             TryResolveRuntime();
-
-            if (
-                runtime != null &&
-                runtime.IsAuthenticated &&
-                recordingConsentWanted &&
-                runtime.ActiveSessionCount > 0 &&
-                runtime.ActiveSessionCount != lastConsentAppliedSessionCount
-            )
-            {
-                runtime.SetRecordingConsentForAll(true);
-                lastConsentAppliedSessionCount = runtime.ActiveSessionCount;
-
-                Debug.Log(
-                    "VOICE_V6_RECORDING_CONSENT_USER_APPLIED=PASS" +
-                    " | sessionCount=" + runtime.ActiveSessionCount);
-            }
-
             UpdateUi();
         }
 
         //* این تابع Runtime صوت را از ریشه ساخته‌شده توسط مسیر Voice پیدا می‌کند.
         private void TryResolveRuntime()
         {
-            if (runtime != null) return;
+            if (runtime != null)
+                return;
 
             GameObject root = GameObject.Find(RuntimeRootName);
 
-            if (root == null) return;
+            if (root == null)
+                return;
 
             runtime = root.GetComponent<VoiceClientRuntime>();
         }
@@ -131,9 +94,12 @@ namespace Network_A.Voice.Client.Runtime
         //* این تابع فقط با کلیک مستقیم کاربر اجازه میکروفن را می‌گیرد و سپس میکروفن را روشن می‌کند.
         private void HandleMicrophoneButtonClicked()
         {
-            if (runtime == null || !runtime.IsAuthenticated)
+            if (runtime == null)
             {
-                Debug.LogWarning("VOICE_V6_MIC_USER_ACTION=FAIL | reason=voice_not_authenticated");
+                Debug.LogWarning(
+                    "VOICE_V6_MIC_USER_ACTION=FAIL" +
+                    " | reason=runtime_missing");
+
                 UpdateUi();
                 return;
             }
@@ -142,15 +108,19 @@ namespace Network_A.Voice.Client.Runtime
             {
                 runtime.SetMicrophoneMuted(true);
 
-                Debug.Log("VOICE_V6_MIC_USER_DISABLED=PASS");
+                Debug.Log(
+                    "VOICE_V6_MIC_USER_DISABLED=PASS");
 
                 UpdateUi();
                 return;
             }
 
-            if (microphonePermissionRequestRunning) return;
+            if (microphonePermissionRequestRunning)
+                return;
 
-            StartCoroutine(RequestMicrophonePermissionAndEnable());
+            StartCoroutine(
+                RequestMicrophonePermissionAndEnable());
+
             UpdateUi();
         }
 
@@ -159,16 +129,19 @@ namespace Network_A.Voice.Client.Runtime
         {
             microphonePermissionRequestRunning = true;
 
-            Debug.Log("VOICE_V6_MIC_PERMISSION_REQUEST=START");
+            Debug.Log(
+                "VOICE_V6_MIC_PERMISSION_REQUEST=START");
 
             AsyncOperation request =
-                Application.RequestUserAuthorization(UserAuthorization.Microphone);
+                Application.RequestUserAuthorization(
+                    UserAuthorization.Microphone);
 
             yield return request;
 
             microphonePermissionRequestRunning = false;
 
-            if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+            if (!Application.HasUserAuthorization(
+                    UserAuthorization.Microphone))
             {
                 runtime.SetMicrophoneMuted(true);
 
@@ -182,144 +155,132 @@ namespace Network_A.Voice.Client.Runtime
 
             runtime.SetMicrophoneMuted(false);
 
-            Debug.Log("VOICE_V6_MIC_PERMISSION=PASS");
-            Debug.Log("VOICE_V6_MIC_USER_ENABLED=PASS");
-
-            UpdateUi();
-        }
-
-        //* این تابع رضایت ضبط را فقط با انتخاب مستقیم کاربر تغییر می‌دهد و به نشست‌های فعال می‌فرستد.
-        private void HandleRecordingConsentButtonClicked()
-        {
-            if (runtime == null || !runtime.IsAuthenticated)
-            {
-                Debug.LogWarning(
-                    "VOICE_V6_RECORDING_CONSENT_USER_ACTION=FAIL" +
-                    " | reason=voice_not_authenticated");
-
-                UpdateUi();
-                return;
-            }
-
-            recordingConsentWanted = !recordingConsentWanted;
-            lastConsentAppliedSessionCount = -1;
-
-            runtime.SetRecordingConsentForAll(recordingConsentWanted);
+            Debug.Log(
+                "VOICE_V6_MIC_PERMISSION=PASS");
 
             Debug.Log(
-                "VOICE_V6_RECORDING_CONSENT_USER_SELECTED=PASS" +
-                " | consented=" + recordingConsentWanted +
-                " | sessionCount=" + runtime.ActiveSessionCount);
+                "VOICE_V6_MIC_USER_ENABLED=PASS");
 
             UpdateUi();
         }
 
-        //* این تابع بلندگو را برای کاربر خاموش یا روشن می‌کند.
+        //* این تابع دکمه اصلی Speaker را کنترل می‌کند و تمام صدای ورودی کاربر را قطع یا وصل می‌کند.
         private void HandleSpeakerButtonClicked()
         {
-            if (runtime == null || !runtime.IsAuthenticated)
+            if (runtime == null)
             {
+                Debug.LogWarning(
+                    "VOICE_V6_SPEAKER_USER_ACTION=FAIL" +
+                    " | reason=runtime_missing");
+
                 UpdateUi();
                 return;
             }
 
-            speakerOff = !speakerOff;
+            speakerOff = !runtime.IsSpeakerOff;
+
             runtime.SetSpeakerOff(speakerOff);
 
             Debug.Log(
                 "VOICE_V6_SPEAKER_USER_SELECTED=PASS" +
-                " | speakerOff=" + speakerOff);
+                " | speakerOff=" + speakerOff +
+                " | scope=all_incoming_audio");
 
             UpdateUi();
         }
 
-        //* این تابع دریافت همه صداهای ورودی را قطع یا وصل می‌کند.
-        private void HandleMuteAllButtonClicked()
-        {
-            if (runtime == null || !runtime.IsAuthenticated)
-            {
-                UpdateUi();
-                return;
-            }
-
-            muteAllIncoming = !muteAllIncoming;
-            runtime.SetMuteAllIncoming(muteAllIncoming);
-
-            Debug.Log(
-                "VOICE_V6_MUTE_ALL_USER_SELECTED=PASS" +
-                " | muteAll=" + muteAllIncoming);
-
-            UpdateUi();
-        }
-
-        //* این تابع متن‌ها و فعال بودن دکمه‌ها را بر اساس وضعیت واقعی Runtime به‌روزرسانی می‌کند.
+        //* این تابع وضعیت دوخطی پنل، اسپرایت‌ها و فعال بودن دکمه‌ها را بر اساس Runtime واقعی به‌روزرسانی می‌کند.
         private void UpdateUi()
         {
             bool runtimeReady = runtime != null;
-            bool authenticated = runtimeReady && runtime.IsAuthenticated;
-            bool micMuted = !runtimeReady || runtime.IsMicrophoneMuted;
-            int sessionCount = runtimeReady ? runtime.ActiveSessionCount : 0;
+
+            bool authenticated =
+                runtimeReady &&
+                runtime.IsAuthenticated;
+
+            bool micMuted =
+                !runtimeReady ||
+                runtime.IsMicrophoneMuted;
+
+            speakerOff =
+                runtimeReady
+                    ? runtime.IsSpeakerOff
+                    : speakerOff;
+
+            int sessionCount =
+                runtimeReady
+                    ? runtime.ActiveSessionCount
+                    : 0;
 
             if (statusText != null)
             {
                 statusText.text =
-                    "وضعیت صدا: " + (authenticated ? "وصل" : "در انتظار اتصال") + "\n" +
-                    "نشست فعال: " + sessionCount + "\n" +
-                    "میکروفن: " + (micMuted ? "خاموش" : "روشن") + "\n" +
-                    "رضایت ضبط: " + (recordingConsentWanted ? "داده شده" : "داده نشده") + "\n" +
-                    "ضبط فقط بعد از رضایت کاربر فعال می‌شود.";
+                    "وضعیت صدا: " +
+                    (authenticated
+                        ? "وصل"
+                        : "در انتظار اتصال") +
+                    "\n" +
+                    "نشست فعال: " +
+                    sessionCount;
             }
 
-            if (microphoneButtonText != null)
+            if (microphoneButton != null &&
+                microphoneButton.image != null)
             {
-                if (microphonePermissionRequestRunning)
+                Sprite targetMicSprite =
+                    micMuted
+                        ? micOffSprite
+                        : micOnSprite;
+
+                if (targetMicSprite != null &&
+                    microphoneButton.image.sprite != targetMicSprite)
                 {
-                    microphoneButtonText.text = "در حال گرفتن اجازه میکروفن...";
+                    microphoneButton.image.sprite =
+                        targetMicSprite;
+
+                    Debug.Log(
+                        "VOICE_V6_MIC_SPRITE_CHANGED=PASS" +
+                        " | state=" +
+                        (micMuted ? "OFF" : "ON") +
+                        " | sprite=" +
+                        targetMicSprite.name);
                 }
-                else
+            }
+
+            if (speakerButton != null &&
+                speakerButton.image != null)
+            {
+                Sprite targetSpeakerSprite =
+                    speakerOff
+                        ? speakerOffSprite
+                        : speakerOnSprite;
+
+                if (targetSpeakerSprite != null &&
+                    speakerButton.image.sprite != targetSpeakerSprite)
                 {
-                    microphoneButtonText.text =
-                        micMuted ? "روشن کردن میکروفن" : "خاموش کردن میکروفن";
+                    speakerButton.image.sprite =
+                        targetSpeakerSprite;
+
+                    Debug.Log(
+                        "VOICE_V6_SPEAKER_SPRITE_CHANGED=PASS" +
+                        " | state=" +
+                        (speakerOff ? "OFF" : "ON") +
+                        " | sprite=" +
+                        targetSpeakerSprite.name);
                 }
-            }
-
-            if (recordingConsentButtonText != null)
-            {
-                recordingConsentButtonText.text =
-                    recordingConsentWanted ? "لغو رضایت ضبط" : "اجازه ضبط این مکالمه";
-            }
-
-            if (speakerButtonText != null)
-            {
-                speakerButtonText.text =
-                    speakerOff ? "روشن کردن بلندگو" : "خاموش کردن بلندگو";
-            }
-
-            if (muteAllButtonText != null)
-            {
-                muteAllButtonText.text =
-                    muteAllIncoming ? "شنیدن همه" : "قطع صدای همه";
             }
 
             if (microphoneButton != null)
             {
                 microphoneButton.interactable =
-                    authenticated && !microphonePermissionRequestRunning;
-            }
-
-            if (recordingConsentButton != null)
-            {
-                recordingConsentButton.interactable = authenticated;
+                    runtimeReady &&
+                    !microphonePermissionRequestRunning;
             }
 
             if (speakerButton != null)
             {
-                speakerButton.interactable = authenticated;
-            }
-
-            if (muteAllButton != null)
-            {
-                muteAllButton.interactable = authenticated;
+                speakerButton.interactable =
+                    runtimeReady;
             }
         }
     }
@@ -327,5 +288,46 @@ namespace Network_A.Voice.Client.Runtime
 
 /*
 توضیح فایل:
-این فایل هیچ دکمه‌ای را در زمان اجرا نمی‌سازد. دکمه‌ها و نوشته‌ها باید به‌صورت دستی داخل صحنه ساخته شوند و سپس از بازرس یونیتی به این اسکریپت وصل شوند. نوشته‌های این پنل با آر تی ال تی ام پرو کار می‌کنند تا متن فارسی راست‌به‌چپ درست نمایش داده شود. این کنترلر فقط دکمه‌های دستی صحنه را به Runtime صوت متصل می‌کند. روشن کردن میکروفن فقط با کلیک کاربر و پس از دریافت اجازه میکروفن انجام می‌شود. رضایت ضبط نیز فقط با انتخاب مستقیم کاربر برای نشست‌های فعال ارسال می‌شود.
+این فایل هیچ دکمه‌ای را در زمان اجرا نمی‌سازد.
+دکمه‌ها باید به‌صورت دستی داخل صحنه ساخته شوند و سپس از Inspector به این اسکریپت متصل شوند.
+
+این کنترلر دکمه اصلی Microphone و Speaker را به VoiceClientRuntime متصل می‌کند.
+
+وضعیت Microphone دیگر با Text نمایش داده نمی‌شود.
+برای نمایش وضعیت Microphone از Sprite استفاده می‌شود:
+
+Mic روشن:
+Mic_On
+
+Mic خاموش:
+Mic_Off
+
+وضعیت Speaker نیز دیگر با Text نمایش داده نمی‌شود.
+برای نمایش وضعیت Speaker از Sprite استفاده می‌شود:
+
+Speaker روشن:
+Speaker_On
+
+Speaker خاموش:
+Speaker_Off
+
+دکمه اصلی Speaker تنها کنترل عمومی دریافت صدا است.
+با خاموش کردن Speaker تمام صداهای ورودی برای کاربر محلی قطع می‌شوند و با روشن کردن آن دوباره دریافت صدا فعال می‌شود.
+
+کنترل جداگانه Mute All در این Controller وجود ندارد.
+
+دکمه و Text مربوط به Recording Consent به‌طور کامل از این Controller حذف شده‌اند.
+اجازه ضبط صدای کاربر دیگر از یک دکمه مستقل دریافت نمی‌شود.
+وضعیت روشن یا خاموش بودن Microphone منبع رفتار ضبط صدای خود کاربر است.
+
+Txt_Voice_Status فقط دو خط نمایش می‌دهد:
+
+خط اول:
+وضعیت اتصال Voice
+
+خط دوم:
+تعداد نشست‌های فعال Voice
+
+روشن کردن Microphone فقط با کلیک مستقیم کاربر انجام می‌شود.
+در صورت نیاز، ابتدا اجازه دسترسی Microphone از سیستم درخواست می‌شود و فقط پس از تایید، Microphone فعال خواهد شد.
 */

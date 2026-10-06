@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Network_A.GameServer;
 using Network_A.GameServer.Players;
 using UnityEngine;
@@ -24,6 +26,8 @@ namespace Network_A.Voice.Dedicated
             new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> currentResolvedParticipantKeys =
             new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> eligibleParticipantKeys =
+            new HashSet<string>(StringComparer.Ordinal);
         private readonly List<string> pendingTrackerRemovals =
             new List<string>();
         private readonly List<VoiceDedicatedTopologyPairObservation> pairObservations =
@@ -32,6 +36,7 @@ namespace Network_A.Voice.Dedicated
         private VoiceDedicatedGroupTopologyRuntime groupTopologyRuntime;
 
         private const int MaximumAuthorityEpochResetCount = 8;
+        private const float SessionEligibilityRefreshIntervalSeconds = 0.5f;
 
         private long stabilityDelayMs;
         private string authorityEpochId = string.Empty;
@@ -43,6 +48,10 @@ namespace Network_A.Voice.Dedicated
         private bool runtimeEventsBound;
         private bool authorityRunning;
         private bool authorityFaulted;
+        private bool eligibilitySnapshotReady;
+        private bool eligibilityRefreshRunning;
+        private float nextEligibilityRefreshAtRealtime;
+        private CancellationTokenSource eligibilityCts;
         private int authorityEpochResetCount;
 
         public bool IsConfigured { get { return configured; } }
@@ -115,10 +124,15 @@ namespace Network_A.Voice.Dedicated
             currentScopeUserKeys.Clear();
             currentScopeParticipantKeys.Clear();
             currentResolvedParticipantKeys.Clear();
+            eligibleParticipantKeys.Clear();
             pairObservations.Clear();
+            eligibilitySnapshotReady = false;
+            eligibilityRefreshRunning = false;
+            nextEligibilityRefreshAtRealtime = 0.0f;
             authorityEpochResetCount = 0;
             nextSampleAtRealtime = 0.0f;
 
+            ResetEligibilityCancellationSource();
             BindEvents();
 
             if (runtime.IsRunning)
@@ -146,6 +160,7 @@ namespace Network_A.Voice.Dedicated
             int tickRate = Mathf.Max(1, config.tickRate);
             sampleIntervalSeconds = 1.0f / tickRate;
             nextSampleAtRealtime = Time.realtimeSinceStartup;
+            nextEligibilityRefreshAtRealtime = 0.0f;
             authorityRunning = true;
 
             Debug.Log(
@@ -165,6 +180,10 @@ namespace Network_A.Voice.Dedicated
 
             authorityRunning = false;
             nextSampleAtRealtime = 0.0f;
+            eligibilitySnapshotReady = false;
+            eligibilityRefreshRunning = false;
+            nextEligibilityRefreshAtRealtime = 0.0f;
+            eligibleParticipantKeys.Clear();
 
             Debug.Log(
                 "[VoiceDedicatedAuthorityMonitor] Authority stopped" +
@@ -177,12 +196,26 @@ namespace Network_A.Voice.Dedicated
             StartAuthority(config);
         }
 
-        //* این تابع در هر فریم فقط در زمان نمونه‌برداری تعیین‌شده، زوج‌های همان سرور و روم را بررسی می‌کند.
+        //* این تابع Snapshot شرط Mic/Speaker را مستقل تازه می‌کند و فقط با Snapshot معتبر زوج‌های همان سرور و روم را ارزیابی می‌کند.
         private void Update()
         {
             if (!configured ||
                 !authorityRunning ||
-                authorityFaulted ||
+                authorityFaulted)
+            {
+                return;
+            }
+
+            if (playerRegistry == null || playerRegistry.CurrentPlayerCount == 0)
+            {
+                eligibilitySnapshotReady = false;
+                eligibleParticipantKeys.Clear();
+                return;
+            }
+
+            TryStartSessionEligibilityRefresh();
+
+            if (!eligibilitySnapshotReady ||
                 Time.realtimeSinceStartup < nextSampleAtRealtime)
             {
                 return;
@@ -197,6 +230,134 @@ namespace Network_A.Voice.Dedicated
             catch (Exception exception)
             {
                 FailAuthority(exception.ToString());
+            }
+        }
+
+        //* این تابع Poll امن Eligibility را با فاصله محدود و بدون هم‌پوشانی درخواست‌ها شروع می‌کند.
+        private void TryStartSessionEligibilityRefresh()
+        {
+            if (eligibilityRefreshRunning ||
+                deltaSender == null ||
+                !deltaSender.IsConfigured ||
+                !deltaSender.IsTransportEnabled ||
+                eligibilityCts == null ||
+                eligibilityCts.IsCancellationRequested ||
+                Time.realtimeSinceStartup < nextEligibilityRefreshAtRealtime)
+            {
+                return;
+            }
+
+            eligibilityRefreshRunning = true;
+            nextEligibilityRefreshAtRealtime =
+                Time.realtimeSinceStartup + SessionEligibilityRefreshIntervalSeconds;
+
+            _ = RefreshSessionEligibilityAsync(eligibilityCts.Token);
+        }
+
+        //* این تابع Snapshot فقط-خواندنی Mic/Speaker را می‌گیرد و شکست HTTP را از صف Session Delta جدا نگه می‌دارد.
+        private async Task RefreshSessionEligibilityAsync(
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                VoiceDedicatedSessionEligibilitySnapshot snapshot =
+                    await deltaSender.FetchSessionEligibilitySnapshotAsync(
+                        cancellationToken);
+
+                if (snapshot != null)
+                {
+                    ApplySessionEligibilitySnapshot(snapshot);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    "VOICE_MS5_ELIGIBILITY_REFRESH=FAIL" +
+                    " | error=" + CompactForLog(exception.Message));
+            }
+            finally
+            {
+                eligibilityRefreshRunning = false;
+            }
+        }
+
+        //* این تابع فقط participantهای eligible همان serverId را در Gate مستقل Topology جایگزین می‌کند.
+        private void ApplySessionEligibilitySnapshot(
+            VoiceDedicatedSessionEligibilitySnapshot snapshot)
+        {
+            if (snapshot == null || runtime == null) return;
+
+            DedicatedServerConfigData config = runtime.GetCurrentConfig();
+            string expectedServerId = config == null
+                ? string.Empty
+                : SafeTrim(config.serverId);
+
+            string snapshotServerId = SafeTrim(snapshot.serverId);
+            if (expectedServerId.Length == 0 ||
+                !string.Equals(
+                    expectedServerId,
+                    snapshotServerId,
+                    StringComparison.Ordinal))
+            {
+                Debug.LogWarning(
+                    "VOICE_MS5_ELIGIBILITY_SNAPSHOT_REJECTED=PASS" +
+                    " | expectedServerId=" + expectedServerId +
+                    " | snapshotServerId=" + snapshotServerId);
+                return;
+            }
+
+            HashSet<string> nextEligibleParticipantKeys =
+                new HashSet<string>(StringComparer.Ordinal);
+
+            VoiceDedicatedSessionEligibilityParticipant[] participants =
+                snapshot.participants ??
+                Array.Empty<VoiceDedicatedSessionEligibilityParticipant>();
+
+            for (int index = 0; index < participants.Length; index += 1)
+            {
+                VoiceDedicatedSessionEligibilityParticipant participant =
+                    participants[index];
+
+                if (participant == null || !participant.eligible) continue;
+
+                string roomId = SafeTrim(participant.roomId);
+                string userId = SafeTrim(participant.userId);
+                string connectionId = SafeTrim(participant.connectionId);
+
+                if (roomId.Length == 0 ||
+                    userId.Length == 0 ||
+                    connectionId.Length == 0)
+                {
+                    continue;
+                }
+
+                nextEligibleParticipantKeys.Add(
+                    BuildScopeParticipantKey(
+                        snapshotServerId,
+                        roomId,
+                        userId,
+                        connectionId));
+            }
+
+            bool changed =
+                !eligibilitySnapshotReady ||
+                !eligibleParticipantKeys.SetEquals(
+                    nextEligibleParticipantKeys);
+
+            eligibleParticipantKeys.Clear();
+            eligibleParticipantKeys.UnionWith(nextEligibleParticipantKeys);
+            eligibilitySnapshotReady = true;
+
+            if (changed)
+            {
+                Debug.Log(
+                    "VOICE_MS5_DEDICATED_ELIGIBILITY_SYNC=PASS" +
+                    " | serverId=" + snapshotServerId +
+                    " | eligibleParticipants=" + eligibleParticipantKeys.Count +
+                    " | snapshotParticipants=" + participants.Length);
             }
         }
 
@@ -234,12 +395,20 @@ namespace Network_A.Voice.Dedicated
                 }
 
                 currentScopeUserKeys.Add(BuildScopeUserKey(serverId, roomId, userId));
-                currentScopeParticipantKeys.Add(
+
+                string participantKey =
                     BuildScopeParticipantKey(
                         serverId,
                         roomId,
                         userId,
-                        connectionId));
+                        connectionId);
+
+                currentScopeParticipantKeys.Add(participantKey);
+
+                if (!IsVoiceSessionEligible(participantKey))
+                {
+                    continue;
+                }
 
                 Vector3 authoritativePosition;
                 string positionRejectReason;
@@ -257,16 +426,37 @@ namespace Network_A.Voice.Dedicated
                         session,
                         authoritativePosition));
 
-                currentResolvedParticipantKeys.Add(
-                    BuildScopeParticipantKey(
-                        serverId,
-                        roomId,
-                        userId,
-                        connectionId));
+                currentResolvedParticipantKeys.Add(participantKey);
             }
 
             long stabilityClockMs = ReadMonotonicMilliseconds();
             long effectiveAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            List<VoiceDedicatedTopologyParticipantPosition> participantPositions =
+                new List<VoiceDedicatedTopologyParticipantPosition>(participants.Count);
+
+            for (int index = 0; index < participants.Count; index += 1)
+            {
+                ResolvedParticipant resolved = participants[index];
+                DedicatedPlayerSession session = resolved.Session;
+                Vector3 position = resolved.AuthoritativePosition;
+
+                participantPositions.Add(
+                    new VoiceDedicatedTopologyParticipantPosition(
+                        new VoiceDedicatedGroupParticipant(
+                            session.serverId,
+                            session.roomId,
+                            session.userId,
+                            session.connectionId),
+                        position.x,
+                        position.y,
+                        position.z,
+                        effectiveAtMs));
+            }
+
+            groupTopologyRuntime.UpdateParticipantPositions(
+                participantPositions,
+                effectiveAtMs);
 
             for (int firstIndex = 0; firstIndex < participants.Count; firstIndex += 1)
             {
@@ -374,6 +564,13 @@ namespace Network_A.Voice.Dedicated
             SynchronizePairTrackerAssignment(tracker);
         }
 
+        //* این تابع نقطه واحد تصمیم‌گیری عضویت Voice Session است و شروط بعدی فقط به همین Gate اضافه می‌شوند.
+        private bool IsVoiceSessionEligible(string participantKey)
+        {
+            return eligibilitySnapshotReady &&
+                   eligibleParticipantKeys.Contains(participantKey);
+        }
+
         //* این تابع زوج‌هایی را که دیگر هر دو عضو معتبر ندارند با علت مستند می‌بندد و از حافظه حذف می‌کند.
         private void CloseAndRemoveUnobservedTrackers(long effectiveAtMs)
         {
@@ -425,11 +622,16 @@ namespace Network_A.Voice.Dedicated
                 bool connectionStillInScope =
                     currentScopeParticipantKeys.Contains(participantKey);
 
+                bool voiceEligible =
+                    IsVoiceSessionEligible(participantKey);
+
                 VoiceDedicatedSessionReason reason = !userStillInScope
                     ? VoiceDedicatedSessionReason.RoomLeft
                     : !connectionStillInScope
                         ? VoiceDedicatedSessionReason.DedicatedDisconnected
-                        : VoiceDedicatedSessionReason.AvatarDespawned;
+                        : !voiceEligible
+                            ? VoiceDedicatedSessionReason.AccessRevoked
+                            : VoiceDedicatedSessionReason.AvatarDespawned;
 
                 IReadOnlyList<VoiceDedicatedSessionDelta> deltas =
                     groupTopologyRuntime.RemoveParticipant(
@@ -562,7 +764,10 @@ namespace Network_A.Voice.Dedicated
             currentScopeUserKeys.Clear();
             currentScopeParticipantKeys.Clear();
             currentResolvedParticipantKeys.Clear();
+            eligibleParticipantKeys.Clear();
             pairObservations.Clear();
+            eligibilitySnapshotReady = false;
+            nextEligibilityRefreshAtRealtime = 0.0f;
             groupTopologyRuntime.ResetState();
             authorityEpochResetCount = 0;
             authorityFaulted = false;
@@ -886,7 +1091,10 @@ namespace Network_A.Voice.Dedicated
             currentScopeUserKeys.Clear();
             currentScopeParticipantKeys.Clear();
             currentResolvedParticipantKeys.Clear();
+            eligibleParticipantKeys.Clear();
             pairObservations.Clear();
+            eligibilitySnapshotReady = false;
+            nextEligibilityRefreshAtRealtime = 0.0f;
             groupTopologyRuntime.ResetState();
             LastFailure = string.Empty;
             authorityFaulted = false;
@@ -938,16 +1146,53 @@ namespace Network_A.Voice.Dedicated
                 " | error=" + LastFailure);
         }
 
-        //* این تابع هنگام فعال‌شدن دوباره آبجکت، اشتراک‌های لازم را بازیابی می‌کند.
-        private void OnEnable()
+        //* این تابع منبع لغو Poll Eligibility را بدون نشت Task از نو آماده می‌کند.
+        private void ResetEligibilityCancellationSource()
         {
-            if (configured) BindEvents();
+            if (eligibilityCts != null)
+            {
+                eligibilityCts.Cancel();
+                eligibilityCts.Dispose();
+            }
+
+            eligibilityCts = new CancellationTokenSource();
+            eligibilityRefreshRunning = false;
         }
 
-        //* این تابع هنگام غیرفعال‌شدن آبجکت، اشتراک‌های رویدادی را پاک می‌کند.
+        //* این تابع هنگام فعال‌شدن دوباره آبجکت، اشتراک‌ها و Poll Eligibility را بازیابی می‌کند.
+        private void OnEnable()
+        {
+            if (!configured) return;
+
+            if (eligibilityCts == null || eligibilityCts.IsCancellationRequested)
+            {
+                ResetEligibilityCancellationSource();
+            }
+
+            nextEligibilityRefreshAtRealtime = 0.0f;
+            BindEvents();
+        }
+
+        //* این تابع هنگام غیرفعال‌شدن آبجکت، Poll در حال اجرا و اشتراک‌های رویدادی را پاک می‌کند.
         private void OnDisable()
         {
+            if (eligibilityCts != null && !eligibilityCts.IsCancellationRequested)
+            {
+                eligibilityCts.Cancel();
+            }
+
+            eligibilityRefreshRunning = false;
             UnbindEvents();
+        }
+
+        //* این تابع منبع لغو Eligibility را هنگام حذف آبجکت آزاد می‌کند.
+        private void OnDestroy()
+        {
+            if (eligibilityCts == null) return;
+
+            eligibilityCts.Cancel();
+            eligibilityCts.Dispose();
+            eligibilityCts = null;
         }
 
         private sealed class ResolvedParticipant

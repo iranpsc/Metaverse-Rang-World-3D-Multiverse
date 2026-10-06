@@ -69,6 +69,7 @@ namespace Network_A.DedicatedGameServer.Client
 
         public string ConnectionId { get; private set; }
         public string UserId { get; private set; }
+        public string UserName { get; private set; }
         public string PlayerId { get; private set; }
         public string RoomId { get; private set; }
         public string ServerId { get; private set; }
@@ -296,6 +297,7 @@ namespace Network_A.DedicatedGameServer.Client
             ClearPendingPlayerResumeState();
 
             UserId = authTicket.userId;
+            UserName = authTicket.userName;
             PlayerId = authTicket.playerId;
             RoomId = authTicket.roomId;
             ServerId = authTicket.serverId;
@@ -920,6 +922,7 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 ConnectionId = authOk.connectionId;
                 UserId = authOk.userId;
+                if (!string.IsNullOrWhiteSpace(authOk.userName)) UserName = authOk.userName.Trim();
                 PlayerId = authOk.playerId;
                 RoomId = authOk.roomId;
                 ServerId = authOk.serverId;
@@ -1345,6 +1348,7 @@ namespace Network_A.DedicatedGameServer.Client
             public bool ok;
             public string reason;
             public string userId;
+            public string userName;
             public string playerId;
             public string connectionId;
             public string roomId;

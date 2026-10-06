@@ -1164,8 +1164,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 136.09294, y: -6.7493}
-  m_SizeDelta: {x: 855.208, y: 134.6572}
+  m_AnchoredPosition: {x: 147, y: -0.0000019073}
+  m_SizeDelta: {x: 434.3899, y: 134.6572}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &136800478
 MonoBehaviour:
@@ -1991,8 +1991,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 628.7298, y: 119.1597}
-  m_SizeDelta: {x: 1180.583, y: 164.8448}
+  m_AnchoredPosition: {x: 466.26205, y: 119.1597}
+  m_SizeDelta: {x: 855.6476, y: 164.8448}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &866910677
 MonoBehaviour:
@@ -2007,7 +2007,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0.392}
+  m_Color: {r: 0, g: 0, b: 0, a: 0.392}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -2773,6 +2773,7 @@ MonoBehaviour:
   disconnectBeforeConnect: 1
   websocketConnectMaxAttempts: 2
   websocketConnectRetryDelaySeconds: 1
+  websocketFirstAttemptSoftTimeoutSeconds: 3.5
   verboseLogs: 1
 --- !u!114 &3186380343314539706
 MonoBehaviour:

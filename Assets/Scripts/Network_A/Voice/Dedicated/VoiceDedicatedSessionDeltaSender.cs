@@ -15,6 +15,9 @@ namespace Network_A.Voice.Dedicated
         public const string RelativeEndpointPath =
             "/game-server-control/dedicated/voice-session-delta";
 
+        public const string EligibilityRelativeEndpointPath =
+            "/game-server-control/dedicated/voice-session-eligibility";
+
         private const int MaximumPendingEventCount = 1024;
         private const int MaximumBatchEventCount = 1024;
         private const int RequestTimeoutSeconds = 15;
@@ -328,6 +331,119 @@ namespace Network_A.Voice.Dedicated
             {
                 sendLoopRunning = false;
             }
+        }
+
+        //* این تابع Snapshot شرط Mic/Speaker را بدون اثر روی صف Delta از سرویس Voice دریافت می‌کند.
+        public async Task<VoiceDedicatedSessionEligibilitySnapshot>
+            FetchSessionEligibilitySnapshotAsync(
+                CancellationToken cancellationToken)
+        {
+            if (!configured ||
+                !transportEnabled ||
+                runtime == null ||
+                controlClient == null)
+            {
+                return null;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            DedicatedServerConfigData config = runtime.GetCurrentConfig();
+            if (config == null) return null;
+
+            string serverId = string.IsNullOrWhiteSpace(config.serverId)
+                ? string.Empty
+                : config.serverId.Trim();
+
+            string baseUrl = string.IsNullOrWhiteSpace(config.controlBaseUrl)
+                ? string.Empty
+                : config.controlBaseUrl.Trim().TrimEnd('/');
+
+            if (serverId.Length == 0 || baseUrl.Length == 0) return null;
+
+            string serviceToken = await controlClient.GetFreshServiceTokenAsync(
+                cancellationToken,
+                false);
+
+            if (string.IsNullOrWhiteSpace(serviceToken)) return null;
+
+            VoiceDedicatedSessionEligibilityRequest requestBody =
+                new VoiceDedicatedSessionEligibilityRequest
+                {
+                    serviceToken = serviceToken.Trim(),
+                    serverId = serverId
+                };
+
+            VoiceDedicatedHttpSendResult result = await SendJsonAsync(
+                baseUrl + EligibilityRelativeEndpointPath,
+                JsonUtility.ToJson(requestBody),
+                cancellationToken);
+
+            if (!result.Success &&
+                (result.StatusCode == 401 || result.StatusCode == 403))
+            {
+                serviceToken = await controlClient.GetFreshServiceTokenAsync(
+                    cancellationToken,
+                    true);
+
+                if (string.IsNullOrWhiteSpace(serviceToken)) return null;
+
+                requestBody.serviceToken = serviceToken.Trim();
+                result = await SendJsonAsync(
+                    baseUrl + EligibilityRelativeEndpointPath,
+                    JsonUtility.ToJson(requestBody),
+                    cancellationToken);
+            }
+
+            if (!result.Success)
+            {
+                Debug.LogWarning(
+                    "VOICE_MS5_ELIGIBILITY_FETCH=FAIL" +
+                    " | status=" + result.StatusCode +
+                    " | error=" + CompactForLog(result.Error) +
+                    " | body=" + CompactForLog(result.RawBody));
+                return null;
+            }
+
+            VoiceDedicatedSessionEligibilityResponse response;
+
+            try
+            {
+                response = JsonUtility.FromJson<VoiceDedicatedSessionEligibilityResponse>(
+                    result.RawBody);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    "VOICE_MS5_ELIGIBILITY_FETCH=FAIL" +
+                    " | reason=parse_failed" +
+                    " | error=" + CompactForLog(exception.Message));
+                return null;
+            }
+
+            if (response == null ||
+                !response.success ||
+                response.data == null ||
+                !string.Equals(
+                    response.data.serverId,
+                    serverId,
+                    StringComparison.Ordinal))
+            {
+                Debug.LogWarning(
+                    "VOICE_MS5_ELIGIBILITY_FETCH=FAIL" +
+                    " | reason=invalid_response" +
+                    " | serverId=" + serverId +
+                    " | body=" + CompactForLog(result.RawBody));
+                return null;
+            }
+
+            if (response.data.participants == null)
+            {
+                response.data.participants =
+                    Array.Empty<VoiceDedicatedSessionEligibilityParticipant>();
+            }
+
+            return response.data;
         }
 
         //* این تابع حداکثر اندازه مجاز را بدون حذف از صف برای ارسال آماده می‌کند.

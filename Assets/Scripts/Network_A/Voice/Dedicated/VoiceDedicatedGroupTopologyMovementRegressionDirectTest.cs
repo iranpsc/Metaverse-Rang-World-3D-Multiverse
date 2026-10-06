@@ -90,12 +90,38 @@ namespace Network_A.Voice.Dedicated
                     participantC,
                     CreateSessionId(2),
                     2.4f,
+                    2000),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
                     2000));
+            RequireTopologyInvariants(runtime);
+            Require(
+                runtime.ActiveSessionCount == 1 &&
+                runtime.ActiveGroupSessionCount == 0,
+                "A partial C approach created a session-backed pair before grace.");
+
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Update(
+                    participantA,
+                    participantC,
+                    2.4f,
+                    2310),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
+                    2310));
             RequireTopologyInvariants(runtime);
             Require(
                 runtime.ActiveSessionCount == 2 &&
                 runtime.ActiveGroupSessionCount == 0,
-                "A partial C approach merged before C was close to every group member.");
+                "A partial C approach did not create a real pair after grace.");
 
             Apply(
                 runtime,
@@ -264,9 +290,29 @@ namespace Network_A.Voice.Dedicated
                     2.4f,
                     9000));
             Require(
+                runtime.ActiveSessionCount == 1 &&
+                runtime.ActiveGroupSessionCount == 0,
+                "AC pair reformed before the session-backed group-join grace elapsed.");
+            RequireTopologyInvariants(runtime);
+
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Update(
+                    participantA,
+                    participantC,
+                    2.4f,
+                    9301),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.8f,
+                    9301));
+            Require(
                 runtime.ActiveSessionCount == 2 &&
                 runtime.ActiveGroupSessionCount == 0,
-                "AC pair did not reform independently after the group split.");
+                "AC pair did not reform independently after the group split grace elapsed.");
             RequireTopologyInvariants(runtime);
 
             Apply(
@@ -277,7 +323,7 @@ namespace Network_A.Voice.Dedicated
                     participantC,
                     CreateSessionId(9),
                     2.3f,
-                    9100));
+                    9400));
             RequireStableGroup(
                 runtime,
                 stableSessionId,
@@ -379,6 +425,37 @@ namespace Network_A.Voice.Dedicated
                 CreatePair(first, second),
                 VoiceDedicatedProximityState.Outside,
                 VoiceDedicatedProximityDecisionType.SessionClosed,
+                string.Empty,
+                distanceMeters,
+                effectiveAtMs);
+        }
+
+        private static VoiceDedicatedTopologyPairObservation Observe(
+            VoiceDedicatedGroupParticipant first,
+            VoiceDedicatedGroupParticipant second,
+            VoiceDedicatedProximityState state,
+            float distanceMeters,
+            long effectiveAtMs)
+        {
+            return new VoiceDedicatedTopologyPairObservation(
+                CreatePair(first, second),
+                state,
+                VoiceDedicatedProximityDecisionType.None,
+                string.Empty,
+                distanceMeters,
+                effectiveAtMs);
+        }
+
+        private static VoiceDedicatedTopologyPairObservation Update(
+            VoiceDedicatedGroupParticipant first,
+            VoiceDedicatedGroupParticipant second,
+            float distanceMeters,
+            long effectiveAtMs)
+        {
+            return new VoiceDedicatedTopologyPairObservation(
+                CreatePair(first, second),
+                VoiceDedicatedProximityState.Active,
+                VoiceDedicatedProximityDecisionType.DistanceUpdated,
                 string.Empty,
                 distanceMeters,
                 effectiveAtMs);

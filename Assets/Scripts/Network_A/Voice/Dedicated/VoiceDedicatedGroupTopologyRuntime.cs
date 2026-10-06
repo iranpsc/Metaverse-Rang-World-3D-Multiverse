@@ -100,8 +100,58 @@ namespace Network_A.Voice.Dedicated
         }
     }
 
+    public struct VoiceDedicatedTopologyParticipantPosition
+    {
+        public VoiceDedicatedGroupParticipant Participant { get; private set; }
+        public float X { get; private set; }
+        public float Y { get; private set; }
+        public float Z { get; private set; }
+        public long EffectiveAtMs { get; private set; }
+
+        public VoiceDedicatedTopologyParticipantPosition(
+            VoiceDedicatedGroupParticipant participant,
+            float x,
+            float y,
+            float z,
+            long effectiveAtMs)
+        {
+            if (participant == null)
+            {
+                throw new ArgumentNullException("participant");
+            }
+
+            if (!IsFinite(x) || !IsFinite(y) || !IsFinite(z))
+            {
+                throw new ArgumentOutOfRangeException(
+                    "x",
+                    "Voice participant position components must be finite.");
+            }
+
+            if (effectiveAtMs < 0)
+            {
+                throw new ArgumentOutOfRangeException("effectiveAtMs");
+            }
+
+            Participant = participant;
+            X = x;
+            Y = y;
+            Z = z;
+            EffectiveAtMs = effectiveAtMs;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+    }
+
     public sealed class VoiceDedicatedGroupTopologyRuntime
     {
+        public const float SessionPositionEnterDistanceMeters = 3.0f;
+        public const long SessionPositionRefreshIntervalMs = 300L;
+        public const long SessionMemberPairDelayMs = 1000L;
+        public const float SessionPositionProgressResetDistanceMeters = 0.02f;
+
         private readonly Dictionary<string, PairEdgeState> edgesByPairKey =
             new Dictionary<string, PairEdgeState>(StringComparer.Ordinal);
         private readonly Dictionary<string, RuntimeSession> sessionsById =
@@ -110,15 +160,22 @@ namespace Network_A.Voice.Dedicated
             new Dictionary<string, string>(StringComparer.Ordinal);
         private readonly Dictionary<string, string> previousTargetByParticipantKey =
             new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, RuntimeParticipantPosition> participantPositionsByKey =
+            new Dictionary<string, RuntimeParticipantPosition>(StringComparer.Ordinal);
+        private readonly Dictionary<string, PendingSessionMemberPair> pendingSessionMemberPairsByPairKey =
+            new Dictionary<string, PendingSessionMemberPair>(StringComparer.Ordinal);
         private readonly HashSet<string> usedSessionIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> burnedSessionIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> blockedGroupExitPairKeys =
+            new HashSet<string>(StringComparer.Ordinal);
         private readonly VoiceDedicatedStableGroupMergePlanner mergePlanner;
         private readonly VoiceDedicatedGroupLeaveReformationPlanner leavePlanner;
         private readonly Func<string> sessionIdFactory;
 
         private long nextSessionOrder;
+        private long latestParticipantPositionEffectiveAtMs;
 
         public int ActiveSessionCount { get { return sessionsById.Count; } }
         public int ActiveGroupSessionCount
@@ -148,6 +205,57 @@ namespace Network_A.Voice.Dedicated
                 new VoiceDedicatedGroupLeaveReformationPlanner();
         }
 
+        public void UpdateParticipantPositions(
+            IReadOnlyList<VoiceDedicatedTopologyParticipantPosition> positions,
+            long effectiveAtMs)
+        {
+            if (positions == null) throw new ArgumentNullException("positions");
+            if (effectiveAtMs < 0) throw new ArgumentOutOfRangeException("effectiveAtMs");
+
+            participantPositionsByKey.Clear();
+            latestParticipantPositionEffectiveAtMs = effectiveAtMs;
+
+            for (int index = 0; index < positions.Count; index += 1)
+            {
+                VoiceDedicatedTopologyParticipantPosition position = positions[index];
+                VoiceDedicatedGroupParticipant participant = position.Participant;
+                if (participant == null) continue;
+
+                participantPositionsByKey[participant.IdentityKey] =
+                    new RuntimeParticipantPosition(
+                        participant,
+                        position.X,
+                        position.Y,
+                        position.Z,
+                        position.EffectiveAtMs);
+            }
+
+            RefreshAllSessionPositions(effectiveAtMs, false);
+        }
+
+        public bool TryGetSessionPosition(
+            string sessionId,
+            out float x,
+            out float y,
+            out float z)
+        {
+            RuntimeSession session;
+            if (string.IsNullOrWhiteSpace(sessionId) ||
+                !sessionsById.TryGetValue(sessionId, out session) ||
+                !session.HasSessionPosition)
+            {
+                x = 0.0f;
+                y = 0.0f;
+                z = 0.0f;
+                return false;
+            }
+
+            x = session.SessionPositionX;
+            y = session.SessionPositionY;
+            z = session.SessionPositionZ;
+            return true;
+        }
+
         public IReadOnlyList<VoiceDedicatedSessionDelta> ApplyPairObservations(
             IReadOnlyList<VoiceDedicatedTopologyPairObservation> observations,
             string authorityEpochId,
@@ -166,11 +274,17 @@ namespace Network_A.Voice.Dedicated
                 new List<VoiceDedicatedTopologyPairObservation>();
             List<VoiceDedicatedTopologyPairObservation> updated =
                 new List<VoiceDedicatedTopologyPairObservation>();
+            HashSet<string> outsidePairKeys =
+                new HashSet<string>(StringComparer.Ordinal);
+            long latestObservationEffectiveAtMs = 0L;
 
             for (int index = 0; index < observations.Count; index += 1)
             {
                 VoiceDedicatedTopologyPairObservation observation =
                     observations[index];
+                latestObservationEffectiveAtMs = Math.Max(
+                    latestObservationEffectiveAtMs,
+                    observation.EffectiveAtMs);
 
                 PairEdgeState edgeState;
                 if (!edgesByPairKey.TryGetValue(
@@ -184,6 +298,11 @@ namespace Network_A.Voice.Dedicated
                 edgeState.State = observation.State;
                 edgeState.DistanceMeters = observation.DistanceMeters;
                 edgeState.EffectiveAtMs = observation.EffectiveAtMs;
+
+                if (observation.State == VoiceDedicatedProximityState.Outside)
+                {
+                    outsidePairKeys.Add(observation.Pair.PairKey);
+                }
 
                 if (observation.TransitionType ==
                     VoiceDedicatedProximityDecisionType.SessionCreated)
@@ -206,6 +325,10 @@ namespace Network_A.Voice.Dedicated
             exited.Sort(CompareObservations);
             updated.Sort(CompareObservations);
 
+            long topologyEffectiveAtMs = Math.Max(
+                latestObservationEffectiveAtMs,
+                latestParticipantPositionEffectiveAtMs);
+
             List<VoiceDedicatedSessionDelta> deltas =
                 new List<VoiceDedicatedSessionDelta>();
 
@@ -218,8 +341,39 @@ namespace Network_A.Voice.Dedicated
                     deltas);
             }
 
+            ReleaseBlockedPairsWithOutsideEvidence(outsidePairKeys);
+            CancelPendingPairsWithOutsideEvidence(outsidePairKeys);
+
             HashSet<string> createdPairKeys =
                 new HashSet<string>(StringComparer.Ordinal);
+            HashSet<string> topologyTransitionPairKeys =
+                new HashSet<string>(StringComparer.Ordinal);
+            HashSet<string> recentlyLeftSessionKeys =
+                new HashSet<string>(StringComparer.Ordinal);
+
+            RefreshAllSessionPositions(topologyEffectiveAtMs, false);
+
+            ApplySessionPositionGroupExits(
+                authorityEpochId,
+                nextSourceSequence,
+                deltas,
+                recentlyLeftSessionKeys,
+                topologyEffectiveAtMs);
+
+            ApplySessionPositionJoins(
+                authorityEpochId,
+                nextSourceSequence,
+                deltas,
+                topologyTransitionPairKeys,
+                recentlyLeftSessionKeys,
+                topologyEffectiveAtMs);
+
+            ProcessPendingSessionMemberPairs(
+                authorityEpochId,
+                nextSourceSequence,
+                deltas,
+                topologyTransitionPairKeys,
+                topologyEffectiveAtMs);
 
             for (int index = 0; index < entered.Count; index += 1)
             {
@@ -230,17 +384,29 @@ namespace Network_A.Voice.Dedicated
                     continue;
                 }
 
+                if (blockedGroupExitPairKeys.Contains(observation.Pair.PairKey))
+                {
+                    topologyTransitionPairKeys.Add(observation.Pair.PairKey);
+                    continue;
+                }
+
+                VoiceDedicatedGroupParticipant first =
+                    CreateParticipantFromPairEndpoint(observation.Pair, true);
+                VoiceDedicatedGroupParticipant second =
+                    CreateParticipantFromPairEndpoint(observation.Pair, false);
+
+                if (PairRequiresSessionMemberDelay(first, second))
+                {
+                    BeginPendingSessionMemberPair(observation);
+                    topologyTransitionPairKeys.Add(observation.Pair.PairKey);
+                    continue;
+                }
+
                 string sessionId = NormalizeAndReserveSessionId(
                     observation.SuggestedSessionId);
 
-                CreatePairSession(
-                    observation.Pair,
-                    sessionId,
-                    observation.DistanceMeters,
-                    observation.EffectiveAtMs);
-
                 deltas.Add(
-                    CreatePairSessionDelta(
+                    OpenPairSession(
                         observation.Pair,
                         sessionId,
                         observation.DistanceMeters,
@@ -251,15 +417,14 @@ namespace Network_A.Voice.Dedicated
                 createdPairKeys.Add(observation.Pair.PairKey);
             }
 
-            ApplyAllEligibleStableMerges(
-                authorityEpochId,
-                nextSourceSequence,
-                deltas);
-
             for (int index = 0; index < entered.Count; index += 1)
             {
                 VoiceDedicatedTopologyPairObservation observation = entered[index];
-                if (createdPairKeys.Contains(observation.Pair.PairKey)) continue;
+                if (createdPairKeys.Contains(observation.Pair.PairKey) ||
+                    topologyTransitionPairKeys.Contains(observation.Pair.PairKey))
+                {
+                    continue;
+                }
 
                 AddDistanceDeltaIfMapped(
                     observation,
@@ -270,8 +435,15 @@ namespace Network_A.Voice.Dedicated
 
             for (int index = 0; index < updated.Count; index += 1)
             {
+                VoiceDedicatedTopologyPairObservation observation = updated[index];
+                if (createdPairKeys.Contains(observation.Pair.PairKey) ||
+                    topologyTransitionPairKeys.Contains(observation.Pair.PairKey))
+                {
+                    continue;
+                }
+
                 AddDistanceDeltaIfMapped(
-                    updated[index],
+                    observation,
                     authorityEpochId,
                     nextSourceSequence,
                     deltas);
@@ -356,6 +528,7 @@ namespace Network_A.Voice.Dedicated
             }
 
             RemoveParticipantEdges(participant);
+            participantPositionsByKey.Remove(participant.IdentityKey);
             previousTargetByParticipantKey.Remove(participant.IdentityKey);
             return deltas;
         }
@@ -399,6 +572,10 @@ namespace Network_A.Voice.Dedicated
             sessionIdByPairKey.Clear();
             edgesByPairKey.Clear();
             previousTargetByParticipantKey.Clear();
+            participantPositionsByKey.Clear();
+            pendingSessionMemberPairsByPairKey.Clear();
+            latestParticipantPositionEffectiveAtMs = 0L;
+            blockedGroupExitPairKeys.Clear();
             return deltas;
         }
 
@@ -413,6 +590,10 @@ namespace Network_A.Voice.Dedicated
             sessionIdByPairKey.Clear();
             edgesByPairKey.Clear();
             previousTargetByParticipantKey.Clear();
+            participantPositionsByKey.Clear();
+            pendingSessionMemberPairsByPairKey.Clear();
+            latestParticipantPositionEffectiveAtMs = 0L;
+            blockedGroupExitPairKeys.Clear();
         }
 
         public bool TryGetSessionIdForPair(
@@ -436,6 +617,7 @@ namespace Network_A.Voice.Dedicated
                 return false;
             }
 
+            blockedGroupExitPairKeys.Remove(pairKey);
             return edgesByPairKey.Remove(pairKey);
         }
 
@@ -506,30 +688,7 @@ namespace Network_A.Voice.Dedicated
             }
             else
             {
-                bool closesDisconnectedGroup;
-                if (!TryResolveGraphBackedGroupExit(
-                        session,
-                        out leavingMember,
-                        out closesDisconnectedGroup))
-                {
-                    return;
-                }
-
-                if (closesDisconnectedGroup)
-                {
-                    deltas.Add(
-                        VoiceDedicatedSessionDelta.CreateSessionClosed(
-                            session.AnchorPair,
-                            session.SessionId,
-                            observation.DistanceMeters,
-                            VoiceDedicatedSessionReason.ProximityExit,
-                            observation.EffectiveAtMs,
-                            authorityEpochId,
-                            nextSourceSequence()));
-
-                    RemoveAndBurnSession(session);
-                    return;
-                }
+                return;
             }
 
             VoiceDedicatedGroupLeaveReformationPlan plan;
@@ -589,6 +748,827 @@ namespace Network_A.Voice.Dedicated
                         observation.EffectiveAtMs,
                         authorityEpochId,
                         nextSourceSequence()));
+            }
+        }
+
+        private void ApplySessionPositionGroupExits(
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> recentlyLeftSessionKeys,
+            long effectiveAtMs)
+        {
+            List<RuntimeSession> sessions = CreateOrderedRuntimeSessions();
+
+            for (int sessionIndex = 0; sessionIndex < sessions.Count; sessionIndex += 1)
+            {
+                RuntimeSession session = sessions[sessionIndex];
+
+                while (session.Members.Count > 2)
+                {
+                    RefreshSessionPosition(session, effectiveAtMs, false);
+                    if (!session.HasSessionPosition) break;
+
+                    RuntimeMember leavingMember = null;
+                    float leavingDistanceMeters = SessionPositionEnterDistanceMeters;
+
+                    for (int memberIndex = 0; memberIndex < session.Members.Count; memberIndex += 1)
+                    {
+                        RuntimeMember member = session.Members[memberIndex];
+                        RuntimeParticipantPosition position;
+                        if (!participantPositionsByKey.TryGetValue(
+                                member.Participant.IdentityKey,
+                                out position))
+                        {
+                            continue;
+                        }
+
+                        float distanceMeters = DistanceToSessionPosition(position, session);
+                        if (distanceMeters <= SessionPositionEnterDistanceMeters) continue;
+
+                        if (leavingMember == null ||
+                            distanceMeters > leavingDistanceMeters ||
+                            (Math.Abs(distanceMeters - leavingDistanceMeters) < 0.0001f &&
+                             string.CompareOrdinal(
+                                 member.Participant.IdentityKey,
+                                 leavingMember.Participant.IdentityKey) < 0))
+                        {
+                            leavingMember = member;
+                            leavingDistanceMeters = distanceMeters;
+                        }
+                    }
+
+                    if (leavingMember == null) break;
+
+                    if (!LeaveGroupMemberFromSession(
+                            session,
+                            leavingMember.Participant,
+                            leavingDistanceMeters,
+                            effectiveAtMs,
+                            authorityEpochId,
+                            nextSourceSequence,
+                            deltas,
+                            recentlyLeftSessionKeys))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        private void ApplySessionPositionJoins(
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> topologyTransitionPairKeys,
+            HashSet<string> recentlyLeftSessionKeys,
+            long effectiveAtMs)
+        {
+            List<RuntimeParticipantPosition> candidates =
+                new List<RuntimeParticipantPosition>(participantPositionsByKey.Values);
+            candidates.Sort(CompareRuntimeParticipantPositions);
+
+            for (int index = 0; index < candidates.Count; index += 1)
+            {
+                RuntimeParticipantPosition candidatePosition = candidates[index];
+                VoiceDedicatedGroupParticipant candidate = candidatePosition.Participant;
+
+                RuntimeSession target;
+                float distanceMeters;
+                if (!TryResolveNearestSessionByPosition(
+                        candidatePosition,
+                        recentlyLeftSessionKeys,
+                        out target,
+                        out distanceMeters))
+                {
+                    continue;
+                }
+
+                long joinAtMs = Math.Max(
+                    effectiveAtMs,
+                    candidatePosition.EffectiveAtMs);
+
+                if (!CloseConflictingPairSessionsBeforeJoin(
+                        target,
+                        candidate,
+                        joinAtMs,
+                        authorityEpochId,
+                        nextSourceSequence,
+                        deltas,
+                        topologyTransitionPairKeys))
+                {
+                    continue;
+                }
+
+                JoinParticipantToSession(
+                    target,
+                    candidate,
+                    distanceMeters,
+                    joinAtMs,
+                    authorityEpochId,
+                    nextSourceSequence,
+                    deltas,
+                    topologyTransitionPairKeys);
+            }
+        }
+
+        private bool TryResolveNearestSessionByPosition(
+            RuntimeParticipantPosition candidatePosition,
+            HashSet<string> recentlyLeftSessionKeys,
+            out RuntimeSession selectedSession,
+            out float selectedDistanceMeters)
+        {
+            selectedSession = null;
+            selectedDistanceMeters = float.MaxValue;
+
+            List<RuntimeSession> sessions = CreateOrderedRuntimeSessions();
+            for (int index = 0; index < sessions.Count; index += 1)
+            {
+                RuntimeSession session = sessions[index];
+                VoiceDedicatedGroupParticipant candidate = candidatePosition.Participant;
+
+                if (!session.HasSessionPosition ||
+                    session.Contains(candidate) ||
+                    !string.Equals(
+                        session.AnchorPair.ServerId,
+                        candidate.ServerId,
+                        StringComparison.Ordinal) ||
+                    !string.Equals(
+                        session.AnchorPair.RoomId,
+                        candidate.RoomId,
+                        StringComparison.Ordinal) ||
+                    recentlyLeftSessionKeys.Contains(
+                        BuildParticipantSessionKey(candidate, session.SessionId)))
+                {
+                    continue;
+                }
+
+                float distanceMeters = DistanceToSessionPosition(
+                    candidatePosition,
+                    session);
+                if (distanceMeters > SessionPositionEnterDistanceMeters) continue;
+
+                bool betterDistance =
+                    distanceMeters < selectedDistanceMeters - 0.0001f;
+                bool equalDistance =
+                    Math.Abs(distanceMeters - selectedDistanceMeters) < 0.0001f;
+                bool betterSessionId =
+                    selectedSession == null ||
+                    string.CompareOrdinal(
+                        session.SessionId,
+                        selectedSession.SessionId) < 0;
+
+                if (selectedSession == null ||
+                    betterDistance ||
+                    (equalDistance && betterSessionId))
+                {
+                    selectedSession = session;
+                    selectedDistanceMeters = distanceMeters;
+                }
+            }
+
+            return selectedSession != null;
+        }
+
+        private bool PairRequiresSessionMemberDelay(
+            VoiceDedicatedGroupParticipant first,
+            VoiceDedicatedGroupParticipant second)
+        {
+            return IsParticipantInSessionWithoutPeer(first, second) ||
+                   IsParticipantInSessionWithoutPeer(second, first);
+        }
+
+        private bool IsParticipantInSessionWithoutPeer(
+            VoiceDedicatedGroupParticipant member,
+            VoiceDedicatedGroupParticipant peer)
+        {
+            foreach (RuntimeSession session in sessionsById.Values)
+            {
+                if (session.Contains(member) && !session.Contains(peer))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void BeginPendingSessionMemberPair(
+            VoiceDedicatedTopologyPairObservation observation)
+        {
+            PendingSessionMemberPair pending;
+            if (!pendingSessionMemberPairsByPairKey.TryGetValue(
+                    observation.Pair.PairKey,
+                    out pending))
+            {
+                pending = new PendingSessionMemberPair(
+                    observation.Pair,
+                    observation.SuggestedSessionId,
+                    observation.EffectiveAtMs);
+                pendingSessionMemberPairsByPairKey.Add(
+                    observation.Pair.PairKey,
+                    pending);
+            }
+
+            float sessionDistanceMeters;
+            if (TryResolveNearestRelevantSessionDistance(
+                    observation.Pair,
+                    out sessionDistanceMeters))
+            {
+                pending.ObserveSessionDistance(
+                    sessionDistanceMeters,
+                    observation.EffectiveAtMs);
+            }
+        }
+
+        private void ProcessPendingSessionMemberPairs(
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> topologyTransitionPairKeys,
+            long effectiveAtMs)
+        {
+            if (pendingSessionMemberPairsByPairKey.Count == 0) return;
+
+            List<string> pairKeys =
+                new List<string>(pendingSessionMemberPairsByPairKey.Keys);
+            pairKeys.Sort(StringComparer.Ordinal);
+
+            for (int index = 0; index < pairKeys.Count; index += 1)
+            {
+                string pairKey = pairKeys[index];
+                PendingSessionMemberPair pending;
+                if (!pendingSessionMemberPairsByPairKey.TryGetValue(
+                        pairKey,
+                        out pending))
+                {
+                    continue;
+                }
+
+                if (sessionIdByPairKey.ContainsKey(pairKey))
+                {
+                    pendingSessionMemberPairsByPairKey.Remove(pairKey);
+                    continue;
+                }
+
+                PairEdgeState edge;
+                if (!edgesByPairKey.TryGetValue(pairKey, out edge) ||
+                    edge.State == VoiceDedicatedProximityState.Outside)
+                {
+                    pendingSessionMemberPairsByPairKey.Remove(pairKey);
+                    continue;
+                }
+
+                if (edge.State != VoiceDedicatedProximityState.Active)
+                {
+                    topologyTransitionPairKeys.Add(pairKey);
+                    continue;
+                }
+
+                VoiceDedicatedGroupParticipant first =
+                    CreateParticipantFromPairEndpoint(pending.Pair, true);
+                VoiceDedicatedGroupParticipant second =
+                    CreateParticipantFromPairEndpoint(pending.Pair, false);
+
+                if (!PairRequiresSessionMemberDelay(first, second))
+                {
+                    OpenPendingPairSession(
+                        pending,
+                        edge,
+                        authorityEpochId,
+                        nextSourceSequence,
+                        deltas,
+                        topologyTransitionPairKeys,
+                        effectiveAtMs);
+                    continue;
+                }
+
+                float sessionDistanceMeters;
+                if (!TryResolveNearestRelevantSessionDistance(
+                        pending.Pair,
+                        out sessionDistanceMeters))
+                {
+                    continue;
+                }
+
+                if (sessionDistanceMeters <= SessionPositionEnterDistanceMeters)
+                {
+                    pendingSessionMemberPairsByPairKey.Remove(pairKey);
+                    topologyTransitionPairKeys.Add(pairKey);
+                    continue;
+                }
+
+                pending.ObserveSessionDistance(
+                    sessionDistanceMeters,
+                    effectiveAtMs);
+
+                if (effectiveAtMs - pending.LastProgressAtMs <
+                    SessionMemberPairDelayMs)
+                {
+                    topologyTransitionPairKeys.Add(pairKey);
+                    continue;
+                }
+
+                OpenPendingPairSession(
+                    pending,
+                    edge,
+                    authorityEpochId,
+                    nextSourceSequence,
+                    deltas,
+                    topologyTransitionPairKeys,
+                    effectiveAtMs);
+            }
+        }
+
+        private void OpenPendingPairSession(
+            PendingSessionMemberPair pending,
+            PairEdgeState edge,
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> topologyTransitionPairKeys,
+            long effectiveAtMs)
+        {
+            string sessionId = NormalizeAndReserveSessionId(
+                pending.SuggestedSessionId);
+            long openAtMs = Math.Max(effectiveAtMs, edge.EffectiveAtMs);
+
+            deltas.Add(
+                OpenPairSession(
+                    pending.Pair,
+                    sessionId,
+                    edge.DistanceMeters,
+                    openAtMs,
+                    authorityEpochId,
+                    nextSourceSequence()));
+
+            pendingSessionMemberPairsByPairKey.Remove(pending.Pair.PairKey);
+            topologyTransitionPairKeys.Add(pending.Pair.PairKey);
+        }
+
+        private bool TryResolveNearestRelevantSessionDistance(
+            VoiceDedicatedParticipantPair pair,
+            out float selectedDistanceMeters)
+        {
+            selectedDistanceMeters = float.MaxValue;
+            bool found = false;
+
+            VoiceDedicatedGroupParticipant first =
+                CreateParticipantFromPairEndpoint(pair, true);
+            VoiceDedicatedGroupParticipant second =
+                CreateParticipantFromPairEndpoint(pair, false);
+
+            found |= TryResolveNearestSessionDistanceForMemberAndPeer(
+                first,
+                second,
+                ref selectedDistanceMeters);
+            found |= TryResolveNearestSessionDistanceForMemberAndPeer(
+                second,
+                first,
+                ref selectedDistanceMeters);
+
+            return found;
+        }
+
+        private bool TryResolveNearestSessionDistanceForMemberAndPeer(
+            VoiceDedicatedGroupParticipant member,
+            VoiceDedicatedGroupParticipant peer,
+            ref float selectedDistanceMeters)
+        {
+            RuntimeParticipantPosition peerPosition;
+            if (!participantPositionsByKey.TryGetValue(
+                    peer.IdentityKey,
+                    out peerPosition))
+            {
+                return false;
+            }
+
+            bool found = false;
+            foreach (RuntimeSession session in sessionsById.Values)
+            {
+                if (!session.HasSessionPosition ||
+                    !session.Contains(member) ||
+                    session.Contains(peer))
+                {
+                    continue;
+                }
+
+                float distanceMeters = DistanceToSessionPosition(
+                    peerPosition,
+                    session);
+                if (!found || distanceMeters < selectedDistanceMeters)
+                {
+                    selectedDistanceMeters = distanceMeters;
+                    found = true;
+                }
+            }
+
+            return found;
+        }
+
+        private bool CloseConflictingPairSessionsBeforeJoin(
+            RuntimeSession target,
+            VoiceDedicatedGroupParticipant participant,
+            long effectiveAtMs,
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> topologyTransitionPairKeys)
+        {
+            List<RuntimeSession> conflicts = new List<RuntimeSession>();
+
+            for (int index = 0; index < target.Members.Count; index += 1)
+            {
+                VoiceDedicatedGroupParticipant peer =
+                    target.Members[index].Participant;
+                VoiceDedicatedParticipantPair pair = CreatePair(participant, peer);
+                string sessionId;
+
+                if (!sessionIdByPairKey.TryGetValue(pair.PairKey, out sessionId) ||
+                    string.Equals(
+                        sessionId,
+                        target.SessionId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                RuntimeSession conflict;
+                if (!sessionsById.TryGetValue(sessionId, out conflict))
+                {
+                    throw new InvalidOperationException(
+                        "Voice SessionPosition join references a missing conflicting Session.");
+                }
+
+                if (conflict.Members.Count != 2)
+                {
+                    return false;
+                }
+
+                if (!conflicts.Contains(conflict)) conflicts.Add(conflict);
+                topologyTransitionPairKeys.Add(pair.PairKey);
+            }
+
+            conflicts.Sort(CompareRuntimeSessions);
+
+            for (int index = 0; index < conflicts.Count; index += 1)
+            {
+                RuntimeSession conflict = conflicts[index];
+                deltas.Add(
+                    VoiceDedicatedSessionDelta.CreateSessionClosed(
+                        conflict.AnchorPair,
+                        conflict.SessionId,
+                        conflict.LastDistanceMeters,
+                        VoiceDedicatedSessionReason.SessionClosed,
+                        effectiveAtMs,
+                        authorityEpochId,
+                        nextSourceSequence()));
+                RemoveAndBurnSession(conflict);
+            }
+
+            return true;
+        }
+
+        private void CancelPendingPairsWithOutsideEvidence(
+            HashSet<string> outsidePairKeys)
+        {
+            if (outsidePairKeys == null || outsidePairKeys.Count == 0) return;
+
+            foreach (string pairKey in outsidePairKeys)
+            {
+                pendingSessionMemberPairsByPairKey.Remove(pairKey);
+            }
+        }
+
+        private VoiceDedicatedSessionDelta OpenPairSession(
+            VoiceDedicatedParticipantPair pair,
+            string sessionId,
+            float distanceMeters,
+            long effectiveAtMs,
+            string authorityEpochId,
+            long sourceSequence)
+        {
+            CreatePairSession(
+                pair,
+                sessionId,
+                distanceMeters,
+                effectiveAtMs);
+
+            return CreatePairSessionDelta(
+                pair,
+                sessionId,
+                distanceMeters,
+                effectiveAtMs,
+                authorityEpochId,
+                sourceSequence);
+        }
+
+        private void JoinParticipantToSession(
+            RuntimeSession session,
+            VoiceDedicatedGroupParticipant participant,
+            float distanceMeters,
+            long effectiveAtMs,
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> topologyTransitionPairKeys)
+        {
+            deltas.Add(
+                VoiceDedicatedSessionDelta.CreateMemberJoined(
+                    session.AnchorPair,
+                    session.SessionId,
+                    participant.UserId,
+                    participant.ConnectionId,
+                    distanceMeters,
+                    effectiveAtMs,
+                    authorityEpochId,
+                    nextSourceSequence()));
+
+            MarkParticipantSessionPairKeys(
+                participant,
+                session,
+                topologyTransitionPairKeys);
+
+            AddMemberToSession(
+                session,
+                participant,
+                distanceMeters,
+                effectiveAtMs);
+
+            previousTargetByParticipantKey[participant.IdentityKey] =
+                session.SessionId;
+        }
+
+        private bool LeaveGroupMemberFromSession(
+            RuntimeSession session,
+            VoiceDedicatedGroupParticipant participant,
+            float distanceMeters,
+            long effectiveAtMs,
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> recentlyLeftSessionKeys)
+        {
+            if (session == null ||
+                participant == null ||
+                session.Members.Count <= 2 ||
+                !session.Contains(participant))
+            {
+                return false;
+            }
+
+            RuntimeMember peer = session.FindFirstPeer(participant);
+            if (peer == null) return false;
+
+            VoiceDedicatedParticipantPair leavePair = CreatePair(
+                participant,
+                peer.Participant);
+
+            deltas.Add(
+                VoiceDedicatedSessionDelta.CreateMemberLeft(
+                    leavePair,
+                    session.SessionId,
+                    participant.UserId,
+                    distanceMeters,
+                    VoiceDedicatedSessionReason.ProximityExit,
+                    effectiveAtMs,
+                    authorityEpochId,
+                    nextSourceSequence()));
+
+            recentlyLeftSessionKeys.Add(
+                BuildParticipantSessionKey(
+                    participant,
+                    session.SessionId));
+
+            session.LastEffectiveAtMs = effectiveAtMs;
+            RemoveMemberFromSession(session, participant);
+            previousTargetByParticipantKey.Remove(participant.IdentityKey);
+            return true;
+        }
+
+        private void MarkParticipantSessionPairKeys(
+            VoiceDedicatedGroupParticipant participant,
+            RuntimeSession session,
+            HashSet<string> pairKeys)
+        {
+            for (int index = 0; index < session.Members.Count; index += 1)
+            {
+                VoiceDedicatedGroupParticipant peer =
+                    session.Members[index].Participant;
+                if (peer.HasSameIdentity(participant)) continue;
+                string pairKey = CreatePair(participant, peer).PairKey;
+                pairKeys.Add(pairKey);
+                pendingSessionMemberPairsByPairKey.Remove(pairKey);
+            }
+        }
+
+        private void RefreshAllSessionPositions(long effectiveAtMs, bool force)
+        {
+            foreach (RuntimeSession session in sessionsById.Values)
+            {
+                RefreshSessionPosition(session, effectiveAtMs, force);
+            }
+        }
+
+        private void RefreshSessionPosition(
+            RuntimeSession session,
+            long effectiveAtMs,
+            bool force)
+        {
+            if (session == null || session.Members.Count < 2) return;
+
+            if (!force &&
+                session.HasSessionPosition &&
+                effectiveAtMs - session.LastSessionPositionUpdateAtMs <
+                    SessionPositionRefreshIntervalMs)
+            {
+                return;
+            }
+
+            float sumX = 0.0f;
+            float sumY = 0.0f;
+            float sumZ = 0.0f;
+
+            for (int index = 0; index < session.Members.Count; index += 1)
+            {
+                RuntimeParticipantPosition position;
+                if (!participantPositionsByKey.TryGetValue(
+                        session.Members[index].Participant.IdentityKey,
+                        out position))
+                {
+                    return;
+                }
+
+                sumX += position.X;
+                sumY += position.Y;
+                sumZ += position.Z;
+            }
+
+            float inverseCount = 1.0f / session.Members.Count;
+            session.SetSessionPosition(
+                sumX * inverseCount,
+                sumY * inverseCount,
+                sumZ * inverseCount,
+                effectiveAtMs);
+        }
+
+        private static float DistanceToSessionPosition(
+            RuntimeParticipantPosition participantPosition,
+            RuntimeSession session)
+        {
+            float deltaX = participantPosition.X - session.SessionPositionX;
+            float deltaY = participantPosition.Y - session.SessionPositionY;
+            float deltaZ = participantPosition.Z - session.SessionPositionZ;
+            return (float)Math.Sqrt(
+                deltaX * deltaX +
+                deltaY * deltaY +
+                deltaZ * deltaZ);
+        }
+
+        private static string BuildParticipantSessionKey(
+            VoiceDedicatedGroupParticipant participant,
+            string sessionId)
+        {
+            return participant.IdentityKey + "|" + sessionId;
+        }
+
+        private static int CompareRuntimeParticipantPositions(
+            RuntimeParticipantPosition first,
+            RuntimeParticipantPosition second)
+        {
+            if (ReferenceEquals(first, second)) return 0;
+            if (first == null) return -1;
+            if (second == null) return 1;
+            return CompareParticipants(first.Participant, second.Participant);
+        }
+
+        private bool TryApplyDirectStableJoinForEnteredPair(
+            VoiceDedicatedParticipantPair pair,
+            string authorityEpochId,
+            Func<long> nextSourceSequence,
+            List<VoiceDedicatedSessionDelta> deltas,
+            HashSet<string> topologyTransitionPairKeys)
+        {
+            VoiceDedicatedGroupParticipant first =
+                CreateParticipantFromPairEndpoint(pair, true);
+            VoiceDedicatedGroupParticipant second =
+                CreateParticipantFromPairEndpoint(pair, false);
+
+            VoiceDedicatedStableGroupMergePlan plan;
+            if (TryCreateDirectStableJoinPlan(first, second, out plan) ||
+                TryCreateDirectStableJoinPlan(second, first, out plan))
+            {
+                MarkDirectJoinPairKeys(
+                    plan,
+                    topologyTransitionPairKeys);
+
+                ApplyStableMerge(
+                    plan,
+                    authorityEpochId,
+                    nextSourceSequence,
+                    deltas);
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryCreateDirectStableJoinPlan(
+            VoiceDedicatedGroupParticipant candidate,
+            VoiceDedicatedGroupParticipant connectedPeer,
+            out VoiceDedicatedStableGroupMergePlan selectedPlan)
+        {
+            if (IsParticipantInAnySession(candidate))
+            {
+                selectedPlan = null;
+                return false;
+            }
+
+            List<RuntimeSession> orderedSessions = CreateOrderedRuntimeSessions();
+            orderedSessions.Sort(CompareStableMergeTargets);
+            IReadOnlyList<VoiceDedicatedGroupSessionSnapshot> snapshots =
+                CreateSnapshots(orderedSessions);
+            VoiceDedicatedGroupPairGraph pairGraph = CreatePairGraph();
+
+            for (int index = 0; index < orderedSessions.Count; index += 1)
+            {
+                RuntimeSession target = orderedSessions[index];
+                if (!target.Contains(connectedPeer) || target.Contains(candidate))
+                {
+                    continue;
+                }
+
+                string previousTarget;
+                if (!previousTargetByParticipantKey.TryGetValue(
+                        candidate.IdentityKey,
+                        out previousTarget))
+                {
+                    previousTarget = target.SessionId;
+                }
+
+                VoiceDedicatedStableGroupMergePlan plan;
+                if (!mergePlanner.TryCreatePlan(
+                        candidate,
+                        snapshots,
+                        pairGraph,
+                        previousTarget,
+                        out plan) ||
+                    !string.Equals(
+                        plan.TargetSessionId,
+                        target.SessionId,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    plan.SecondarySessionIdsToBurn.Count != 0)
+                {
+                    continue;
+                }
+
+                selectedPlan = plan;
+                return true;
+            }
+
+            selectedPlan = null;
+            return false;
+        }
+
+        private bool IsParticipantInAnySession(
+            VoiceDedicatedGroupParticipant participant)
+        {
+            foreach (RuntimeSession session in sessionsById.Values)
+            {
+                if (session.Contains(participant)) return true;
+            }
+
+            return false;
+        }
+
+        private static VoiceDedicatedGroupParticipant
+            CreateParticipantFromPairEndpoint(
+                VoiceDedicatedParticipantPair pair,
+                bool first)
+        {
+            return new VoiceDedicatedGroupParticipant(
+                pair.ServerId,
+                pair.RoomId,
+                first ? pair.FirstUserId : pair.SecondUserId,
+                first ? pair.FirstConnectionId : pair.SecondConnectionId);
+        }
+
+        private void MarkDirectJoinPairKeys(
+            VoiceDedicatedStableGroupMergePlan plan,
+            HashSet<string> topologyTransitionPairKeys)
+        {
+            RuntimeSession target;
+            if (!sessionsById.TryGetValue(plan.TargetSessionId, out target))
+            {
+                return;
+            }
+
+            for (int index = 0; index < target.Members.Count; index += 1)
+            {
+                VoiceDedicatedParticipantPair pair = CreatePair(
+                    plan.JoiningMember,
+                    target.Members[index].Participant);
+                topologyTransitionPairKeys.Add(pair.PairKey);
             }
         }
 
@@ -940,6 +1920,7 @@ namespace Network_A.Voice.Dedicated
 
             sessionsById.Add(session.SessionId, session);
             sessionIdByPairKey.Add(pair.PairKey, session.SessionId);
+            RefreshSessionPosition(session, effectiveAtMs, true);
         }
 
         private void AddMemberToSession(
@@ -974,6 +1955,8 @@ namespace Network_A.Voice.Dedicated
 
                 sessionIdByPairKey[pair.PairKey] = session.SessionId;
             }
+
+            RefreshSessionPosition(session, effectiveAtMs, true);
         }
 
         private void RemoveMemberFromSession(
@@ -1000,9 +1983,17 @@ namespace Network_A.Voice.Dedicated
 
             session.Remove(participant);
             session.RefreshAnchorPair();
+            RefreshSessionPosition(session, session.LastEffectiveAtMs, true);
         }
 
         private void RemoveAndBurnSession(RuntimeSession session)
+        {
+            RemoveAndBurnSession(session, false);
+        }
+
+        private void RemoveAndBurnSession(
+            RuntimeSession session,
+            bool blockFormerPairReentryUntilOutside)
         {
             for (int firstIndex = 0;
                  firstIndex < session.Members.Count;
@@ -1023,6 +2014,13 @@ namespace Network_A.Voice.Dedicated
                             StringComparison.OrdinalIgnoreCase))
                     {
                         sessionIdByPairKey.Remove(pair.PairKey);
+                    }
+
+                    pendingSessionMemberPairsByPairKey.Remove(pair.PairKey);
+
+                    if (blockFormerPairReentryUntilOutside)
+                    {
+                        blockedGroupExitPairKeys.Add(pair.PairKey);
                     }
                 }
             }
@@ -1045,7 +2043,10 @@ namespace Network_A.Voice.Dedicated
 
             for (int index = 0; index < removals.Count; index += 1)
             {
-                edgesByPairKey.Remove(removals[index]);
+                string pairKey = removals[index];
+                edgesByPairKey.Remove(pairKey);
+                pendingSessionMemberPairsByPairKey.Remove(pairKey);
+                blockedGroupExitPairKeys.Remove(pairKey);
             }
         }
 
@@ -1064,6 +2065,18 @@ namespace Network_A.Voice.Dedicated
             }
 
             return new VoiceDedicatedGroupPairGraph(edges);
+        }
+
+        private void ReleaseBlockedPairsWithOutsideEvidence(
+            HashSet<string> outsidePairKeys)
+        {
+            if (outsidePairKeys == null || outsidePairKeys.Count == 0) return;
+            if (blockedGroupExitPairKeys.Count == 0) return;
+
+            foreach (string pairKey in outsidePairKeys)
+            {
+                blockedGroupExitPairKeys.Remove(pairKey);
+            }
         }
 
         private List<RuntimeSession> CreateOrderedRuntimeSessions()
@@ -1319,6 +2332,79 @@ namespace Network_A.Voice.Dedicated
             }
         }
 
+        private sealed class PendingSessionMemberPair
+        {
+            public VoiceDedicatedParticipantPair Pair { get; private set; }
+            public string SuggestedSessionId { get; private set; }
+            public long LastProgressAtMs { get; private set; }
+            public float LastSessionDistanceMeters { get; private set; }
+            public bool HasSessionDistance { get; private set; }
+
+            public PendingSessionMemberPair(
+                VoiceDedicatedParticipantPair pair,
+                string suggestedSessionId,
+                long firstSeenAtMs)
+            {
+                if (string.IsNullOrWhiteSpace(suggestedSessionId))
+                {
+                    throw new ArgumentException(
+                        "A pending Voice pair requires its original SessionId.",
+                        "suggestedSessionId");
+                }
+
+                Pair = pair;
+                SuggestedSessionId = suggestedSessionId.Trim();
+                LastProgressAtMs = firstSeenAtMs;
+                LastSessionDistanceMeters = float.MaxValue;
+                HasSessionDistance = false;
+            }
+
+            public void ObserveSessionDistance(
+                float distanceMeters,
+                long effectiveAtMs)
+            {
+                if (!HasSessionDistance)
+                {
+                    LastSessionDistanceMeters = distanceMeters;
+                    LastProgressAtMs = effectiveAtMs;
+                    HasSessionDistance = true;
+                    return;
+                }
+
+                if (LastSessionDistanceMeters - distanceMeters >=
+                    SessionPositionProgressResetDistanceMeters)
+                {
+                    LastProgressAtMs = effectiveAtMs;
+                }
+
+                LastSessionDistanceMeters = distanceMeters;
+            }
+        }
+
+        private sealed class RuntimeParticipantPosition
+        {
+            public VoiceDedicatedGroupParticipant Participant { get; private set; }
+            public float X { get; private set; }
+            public float Y { get; private set; }
+            public float Z { get; private set; }
+            public long EffectiveAtMs { get; private set; }
+
+            public RuntimeParticipantPosition(
+                VoiceDedicatedGroupParticipant participant,
+                float x,
+                float y,
+                float z,
+                long effectiveAtMs)
+            {
+                if (participant == null) throw new ArgumentNullException("participant");
+                Participant = participant;
+                X = x;
+                Y = y;
+                Z = z;
+                EffectiveAtMs = effectiveAtMs;
+            }
+        }
+
         private sealed class RuntimeMember
         {
             public VoiceDedicatedGroupParticipant Participant { get; private set; }
@@ -1340,6 +2426,11 @@ namespace Network_A.Voice.Dedicated
             public List<RuntimeMember> Members { get; private set; }
             public float LastDistanceMeters;
             public long LastEffectiveAtMs;
+            public bool HasSessionPosition { get; private set; }
+            public float SessionPositionX { get; private set; }
+            public float SessionPositionY { get; private set; }
+            public float SessionPositionZ { get; private set; }
+            public long LastSessionPositionUpdateAtMs { get; private set; }
             public long CreatedOrder { get; private set; }
             private int nextJoinOrder;
 
@@ -1355,6 +2446,11 @@ namespace Network_A.Voice.Dedicated
                 LastDistanceMeters = distanceMeters;
                 LastEffectiveAtMs = effectiveAtMs;
                 CreatedOrder = createdOrder;
+                HasSessionPosition = false;
+                SessionPositionX = 0.0f;
+                SessionPositionY = 0.0f;
+                SessionPositionZ = 0.0f;
+                LastSessionPositionUpdateAtMs = 0L;
                 Members = new List<RuntimeMember>
                 {
                     new RuntimeMember(
@@ -1373,6 +2469,19 @@ namespace Network_A.Voice.Dedicated
                         1)
                 };
                 nextJoinOrder = 2;
+            }
+
+            public void SetSessionPosition(
+                float x,
+                float y,
+                float z,
+                long effectiveAtMs)
+            {
+                SessionPositionX = x;
+                SessionPositionY = y;
+                SessionPositionZ = z;
+                LastSessionPositionUpdateAtMs = effectiveAtMs;
+                HasSessionPosition = true;
             }
 
             public bool Contains(VoiceDedicatedGroupParticipant participant)

@@ -18,12 +18,20 @@ namespace Network_A.Voice.Dedicated
             "33333333-3333-4333-8333-333333333333";
         private const string SessionAcReformed =
             "44444444-4444-4444-8444-444444444444";
+        private const string SessionDe =
+            "55555555-5555-4555-8555-555555555555";
 
         [MenuItem("Tools/Network A/Voice/Run G5 Group Topology Runtime Integration Test")]
         public static void RunFromEditorMenu()
         {
             try
             {
+                TestTwoPersonBaselineEnterAndExitUnchanged();
+                TestSameTickThirdMemberJoinsWithoutTransientPairs();
+                TestSequentialThirdMemberConvergenceDoesNotPublishTransientPair();
+                TestSequentialThirdMemberMissingEdgeDoesNotPublishTransientPair();
+                TestThirdMemberSingleNearWaitsForGraceBeforeRealPair();
+                TestDeferredThirdMemberFallsBackToRealPair();
                 TestPairToGroupMergeAndStableIdentity();
                 TestSingleInternalEdgeDoesNotEvictMember();
                 TestMemberLeavesAfterAllGroupEdgesExit();
@@ -33,6 +41,11 @@ namespace Network_A.Voice.Dedicated
                 TestAuthoritativeParticipantRemovalCleansEverySession();
 
                 Debug.Log("VOICE_G5_5_RUNTIME_PAIR_BASELINE=PASS");
+                Debug.Log("VOICE_G5_5_RUNTIME_THIRD_MEMBER_DIRECT_JOIN=PASS");
+                Debug.Log("VOICE_G5_5_RUNTIME_SEQUENTIAL_GROUP_CONVERGENCE=PASS");
+                Debug.Log("VOICE_G5_5_RUNTIME_MISSING_EDGE_DEFERS_TRANSIENT_PAIR=PASS");
+                Debug.Log("VOICE_G5_5_RUNTIME_SINGLE_NEAR_GRACE_BEFORE_PAIR=PASS");
+                Debug.Log("VOICE_G5_5_RUNTIME_RADIUS_JOIN_NO_TRANSIENT_PAIR=PASS");
                 Debug.Log("VOICE_G5_5_RUNTIME_STABLE_GROUP_MERGE=PASS");
                 Debug.Log("VOICE_G5_5_RUNTIME_STABLE_DISTANCE_ROUTING=PASS");
                 Debug.Log("VOICE_G5_5_RUNTIME_SINGLE_INTERNAL_EDGE_NO_EVICTION=PASS");
@@ -51,6 +64,283 @@ namespace Network_A.Voice.Dedicated
 
                 throw;
             }
+        }
+
+        private static void TestTwoPersonBaselineEnterAndExitUnchanged()
+        {
+            long sourceSequence = 0;
+            VoiceDedicatedGroupTopologyRuntime runtime =
+                new VoiceDedicatedGroupTopologyRuntime();
+            VoiceDedicatedGroupParticipant participantD = CreateParticipant("d");
+            VoiceDedicatedGroupParticipant participantE = CreateParticipant("e");
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> enterDeltas = Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantD, participantE, SessionDe, 2.0f, 1000));
+
+            Require(
+                enterDeltas.Count == 1 &&
+                enterDeltas[0].type == "session_created" &&
+                string.Equals(
+                    enterDeltas[0].sessionId,
+                    SessionDe,
+                    StringComparison.Ordinal) &&
+                runtime.ActiveSessionCount == 1,
+                "Two-person baseline enter was changed by group convergence logic.");
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> exitDeltas = Apply(
+                runtime,
+                ref sourceSequence,
+                Exit(participantD, participantE, 3.6f, 2000));
+
+            Require(
+                exitDeltas.Count == 1 &&
+                exitDeltas[0].type == "member_left" &&
+                runtime.ActiveSessionCount == 0,
+                "Two-person baseline exit no longer closes the Session completely.");
+        }
+
+        private static void TestSameTickThirdMemberJoinsWithoutTransientPairs()
+        {
+            long sourceSequence = 0;
+            VoiceDedicatedGroupTopologyRuntime runtime =
+                new VoiceDedicatedGroupTopologyRuntime();
+            VoiceDedicatedGroupParticipant participantA = CreateParticipant("a");
+            VoiceDedicatedGroupParticipant participantB = CreateParticipant("b");
+            VoiceDedicatedGroupParticipant participantC = CreateParticipant("c");
+
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantB, SessionAb, 2.0f, 1000));
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> deltas = Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantC, SessionAc, 2.4f, 2000),
+                Enter(participantB, participantC, SessionBc, 2.6f, 2000));
+
+            Require(
+                deltas.Count == 1 &&
+                deltas[0].type == "member_joined" &&
+                string.Equals(
+                    deltas[0].sessionId,
+                    SessionAb,
+                    StringComparison.Ordinal),
+                "Third-member same-tick convergence published a transient pair Session.");
+            Require(
+                runtime.ActiveSessionCount == 1 &&
+                runtime.ActiveGroupSessionCount == 1,
+                "Third-member same-tick convergence did not preserve one stable group Session.");
+            RequirePairSession(runtime, participantA, participantC, SessionAb);
+            RequirePairSession(runtime, participantB, participantC, SessionAb);
+        }
+
+        private static void TestSequentialThirdMemberConvergenceDoesNotPublishTransientPair()
+        {
+            long sourceSequence = 0;
+            VoiceDedicatedGroupTopologyRuntime runtime =
+                new VoiceDedicatedGroupTopologyRuntime();
+            VoiceDedicatedGroupParticipant participantA = CreateParticipant("a");
+            VoiceDedicatedGroupParticipant participantB = CreateParticipant("b");
+            VoiceDedicatedGroupParticipant participantC = CreateParticipant("c");
+
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantB, SessionAb, 2.0f, 1000));
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> firstTick = Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantC, SessionAc, 2.4f, 2000),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.EnterPending,
+                    2.6f,
+                    2000));
+
+            Require(
+                firstTick.Count == 1 &&
+                firstTick[0].type == "member_joined" &&
+                string.Equals(
+                    firstTick[0].sessionId,
+                    SessionAb,
+                    StringComparison.Ordinal),
+                "A third member inside the 3m radius of all Session members did not join the stable Session directly.");
+            Require(
+                runtime.ActiveSessionCount == 1 &&
+                runtime.ActiveGroupSessionCount == 1,
+                "Radius-based third-member join left a transient Session active.");
+            RequirePairSession(runtime, participantA, participantC, SessionAb);
+            RequirePairSession(runtime, participantB, participantC, SessionAb);
+        }
+
+        private static void TestSequentialThirdMemberMissingEdgeDoesNotPublishTransientPair()
+        {
+            long sourceSequence = 0;
+            VoiceDedicatedGroupTopologyRuntime runtime =
+                new VoiceDedicatedGroupTopologyRuntime();
+            VoiceDedicatedGroupParticipant participantA = CreateParticipant("a");
+            VoiceDedicatedGroupParticipant participantB = CreateParticipant("b");
+            VoiceDedicatedGroupParticipant participantC = CreateParticipant("c");
+
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantB, SessionAb, 2.0f, 1000));
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> firstTick = Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantC, SessionAc, 2.4f, 2000));
+
+            Require(
+                firstTick.Count == 0 &&
+                runtime.ActiveSessionCount == 1,
+                "Missing third-member edge evidence published a transient pair Session.");
+            RequireNoPairSession(runtime, participantA, participantC);
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> secondTick = Apply(
+                runtime,
+                ref sourceSequence,
+                Observe(
+                    participantA,
+                    participantC,
+                    VoiceDedicatedProximityState.Active,
+                    2.4f,
+                    2100),
+                Enter(participantB, participantC, SessionBc, 2.6f, 2100));
+
+            Require(
+                secondTick.Count == 1 &&
+                secondTick[0].type == "member_joined" &&
+                string.Equals(
+                    secondTick[0].sessionId,
+                    SessionAb,
+                    StringComparison.Ordinal),
+                "Missing-edge third-member convergence did not join directly into the stable Session.");
+            Require(
+                runtime.ActiveSessionCount == 1 &&
+                runtime.ActiveGroupSessionCount == 1,
+                "Missing-edge third-member convergence left a transient Session active.");
+        }
+
+        private static void TestThirdMemberSingleNearWaitsForGraceBeforeRealPair()
+        {
+            long sourceSequence = 0;
+            VoiceDedicatedGroupTopologyRuntime runtime =
+                new VoiceDedicatedGroupTopologyRuntime();
+            VoiceDedicatedGroupParticipant participantA = CreateParticipant("a");
+            VoiceDedicatedGroupParticipant participantB = CreateParticipant("b");
+            VoiceDedicatedGroupParticipant participantC = CreateParticipant("c");
+
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantB, SessionAb, 2.0f, 1000));
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> firstTick = Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantC, SessionAc, 2.4f, 2000),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
+                    2000));
+
+            Require(
+                firstTick.Count == 0 &&
+                runtime.ActiveSessionCount == 1,
+                "A session-backed single-near candidate bypassed the group-join grace window.");
+            RequireNoPairSession(runtime, participantA, participantC);
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> beforeGrace = Apply(
+                runtime,
+                ref sourceSequence,
+                Update(participantA, participantC, 2.4f, 2299),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
+                    2299));
+
+            Require(
+                beforeGrace.Count == 0 &&
+                runtime.ActiveSessionCount == 1,
+                "A session-backed pair was created before the 300ms group-join grace expired.");
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> afterGrace = Apply(
+                runtime,
+                ref sourceSequence,
+                Update(participantA, participantC, 2.4f, 2301),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
+                    2301));
+
+            Require(
+                afterGrace.Count == 1 &&
+                afterGrace[0].type == "session_created" &&
+                string.Equals(
+                    afterGrace[0].sessionId,
+                    SessionAc,
+                    StringComparison.Ordinal),
+                "A true single-near third participant did not create a real pair after grace.");
+            Require(
+                runtime.ActiveSessionCount == 2 &&
+                runtime.ActiveGroupSessionCount == 0,
+                "Single-near third participant changed the existing pair baseline.");
+            RequirePairSession(runtime, participantA, participantC, SessionAc);
+            RequireNoPairSession(runtime, participantB, participantC);
+        }
+
+        private static void TestDeferredThirdMemberFallsBackToRealPair()
+        {
+            long sourceSequence = 0;
+            VoiceDedicatedGroupTopologyRuntime runtime =
+                new VoiceDedicatedGroupTopologyRuntime();
+            VoiceDedicatedGroupParticipant participantA = CreateParticipant("a");
+            VoiceDedicatedGroupParticipant participantB = CreateParticipant("b");
+            VoiceDedicatedGroupParticipant participantC = CreateParticipant("c");
+
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantB, SessionAb, 2.0f, 1000));
+
+            IReadOnlyList<VoiceDedicatedSessionDelta> radiusTick = Apply(
+                runtime,
+                ref sourceSequence,
+                Enter(participantA, participantC, SessionAc, 2.4f, 2000),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.EnterPending,
+                    2.8f,
+                    2000));
+
+            Require(
+                radiusTick.Count == 1 &&
+                radiusTick[0].type == "member_joined" &&
+                string.Equals(
+                    radiusTick[0].sessionId,
+                    SessionAb,
+                    StringComparison.Ordinal),
+                "A third member inside every 3m member radius created or deferred a transient pair.");
+            Require(
+                runtime.ActiveSessionCount == 1 &&
+                runtime.ActiveGroupSessionCount == 1,
+                "Radius-based group join did not preserve exactly one active group Session.");
+            RequirePairSession(runtime, participantA, participantC, SessionAb);
+            RequirePairSession(runtime, participantB, participantC, SessionAb);
         }
 
         private static void TestPairToGroupMergeAndStableIdentity()
@@ -72,7 +362,23 @@ namespace Network_A.Voice.Dedicated
             Apply(
                 runtime,
                 ref sourceSequence,
-                Enter(participantA, participantC, SessionAc, 1.5f, 2000));
+                Enter(participantA, participantC, SessionAc, 1.5f, 2000),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
+                    2000));
+            Apply(
+                runtime,
+                ref sourceSequence,
+                Update(participantA, participantC, 1.5f, 2310),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
+                    2310));
 
             IReadOnlyList<VoiceDedicatedSessionDelta> mergeDeltas = Apply(
                 runtime,
@@ -318,7 +624,13 @@ namespace Network_A.Voice.Dedicated
             Apply(
                 runtime,
                 ref sourceSequence,
-                Enter(participantA, participantC, SessionAc, 2.5f, 2000));
+                Enter(participantA, participantC, SessionAc, 2.5f, 2000),
+                Observe(
+                    participantB,
+                    participantC,
+                    VoiceDedicatedProximityState.Outside,
+                    3.2f,
+                    2000));
             Apply(
                 runtime,
                 ref sourceSequence,
@@ -375,6 +687,22 @@ namespace Network_A.Voice.Dedicated
                 VoiceDedicatedProximityState.Active,
                 VoiceDedicatedProximityDecisionType.SessionCreated,
                 sessionId,
+                distanceMeters,
+                effectiveAtMs);
+        }
+
+        private static VoiceDedicatedTopologyPairObservation Observe(
+            VoiceDedicatedGroupParticipant first,
+            VoiceDedicatedGroupParticipant second,
+            VoiceDedicatedProximityState state,
+            float distanceMeters,
+            long effectiveAtMs)
+        {
+            return new VoiceDedicatedTopologyPairObservation(
+                CreatePair(first, second),
+                state,
+                VoiceDedicatedProximityDecisionType.None,
+                string.Empty,
                 distanceMeters,
                 effectiveAtMs);
         }

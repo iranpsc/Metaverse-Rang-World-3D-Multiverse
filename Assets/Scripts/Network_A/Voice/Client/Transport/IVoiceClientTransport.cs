@@ -1,6 +1,9 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+#if UNITY_WEBGL && !UNITY_EDITOR
+using Network_A.Voice.Client.Transport.WebGL;
+#endif
 
 namespace Network_A.Voice.Client.Transport
 {
@@ -24,7 +27,7 @@ namespace Network_A.Voice.Client.Transport
         public static IVoiceClientTransport CreateForCurrentPlatform()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            return new VoiceWebGlSocketTransport();
+            return new VoiceWebGLControlReadyTransportAdapter();
 #else
             return new VoiceGrpcClientTransport();
 #endif
