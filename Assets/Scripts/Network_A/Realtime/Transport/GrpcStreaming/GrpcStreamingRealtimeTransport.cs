@@ -16,6 +16,7 @@ namespace Network_A.Realtime.Transport
     {
         private const string RealtimeServiceName = "metaverse.v1.realtime.RealtimeStreamService";
         private const string RealtimeOpenMethodName = "Open";
+        private const int ConnectReadinessTimeoutMs = 9000;
         private const int CleanupTimeoutMs = 2000;
 
 #if !UNITY_WEBGL || UNITY_EDITOR
@@ -26,6 +27,7 @@ namespace Network_A.Realtime.Transport
         private AsyncDuplexStreamingCall<RealtimeRawJsonFrame, RealtimeRawJsonFrame> streamCall;
 #endif
 
+        private readonly SemaphoreSlim sendLock = new SemaphoreSlim(1, 1);
         private CancellationTokenSource connectionCts;
         private RealtimeTransportState state = RealtimeTransportState.Disconnected;
         private bool isDisconnecting;
@@ -72,6 +74,7 @@ namespace Network_A.Realtime.Transport
                 ChannelCredentials credentials = ResolveChannelCredentials(url);
 
                 channel = new Channel(target, credentials);
+                await WaitForChannelReadyAsync(channel, connectionCts.Token);
                 callInvoker = channel.CreateCallInvoker();
 
                 Method<RealtimeRawJsonFrame, RealtimeRawJsonFrame> method = new Method<RealtimeRawJsonFrame, RealtimeRawJsonFrame>(
@@ -91,15 +94,18 @@ namespace Network_A.Realtime.Transport
                 Connected?.Invoke();
                 _ = ReceiveLoopAsync(connectionCts.Token);
 
-                Debug.Log("[GrpcStreamingRealtimeTransport] Connected to " + target);
+                Debug.Log("[GrpcStreamingRealtimeTransport] Channel ready and stream opened to " + target);
                 return true;
             }
             catch (OperationCanceledException)
             {
-                return FailConnect("gRPC streaming connect canceled.");
+                bool cancelledByCaller = cancellationToken.IsCancellationRequested;
+                await CleanupStreamAsync("gRPC streaming connect cancelled", CancellationToken.None, false);
+                return FailConnect(cancelledByCaller ? "gRPC streaming connect canceled." : "gRPC streaming channel readiness timed out.");
             }
             catch (Exception ex)
             {
+                await CleanupStreamAsync("gRPC streaming connect failed", CancellationToken.None, false);
                 return FailConnect("gRPC streaming connect failed: " + ex.Message);
             }
 #endif
@@ -116,9 +122,17 @@ namespace Network_A.Realtime.Transport
 #else
             if (!IsConnected || streamCall == null) return false;
 
+            bool lockTaken = false;
+            bool shouldCloseStream = false;
+
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                await sendLock.WaitAsync(cancellationToken);
+                lockTaken = true;
+
+                if (!IsConnected || streamCall == null) return false;
+
                 await streamCall.RequestStream.WriteAsync(RealtimeRawJsonFrame.FromRawJson(message));
                 return true;
             }
@@ -130,9 +144,15 @@ namespace Network_A.Realtime.Transport
             catch (Exception ex)
             {
                 ErrorReceived?.Invoke("gRPC streaming send failed: " + ex.Message);
-                await HandleRemoteCloseAsync("gRPC streaming send failed", CancellationToken.None);
-                return false;
+                shouldCloseStream = true;
             }
+            finally
+            {
+                if (lockTaken) sendLock.Release();
+            }
+
+            if (shouldCloseStream) await HandleRemoteCloseAsync("gRPC streaming send failed", CancellationToken.None);
+            return false;
 #endif
         }
 
@@ -380,6 +400,30 @@ namespace Network_A.Realtime.Transport
         }
 
 #if !UNITY_WEBGL || UNITY_EDITOR
+        //* این تابع تا زمانی که کانال جی‌آر‌پی‌سی واقعاً به وضعیت آماده برسد منتظر می‌ماند.
+        private static async Task WaitForChannelReadyAsync(Channel channelToConnect, CancellationToken cancellationToken)
+        {
+            if (channelToConnect == null) throw new InvalidOperationException("gRPC channel is null.");
+
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(ConnectReadinessTimeoutMs);
+            Task connectTask = channelToConnect.ConnectAsync(deadline);
+            Task cancellationTask = Task.Delay(Timeout.Infinite, cancellationToken);
+            Task completedTask = await Task.WhenAny(connectTask, cancellationTask);
+
+            if (completedTask != connectTask)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new TimeoutException("gRPC channel readiness timed out.");
+            }
+
+            await connectTask;
+
+            if (channelToConnect.State != ChannelState.Ready)
+            {
+                throw new InvalidOperationException("gRPC channel did not reach Ready state. state=" + channelToConnect.State);
+            }
+        }
+
         //* یک تسک شبکه‌ای را فقط تا مدت محدود منتظر می‌ماند تا خروج از پلی‌مود یا ریلود دامین قفل نشود.
         private static async Task<bool> WaitForTaskWithTimeoutAsync(Task task, int timeoutMs)
         {
@@ -488,6 +532,14 @@ namespace Network_A.Realtime.Transport
 #else
             SetState(RealtimeTransportState.Disconnected);
 #endif
+            try
+            {
+                sendLock.Dispose();
+            }
+            catch
+            {
+                // دیسپوز قفل ارسال نباید خطای ثانویه بسازد.
+            }
         }
     }
 }

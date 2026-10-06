@@ -18,7 +18,8 @@ namespace Network_A.Auth
         public static string ClientVersion = "1.0.0";
         public static int TimeoutSeconds = 15;
         public static string RealtimeWebSocketPath = "/ws";
-
+        // public static string CompletedBuildingsUrl = "https://api.metarang.com/api/features/buildings/completed";
+        public static string CompletedBuildingsUrl = "https://dev-world-3d.metarang.com/completed-buildings.json";
         #region gRPC Streaming Realtime
 
         public static Endpoint RealtimeGrpcStreamingEndpoint = new Endpoint("localhost", 50051, false);
@@ -131,6 +132,12 @@ namespace Network_A.Auth
         public static void UseRealtimeWebSocketPath(string path)
         {
             RealtimeWebSocketPath = NormalizePath(path, "/ws");
+        }
+
+        //* نشانی دریافت ساختمان‌های تکمیل‌شده را به شکل مرکزی و بدون وابستگی به رابط کاربری تغییر می‌دهد.
+        public static void UseCompletedBuildingsUrl(string url)
+        {
+            if (!string.IsNullOrWhiteSpace(url)) CompletedBuildingsUrl = url.Trim();
         }
 
         //* Builds a gRPC-Web unary URL for Envoy.

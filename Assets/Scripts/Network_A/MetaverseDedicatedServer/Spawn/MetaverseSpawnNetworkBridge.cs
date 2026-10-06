@@ -160,7 +160,7 @@ public class MetaverseSpawnNetworkBridge : MonoBehaviour
             return;
         }
 
-        MetaverseSpawnPayload[] payloads = spawnManager.BuildSnapshotPayloads();
+        MetaverseSpawnPayload[] payloads = spawnManager.BuildSnapshotPayloads(ResolveRoomId(roomId));
         string json = MetaverseSpawnMessageCodec.CreateSpawnSnapshotEnvelopeJson(payloads, ResolveRoomId(roomId));
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -190,13 +190,13 @@ public class MetaverseSpawnNetworkBridge : MonoBehaviour
             return;
         }
 
-        List<MetaverseNetworkIdentity> identities = spawnManager.GetSpawnedObjects();
+        List<MetaverseNetworkIdentity> identities = spawnManager.GetSpawnedObjects(ResolveRoomId(roomId));
         int sentCount = 0;
         for (int i = 0; i < identities.Count; i++)
         {
             MetaverseSpawnPayload payload = spawnManager.BuildPayload(identities[i], "emit_existing_spawns", MetaverseSpawnMessageCodec.MirrorSpawnRoute);
             if (payload == null) continue;
-            string json = MetaverseSpawnMessageCodec.CreateSpawnEnvelopeJson(payload, ResolveRoomId(roomId));
+            string json = MetaverseSpawnMessageCodec.CreateSpawnEnvelopeJson(payload, ResolveRoomId(!string.IsNullOrWhiteSpace(roomId) ? roomId : (identities[i] != null ? identities[i].RoomId : string.Empty)));
             if (!string.IsNullOrWhiteSpace(json))
             {
                 send.Invoke(json);
@@ -210,7 +210,7 @@ public class MetaverseSpawnNetworkBridge : MonoBehaviour
     {
         if (identity == null || spawnManager == null) return false;
         MetaverseSpawnPayload payload = spawnManager.BuildPayload(identity, "manual_emit_spawn", MetaverseSpawnMessageCodec.MirrorSpawnRoute);
-        string json = MetaverseSpawnMessageCodec.CreateSpawnEnvelopeJson(payload, ResolveRoomId(roomId));
+        string json = MetaverseSpawnMessageCodec.CreateSpawnEnvelopeJson(payload, ResolveRoomId(!string.IsNullOrWhiteSpace(roomId) ? roomId : identity.RoomId));
         if (string.IsNullOrWhiteSpace(json)) return false;
         OutboundMessageReady?.Invoke(json);
         return true;
@@ -304,7 +304,7 @@ public class MetaverseSpawnNetworkBridge : MonoBehaviour
         LastOutboundRejectReason = string.Empty;
         if (!emitServerSpawnMessages || payload == null) return;
         string roomId = includeRoomIdInOutboundMessages ? payload.roomId : string.Empty;
-        string json = MetaverseSpawnMessageCodec.CreateSpawnEnvelopeJson(payload, ResolveRoomId(roomId));
+        string json = MetaverseSpawnMessageCodec.CreateSpawnEnvelopeJson(payload, ResolveRoomId(!string.IsNullOrWhiteSpace(roomId) ? roomId : (identity != null ? identity.RoomId : string.Empty)));
         if (string.IsNullOrWhiteSpace(json))
         {
             RejectOutbound("spawn_json_empty");
@@ -318,7 +318,7 @@ public class MetaverseSpawnNetworkBridge : MonoBehaviour
     {
         LastOutboundRejectReason = string.Empty;
         if (!emitServerDespawnMessages || identity == null) return;
-        string json = MetaverseSpawnMessageCodec.CreateDespawnEnvelopeJson(identity.NetId, reason, includeRoomIdInOutboundMessages ? MetaverseNetworkClient.roomId : string.Empty);
+        string json = MetaverseSpawnMessageCodec.CreateDespawnEnvelopeJson(identity.NetId, reason, includeRoomIdInOutboundMessages ? (!string.IsNullOrWhiteSpace(identity.RoomId) ? identity.RoomId : MetaverseNetworkClient.roomId) : string.Empty);
         if (string.IsNullOrWhiteSpace(json))
         {
             RejectOutbound("despawn_json_empty");

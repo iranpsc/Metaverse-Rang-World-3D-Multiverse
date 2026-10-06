@@ -47,8 +47,9 @@ namespace Network_A.Tests.Realtime
         [SerializeField] private int accessTokenRefreshSkewSeconds = 60;
 
         [Header("Keep Alive")]
-        [SerializeField] private bool enableTestKeepAlive = false;
-        [SerializeField] private int keepAliveIntervalMs = 5000;
+        [SerializeField] private bool enableTestKeepAlive = true;
+        [SerializeField] private int keepAliveIntervalMs = 3000;
+        [SerializeField] private int keepAlivePingTimeoutMs = 3000;
         [SerializeField] private bool monitorRealtimeConnectionDropInUpdate = true;
 
         [Header("UI")]
@@ -68,13 +69,31 @@ namespace Network_A.Tests.Realtime
         [SerializeField] private bool disableSendButtonWhenMessageInputEmpty = true;
         [SerializeField] private int minimumRoomNameCharactersToEnableCreateButton = 8;
 
-        [Header("Server Debug Failure UI")]
+        [Header("Server Debug Progress UI")]
         [SerializeField] private GameObject pnlServerDebug;
-        [SerializeField] private TextMeshProUGUI serverDebugMessageText;
+        [SerializeField] private TextMeshProUGUI txtServerDebugTitle;
+        [SerializeField] private TextMeshProUGUI txtServerDebugMessage;
+        [SerializeField] private TextMeshProUGUI txtServerDebugTechnical;
+        [SerializeField] private Button btnServerDebugClose;
+        [SerializeField] private Button btnServerDebugRetry;
+        [SerializeField] private Button btnServerDebugRelogin;
+        private bool serverDebugButtonHandlersBound;
+        private string lastRealtimeServerDebugStage = string.Empty;
         [SerializeField] private bool autoFindServerDebugPanelByName = true;
         [SerializeField] private string serverDebugPanelObjectName = "Pnl_ServerDebug";
+        [SerializeField] private bool openServerDebugPanelOnRealtimeConnectProgress = true;
         [SerializeField] private bool openServerDebugPanelOnRealtimeConnectFailure = true;
         [SerializeField] private bool closeServerDebugPanelOnRealtimeConnectSuccess = false;
+        [SerializeField] private bool hideServerDebugCloseWhileRealtimeConnectRunning = true;
+        [SerializeField] private string realtimeConnectProgressTitle = "اتصال به Realtime";
+        [SerializeField] private string gameServerReconnectProgressTitle = "اتصال به گیم سرور";
+        [SerializeField] private string realtimeConnectPreparingMessage = "در حال آماده‌سازی اتصال به Realtime...";
+        [SerializeField] private string realtimeTokenCheckingMessage = "در حال بررسی نشست کاربر برای اتصال Realtime...";
+        [SerializeField] private string realtimeTokenRefreshingMessage = "نشست کاربر برای اتصال Realtime در حال تمدید است...";
+        [SerializeField] private string realtimeSocketConnectingMessage = "در حال باز کردن اتصال شبکه Realtime...";
+        [SerializeField] private string realtimeAuthenticatingMessage = "اتصال شبکه برقرار شد. در حال احراز هویت Realtime...";
+        [SerializeField] private string realtimeRoomSyncMessage = "در حال هماهنگ‌سازی وضعیت روم‌های Realtime...";
+        [SerializeField] private string realtimeConnectSuccessDebugMessage = "اتصال به Realtime با موفقیت انجام شد.";
         [SerializeField] private string realtimeConnectFailureDebugMessage = "اتصال به Realtime انجام نشد. لطفاً دوباره تلاش کنید.";
         [Header("Room List UI")]
         [SerializeField] private Transform roomListContent;
@@ -95,12 +114,92 @@ namespace Network_A.Tests.Realtime
         [SerializeField] private bool cleanupSharedWorldAfterPermanentReconnectFailure = true;
         [SerializeField] private float permanentReconnectFailureTimeoutSeconds = 180f;
         [SerializeField] private bool invokeDisconnectedFor3DAfterPermanentReconnectFailure = true;
+        [Header("CheckNet Fast Reconnect Watch")]
+        [SerializeField] private bool enableCheckNetFastReconnectWatch = true;
+        [SerializeField] private float checkNetFastWatchIntervalSeconds = 0.75f;
+        [SerializeField] private int checkNetFastTimeoutMs = 2000;
+        [SerializeField] private int checkNetFastFailuresBeforeDisconnect = 2;
+        [SerializeField] private float dedicatedGameServerInboundAliveProofSeconds = 2.25f;
+        [SerializeField] private bool useSingleCheckNetFailureInsideDedicatedGameServer = true;
 
+        private bool checkNetFastWatchRunning;
+        private float nextCheckNetFastWatchAt;
+        private int checkNetFastConsecutiveFailures;
+        private bool checkNetFastOutageActive;
+        private bool checkNetFastReconnectKickRequested;
+        private bool checkNetFastWarningOnlyPanelActive;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private const string SingleCheckNetFailureTestArgument =
+            "-networkTestSingleCheckNetFailure";
+        private const int SingleCheckNetFailureValidationWindowMs = 2500;
+        private bool networkValidationCommandLineChecked;
+        private bool singleCheckNetFailureTestArmed;
+        private bool singleCheckNetFailureTestRunning;
+        private bool forceNextCheckNetFailureForValidation;
+#endif
+        [Header("Realtime Reconnect Loop")]
+        [SerializeField] private bool enableAutomaticRealtimeReconnect = true;
+        [SerializeField] private bool rejoinLastRoomAfterRealtimeReconnect = true;
+        [SerializeField] private float realtimeReconnectInitialDelaySeconds = 1f;
+        [SerializeField] private float realtimeReconnectMaxDelaySeconds = 8f;
+        [SerializeField] private string realtimeReconnectStartingMessage = "اتصال Realtime قطع شد. در حال تلاش برای اتصال دوباره...";
+        [SerializeField] private string realtimeReconnectAttemptMessage = "در حال تلاش برای اتصال دوباره به Realtime...";
+        [SerializeField] private string realtimeReconnectRejoinRoomMessage = "اتصال Realtime برگشت. در حال ورود دوباره به روم...";
+        [SerializeField] private string realtimeReconnectSuccessMessage = "اتصال دوباره به Realtime انجام شد.";
+        [SerializeField] private string realtimeReconnectPrepareGameServerMessage = "اتصال بلادرنگ برگشت. در حال بازیابی روم و آماده‌سازی اتصال دوباره به گیم سرور...";
+        [SerializeField] private string realtimeReconnectWaitingForGameServerMessage = "روم بازیابی شد. در حال اتصال دوباره به گیم سرور...";
+        [SerializeField] private string realtimeReconnectFailedMessage = "اتصال دوباره به Realtime انجام نشد. از روم خارج شدید. لطفاً دوباره تلاش کنید.";
+        [SerializeField] private bool refreshRoomListAfterRealtimeReconnectWithoutRejoin = true;
+        [Header("Immediate Internet Lost UI")]
+        [SerializeField] private bool showServerDebugPanelImmediatelyOnInternetLost = true;
+        [SerializeField] private string internetLostDebugTitle = "اتصال اینترنت قطع است";
+        [SerializeField] private string internetLostDebugMessage = "اینترنت شما قطع شده است. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
+        [SerializeField] private string realtimeInternetLostImmediateMessage = "اینترنت شما قطع شده است. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
+        [SerializeField] private string checkNetWarningClearedStatusMessage = "اتصال برقرار است.";
+        private const string FixedInternetLostDebugTitle = "اتصال اینترنت قطع است";
+        private const string FixedInternetLostUserMessage = "اینترنت شما قطع شده است. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
+        private const string FixedRealtimeTransportDropDebugTitle = "بازیابی اتصال Realtime";
+        private const string FixedRealtimeTransportDropUserMessage = "ارتباط Realtime موقتاً قطع شد. در حال بازیابی اتصال...";
+        [SerializeField] private bool suppressRealtimeReconnectProgressUiDuringNetworkIssue = true;
+        [SerializeField] private bool suppressPlayerLeftUiDuringRealtimeReconnect = true;
+        [SerializeField] private float playerLeftSuppressSecondsAfterRealtimeReconnect = 30f;
+        [SerializeField] private bool suppressRealtimePlayerLeftUiWhileDedicatedGameServerActive = true;
+        [SerializeField] private bool useAuthoritativeLobbyRoomUpdatedForPresenceCount = true;
+        [SerializeField] private float authoritativeRoomUpdateProtectionSeconds = 2f;
+        [SerializeField] private float dedicatedGameServerPresenceGuardSecondsAfterDisconnect = 60f;
+        [SerializeField] private float realtimeNetworkIssueUiLockSeconds = 45f;
+        [SerializeField] private bool keepInternetLostStatusWhileNetworkIssueUiLocked = true;
+        [SerializeField] private bool enableFastRealtimeTcpConnectivityProbe = false;
+        [SerializeField] private float fastRealtimeConnectivityProbeIntervalSeconds = 0.35f;
+        [SerializeField] private int fastRealtimeConnectivityProbeTimeoutMs = 500;
+        [SerializeField] private bool allowFastRealtimeTcpProbeToStartReconnect = false;
+        [SerializeField] private int fastRealtimeConnectivityProbeFailuresBeforeReconnect = 1;
         [Header("Manual Exit Camera Safety")]
         [SerializeField] private bool detachMainCameraBeforeRuntimeCloneCleanup = true;
         [SerializeField] private Camera mainCameraOverride;
         [SerializeField] private Transform mainCameraSafeParent;
         [SerializeField] private bool keepMainCameraWorldPoseOnDetach = true;
+
+        [Header("Auth Login Ready Realtime Start")]
+        [SerializeField] private bool autoConnectRealtimeAfterAuthLogin = false;
+        [SerializeField] private bool autoListRoomsAfterAuthRealtimeConnect = true;
+        [SerializeField] private bool autoConnectRealtimeOnlyWhenDisconnected = true;
+        [SerializeField] private float autoConnectRealtimeAfterAuthDelaySeconds = 0.1f;
+        private bool immediateInternetLostHandled;
+        private bool internetLostPanelShownForCurrentOutage;
+        private bool fastRealtimeProbeRunning;
+        private float nextFastRealtimeProbeAt;
+        private int consecutiveFastRealtimeProbeFailures;
+        private bool realtimeNetworkIssueUiLocked;
+        private float realtimeNetworkIssueUiLockedUntil;
+        private float suppressPlayerLeftUiUntil;
+        private bool dedicatedGameServerPresenceGuardActive;
+        private float dedicatedGameServerPresenceGuardUntil;
+
+        //* این شمارنده هر بار که یک اتصال ریل‌تایم واقعاً و تازه احراز هویت می‌شود، افزایش پیدا می‌کند.
+        //* هدف این است که نتیجه‌ی دیرهنگام و بی‌اعتبار پروب‌های async (که برای اتصال قدیمی شروع شده بودند)
+        //* بعد از برقراری یک اتصال جدید و سالم، اشتباهاً یک قطعی جعلی/فیک left نسازد.
+        private int connectionGenerationId;
 
         private RealtimeClient realtimeClient;
         private RealtimeAuthClient realtimeAuthClient;
@@ -112,6 +211,9 @@ namespace Network_A.Tests.Realtime
         private TaskCompletionSource<bool> authWaiter;
         private TaskCompletionSource<bool> leaveAckWaiter;
 
+        private string lastHandledGameAckMessageId = string.Empty;
+        private float lastHandledGameAckTime = -1f;
+
         private string activeServerUrl = string.Empty;
         private string activeRoomId = string.Empty;
         private string activeRoomName = string.Empty;
@@ -121,6 +223,7 @@ namespace Network_A.Tests.Realtime
         private bool isJoined;
         private bool eventsBound;
         private bool isCleaningUp;
+        private bool isAutoConnectRealtimeAfterAuthRunning;
         private bool isConnectAndAuthRunning;
         private bool isCreateRoomRunning;
         private bool hasCreateRoomButtonState;
@@ -136,6 +239,9 @@ namespace Network_A.Tests.Realtime
         private bool permanentReconnectFailureCleanupApplied;
         private Coroutine permanentReconnectFailureCleanupCoroutine;
         private string activePermanentReconnectFailureReason = string.Empty;
+        private CancellationTokenSource realtimeReconnectCts;
+        private bool isRealtimeReconnectRunning;
+        private int realtimeReconnectAttemptCount;
 
         private RealtimeRoomDto[] lastListedRooms = Array.Empty<RealtimeRoomDto>();
         private readonly StringBuilder logBuffer = new StringBuilder(4096);
@@ -157,6 +263,9 @@ namespace Network_A.Tests.Realtime
         private readonly List<RealtimeRoomListItemView> roomListItems = new List<RealtimeRoomListItemView>();
         private string lastCreatedRoomId = string.Empty;
         private RealtimeRoomDto joinedRoom;
+        private string lastAuthoritativeLobbyRoomId = string.Empty;
+        private int lastAuthoritativeLobbyOnlineCount = -1;
+        private float lastAuthoritativeLobbyUpdateAt = -1f;
 
         private string currentRealtimeUserId = string.Empty;
         private string currentRealtimeUserName = string.Empty;
@@ -179,6 +288,27 @@ namespace Network_A.Tests.Realtime
         public string CurrentUserName => currentRealtimeUserName;
         public bool IsJoinedRoom => isJoined;
         public bool IsRealtimeReadyState => IsRealtimeReady();
+        public bool IsRealtimeReconnectRunningState => isRealtimeReconnectRunning;
+
+        //* این تابع از بایندر گیم‌سرور صدا زده می‌شود تا وقتی کلاینت واقعاً داخل ددیکیتد گیم‌سرور است،
+        //* رخدادهای player_left قدیمی ریل‌تایم باعث حذف اشتباه پلیرها و پیام left نشوند.
+        public void SetDedicatedGameServerPresenceGuardActive(bool active, string reason)
+        {
+            if (!suppressRealtimePlayerLeftUiWhileDedicatedGameServerActive) return;
+
+            dedicatedGameServerPresenceGuardActive = active;
+
+            if (active)
+            {
+                dedicatedGameServerPresenceGuardUntil = Time.realtimeSinceStartup + Mathf.Max(1f, dedicatedGameServerPresenceGuardSecondsAfterDisconnect);
+            }
+            else
+            {
+                dedicatedGameServerPresenceGuardUntil = Time.realtimeSinceStartup + Mathf.Max(1f, dedicatedGameServerPresenceGuardSecondsAfterDisconnect);
+            }
+
+            Log("Dedicated game server presence guard updated. active=" + active + " | reason=" + SafeText(reason) + " | until=" + dedicatedGameServerPresenceGuardUntil.ToString("F1"));
+        }
 
         public event Action<string> OnRoomJoinedFor3D;
         public event Action<string> OnRoomLeftFor3D;
@@ -218,6 +348,7 @@ namespace Network_A.Tests.Realtime
             activeServerUrl = ResolveRealtimeServerUrl();
             activeRoomName = BuildRoomName();
             AutoResolveServerDebugReferences("Awake");
+            BindServerDebugButtonHandlers("Awake");
             LogUiReferences("Awake");
             UpdateRoomDisplay();
             SetStatus("Ready");
@@ -234,6 +365,8 @@ namespace Network_A.Tests.Realtime
         private void OnEnable()
         {
             LogUiReferences("OnEnable");
+            BindAuthLoginReadyEvent("OnEnable");
+
             BindMessageInputEvents();
             BindRoomNameInputEvents();
             SyncCreateRoomButtonFromRoomInput(true);
@@ -244,6 +377,12 @@ namespace Network_A.Tests.Realtime
 
         private void Update()
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            ProcessSingleCheckNetFailureValidationTest();
+#endif
+            DetectImmediateInternetLostByLocalNetwork();
+            CheckNetFastReconnectWatch();
+            DetectImmediateInternetLostByFastProbe();
             DetectRealtimeConnectionDrop();
             SyncCreateRoomButtonFromRoomInput(false);
             SyncSendMessageButtonFromMessageInput(false);
@@ -255,6 +394,7 @@ namespace Network_A.Tests.Realtime
         {
             try
             {
+                UnbindAuthLoginReadyEvent();
                 ReleaseForDestroyWithoutNetworkAwait();
             }
             catch (Exception ex)
@@ -266,22 +406,31 @@ namespace Network_A.Tests.Realtime
         public async void ConnectAndAuthButton()
         {
             if (isConnectAndAuthRunning) return;
+            if (!CanStartNormalRealtimeConnectNow("connect_and_auth_button")) return;
+
+            isUserRequestedExitFlow = false;
+            manualExitWorldCleanupApplied = false;
+            permanentReconnectFailureCleanupApplied = false;
+            transportDropAlreadyHandled = false;
 
             isConnectAndAuthRunning = true;
+            ShowServerDebugPanelForRealtimeProgress(
+                realtimeConnectPreparingMessage,
+                "REALTIME_CONNECT_BUTTON_CLICKED",
+                "Connect To Realtime button clicked.",
+                true
+            );
+
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
 
-            bool connectedAndAuthenticated = false;
-
             try
             {
-                connectedAndAuthenticated = await LoginCheckConnectAndAuthAsync();
+                bool connectedAndAuthenticated = await LoginCheckConnectAndAuthAsync();
 
-                if (connectedAndAuthenticated)
-                {
-                    HideServerDebugPanelAfterRealtimeConnectSuccess();
-                }
-                else
+                // نمایش موفقیت داخل LoginCheckConnectAndAuthAsync انجام می شود.
+                // اینجا فقط شکست نهایی دکمه مدیریت می شود تا پنل موفقیت دو بار ثبت نشود.
+                if (!connectedAndAuthenticated)
                 {
                     ShowServerDebugPanelForRealtimeConnectFailure("connect_button_result_false");
                 }
@@ -427,15 +576,49 @@ namespace Network_A.Tests.Realtime
             return true;
         }
 
+        private bool CanStartNormalRealtimeConnectNow(string source)
+        {
+            bool authManagerExists = AuthManager.Instance != null;
+            bool authLoginCompleted = authManagerExists && AuthManager.Instance.isLogin && AuthManager.Instance.CurrentUser != null;
+
+            if (authLoginCompleted) return true;
+
+            string details =
+                "source=" + SafeText(source) +
+                " | authManagerExists=" + authManagerExists +
+                " | authManagerIsLogin=" + (authManagerExists ? AuthManager.Instance.isLogin.ToString() : "False") +
+                " | hasCurrentUser=" + (authManagerExists && AuthManager.Instance.CurrentUser != null) +
+                " | hasAccessToken=" + !string.IsNullOrWhiteSpace(SecureTokenStorage.GetAccessToken()) +
+                " | hasRefreshToken=" + !string.IsNullOrWhiteSpace(SecureTokenStorage.GetRefreshToken());
+
+            Log("Realtime normal connect blocked because AuthManager login is not completed. " + details);
+
+            ShowServerDebugPanelForRealtimeProgress(
+                "ابتدا باید ورود کاربر کامل شود. اتصال Realtime قبل از ورود موفق مجاز نیست.",
+                "REALTIME_CONNECT_BLOCKED_AUTH_NOT_READY",
+                details,
+                false
+            );
+
+            UpdateConnectionButtons();
+            UpdateCreateRoomButton();
+            UpdateSendMessageButton();
+            return false;
+        }
+
         public async Task<bool> LoginCheckConnectAndAuthAsync()
         {
             EnsureLifecycleToken();
 
             if (IsRealtimeReady())
             {
-                await RefreshCurrentUserCreatedRoomStateAsync();
+                // این مسیر فقط یک Gate است. وقتی Realtime از قبل آماده است،
+                // نباید دوباره ListRooms یا پیام موفقیت اتصال اجرا شود.
                 UpdateConnectionButtons();
                 UpdateCreateRoomButton();
+                UpdateSendMessageButton();
+
+                Log("Realtime connect/auth gate reused the existing authenticated connection.");
                 return true;
             }
 
@@ -450,7 +633,11 @@ namespace Network_A.Tests.Realtime
                 isLeaveRoomRunning = false;
             }
 
-            string storedToken = await EnsureFreshAccessTokenBeforeRealtimeAuthAsync(SecureTokenStorage.GetAccessToken(), "stored_token");
+            string storedToken = await EnsureFreshAccessTokenBeforeRealtimeAuthAsync(
+                SecureTokenStorage.GetAccessToken(),
+                "stored_token"
+            );
+
             if (string.IsNullOrWhiteSpace(storedToken))
             {
                 return Fail("Stored access token is empty after refresh gate. First login with normal Auth UI.");
@@ -458,16 +645,33 @@ namespace Network_A.Tests.Realtime
 
             UpdateCurrentUserIdentityFromStoredToken();
 
-            if (realtimeClient == null) CreateClientObjects();
+            if (realtimeClient == null)
+            {
+                CreateClientObjects();
+            }
 
             bool connected = await ConnectAsync();
-            if (!connected) return Fail("Realtime connect failed.");
+            if (!connected)
+            {
+                return Fail("Realtime connect failed.");
+            }
 
             bool authenticated = await AuthenticateWithStoredTokenAsync();
-            if (!authenticated) return Fail("Realtime auth failed.");
+            if (!authenticated)
+            {
+                return Fail("Realtime auth failed.");
+            }
 
+            StopRealtimeReconnectLoop("realtime_authenticated_by_normal_flow");
             StopPermanentReconnectFailureCleanupWatch("realtime_reconnect_authenticated");
             permanentReconnectFailureCleanupApplied = false;
+
+            ShowServerDebugPanelForRealtimeProgress(
+                realtimeRoomSyncMessage,
+                "REALTIME_ROOM_STATE_SYNC",
+                "Refreshing room ownership state after auth.",
+                true
+            );
 
             await RefreshCurrentUserCreatedRoomStateAsync();
 
@@ -475,36 +679,95 @@ namespace Network_A.Tests.Realtime
 
             ShowRealtimeSuccessMessage("Realtime connected and authenticated.");
             Log("Realtime connection and auth completed.");
+
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
+
+            ShowServerDebugPanelForRealtimeConnectSuccess(
+                "login_check_connect_and_auth_success"
+            );
+
             return true;
         }
-
+        //
 
         //* این تابع قبل از آث ریل تایم، اکسس توکن را تازه می کند تا توکن اکسپایر شده ارسال نشود.
         private async Task<string> EnsureFreshAccessTokenBeforeRealtimeAuthAsync(string accessToken, string tokenSource)
         {
-            string safeTokenSource = string.IsNullOrWhiteSpace(tokenSource) ? "unknown" : tokenSource.Trim();
+            string safeTokenSource = string.IsNullOrWhiteSpace(tokenSource)
+                ? "unknown"
+                : tokenSource.Trim();
 
             if (!IsAccessTokenRefreshRequired(accessToken))
             {
-                return string.IsNullOrWhiteSpace(accessToken) ? string.Empty : accessToken.Trim();
+                return string.IsNullOrWhiteSpace(accessToken)
+                    ? string.Empty
+                    : accessToken.Trim();
             }
 
-            if (string.IsNullOrWhiteSpace(SecureTokenStorage.GetRefreshToken()))
+            string refreshToken = SecureTokenStorage.GetRefreshToken();
+
+            if (string.IsNullOrWhiteSpace(refreshToken))
             {
-                Log("Access token refresh is required before realtime auth, but refresh token is empty. tokenSource=" + safeTokenSource);
+                Log(
+                    "Access token refresh is required before realtime auth, but refresh token is empty. tokenSource=" +
+                    safeTokenSource
+                );
+
+                await AuthRefreshManager.Refresh();
+
+                if (isRealtimeReconnectRunning)
+                {
+                    StopRealtimeReconnectLoop(
+                        "refresh_token_missing_before_realtime_auth"
+                    );
+                }
+
+                HideServerDebugPanelAfterRealtimeConnectSuccess();
                 return string.Empty;
             }
 
-            Log("Access token is expired or near expiry. Refreshing before realtime auth. tokenSource=" + safeTokenSource);
+            Log(
+                "Access token is expired or near expiry. Refreshing before realtime auth. tokenSource=" +
+                safeTokenSource
+            );
 
-            bool refreshed = await AuthRefreshManager.Refresh();
+            ShowServerDebugPanelForRealtimeProgress(
+                realtimeTokenRefreshingMessage,
+                "REALTIME_TOKEN_REFRESH",
+                "tokenSource=" + safeTokenSource,
+                true
+            );
+
+            bool preserveSessionOnFailure = isRealtimeReconnectRunning;
+            bool refreshed = await AuthRefreshManager.Refresh(
+                !preserveSessionOnFailure
+            );
 
             if (!refreshed)
             {
-                Log("Refresh before realtime auth failed. tokenSource=" + safeTokenSource);
+                bool hasRefreshToken = !string.IsNullOrWhiteSpace(
+                    SecureTokenStorage.GetRefreshToken()
+                );
+
+                Log(
+                    "Refresh before realtime auth failed. tokenSource=" +
+                    safeTokenSource +
+                    " | preserveSessionOnFailure=" +
+                    preserveSessionOnFailure +
+                    " | hasRefreshToken=" +
+                    hasRefreshToken
+                );
+
+                if (!hasRefreshToken && isRealtimeReconnectRunning)
+                {
+                    StopRealtimeReconnectLoop(
+                        "refresh_token_removed_during_realtime_reconnect"
+                    );
+                    HideServerDebugPanelAfterRealtimeConnectSuccess();
+                }
+
                 return string.Empty;
             }
 
@@ -512,11 +775,25 @@ namespace Network_A.Tests.Realtime
 
             if (string.IsNullOrWhiteSpace(refreshedToken))
             {
-                Log("Refresh before realtime auth returned empty access token. tokenSource=" + safeTokenSource);
+                Log(
+                    "Refresh before realtime auth returned empty access token. tokenSource=" +
+                    safeTokenSource
+                );
                 return string.Empty;
             }
 
-            Log("Refresh before realtime auth succeeded. tokenSource=" + safeTokenSource);
+            Log(
+                "Refresh before realtime auth succeeded. tokenSource=" +
+                safeTokenSource
+            );
+
+            ShowServerDebugPanelForRealtimeProgress(
+                realtimeTokenCheckingMessage,
+                "REALTIME_TOKEN_REFRESH_SUCCESS",
+                "tokenSource=" + safeTokenSource,
+                true
+            );
+
             return refreshedToken.Trim();
         }
 
@@ -595,6 +872,7 @@ namespace Network_A.Tests.Realtime
             EnsureLifecycleToken();
             activeServerUrl = ResolveRealtimeServerUrl();
             Log("Connecting to " + activeServerUrl + " | uiTimeoutMs=" + connectTimeoutMs);
+            ShowServerDebugPanelForRealtimeProgress(realtimeSocketConnectingMessage, "REALTIME_SOCKET_CONNECTING", "url=" + SafeText(activeServerUrl) + " | timeoutMs=" + connectTimeoutMs, true);
 
             Task<bool> connectTask = realtimeClient.ConnectAsync(null, lifecycleCts.Token);
 
@@ -609,6 +887,7 @@ namespace Network_A.Tests.Realtime
                     isAuthenticated = false;
                     transportDropAlreadyHandled = true;
                     Log("Connect timeout before realtime client reported connected. timeoutMs=" + connectTimeoutMs);
+                    ShowServerDebugPanelForRealtimeConnectFailure("connect_timeout_ms_" + connectTimeoutMs);
                     UpdateConnectionButtons();
                     UpdateCreateRoomButton();
                     UpdateSendMessageButton();
@@ -620,26 +899,64 @@ namespace Network_A.Tests.Realtime
             isConnected = connected && realtimeClient.IsConnected;
             transportDropAlreadyHandled = !isConnected;
             Log("Connect result: " + isConnected + " | lifetimeTokenUsed=True");
+            if (isConnected)
+            {
+                if (isRealtimeReconnectRunning)
+                {
+                    Log("Reconnect transport connected internally. Socket connected UI message is suppressed until realtime auth result.");
+                }
+                else
+                {
+                    ShowServerDebugPanelForRealtimeProgress(realtimeAuthenticatingMessage, "REALTIME_SOCKET_CONNECTED", "url=" + SafeText(activeServerUrl), true);
+                }
+            }
+            else
+            {
+                ShowServerDebugPanelForRealtimeConnectFailure("connect_result_false");
+            }
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
             return isConnected;
         }
 
+        //* این تابع برای ارسال پیام احراز هویت و انتظار پاسخ، دو تایم اوت مستقل می سازد تا زمان صرف شده در Send، مهلت انتظار auth_ok را مصرف نکند.
         private async Task<bool> AuthenticateWithStoredTokenAsync()
         {
             EnsureLifecycleToken();
             authWaiter = CreateBoolWaiter();
 
-            using (CancellationTokenSource authCts = CreateLinkedTimeoutToken(waitTimeoutMs))
-            {
-                bool sent = await realtimeAuthClient.AuthenticateWithStoredTokenAsync(authCts.Token);
-                if (!sent) return Fail("Realtime auth message was not sent.");
+            int safeSendTimeoutMs = Mathf.Max(1000, sendTimeoutMs);
 
-                bool ok = await WaitForBoolAsync(authWaiter, waitTimeoutMs, authCts.Token);
+            try
+            {
+                using (CancellationTokenSource authSendCts = CreateLinkedTimeoutToken(safeSendTimeoutMs))
+                {
+                    bool sent = await realtimeAuthClient.AuthenticateWithStoredTokenAsync(authSendCts.Token);
+                    if (!sent) return Fail("Realtime auth message was not sent.");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Log("Realtime auth send cancelled or timed out. sendTimeoutMs=" + safeSendTimeoutMs);
+                return Fail("Realtime auth message send timed out.");
+            }
+
+            Log(
+                "Realtime auth message send completed. Fresh auth acknowledgement timeout started. sendTimeoutMs=" +
+                safeSendTimeoutMs +
+                " | waitTimeoutMs=" +
+                waitTimeoutMs
+            );
+
+            using (CancellationTokenSource authWaitCts = CreateLinkedTimeoutToken(waitTimeoutMs))
+            {
+                bool ok = await WaitForBoolAsync(authWaiter, waitTimeoutMs, authWaitCts.Token);
                 isAuthenticated = ok && realtimeAuthClient.IsAuthenticated;
 
                 Log("Auth result: " + isAuthenticated);
+                if (isAuthenticated) ShowServerDebugPanelForRealtimeProgress(realtimeRoomSyncMessage, "REALTIME_AUTH_OK", "Realtime auth acknowledged by server.", true);
+                else ShowServerDebugPanelForRealtimeConnectFailure("auth_wait_result_false");
                 UpdateConnectionButtons();
                 UpdateCreateRoomButton();
                 return isAuthenticated;
@@ -704,11 +1021,23 @@ namespace Network_A.Tests.Realtime
                 SetListRoomsButtonInteractable(false);
                 Log("List rooms skipped. Client is already joined to a room.");
                 ShowRealtimeWarningMessage("You are already inside a room. Leave current room first.");
+                UpdateConnectionButtons();
+                UpdateCreateRoomButton();
                 UpdateSendMessageButton();
-                return true;
+                return false;
             }
 
-            if (!await LoginCheckConnectAndAuthAsync()) return false;
+            // وقتی Realtime از قبل آماده است، دوباره LoginCheckConnectAndAuthAsync اجرا نمی‌شود؛
+            // چون آن مسیر خودش یک ListRooms داخلی برای بررسی مالکیت روم می‌فرستاد و باعث دو Refresh پشت سر هم می‌شد.
+            if (!IsRealtimeReady())
+            {
+                if (!await LoginCheckConnectAndAuthAsync()) return false;
+            }
+
+            if (!IsRealtimeReady())
+            {
+                return Fail("List rooms requires an authenticated Realtime connection.");
+            }
 
             RealtimeLobbyListRoomsResult result = await realtimeLobbyClient.ListRoomsAsync(
                 CreateReliableOptions(),
@@ -722,12 +1051,35 @@ namespace Network_A.Tests.Realtime
 
             RenderRooms(lastListedRooms);
             RenderRoomListButtons(lastListedRooms);
-            SetListRoomsButtonInteractable(!isJoined);
+            SetRoomListInteractable(true);
+            SetListRoomsButtonInteractable(true);
 
-            if (isJoined) ShowRealtimeWarningMessage("You are already inside a room.");
-            else ShowRealtimeInfoMessage("Rooms refreshed. Count: " + result.Count);
-            Log("List rooms result: count=" + result.Count);
-            UpdateSendMessageButton();
+            UpdateCurrentUserIdentityFromStoredToken();
+            int ownedRoomCount = CountRoomsOwnedByCurrentUser(
+                ResolveCurrentOwnerNameForCreateRoomCheck(),
+                out RealtimeRoomDto firstOwnedRoom
+            );
+
+            currentUserHasCreatedRoom = ownedRoomCount > 0;
+
+            if (firstOwnedRoom != null)
+            {
+                firstOwnedRoom.Normalize();
+                lastCreatedRoomId = firstOwnedRoom.roomId;
+                currentUserCreatedRoomId = firstOwnedRoom.roomId;
+            }
+            else
+            {
+                currentUserCreatedRoomId = string.Empty;
+            }
+
+            ShowRealtimeInfoMessage("Rooms refreshed. Count: " + result.Count);
+            Log(
+                "List rooms result: count=" +
+                result.Count +
+                " | ownedRoomCount=" +
+                ownedRoomCount
+            );
 
             if (!string.IsNullOrWhiteSpace(lastCreatedRoomId))
             {
@@ -735,6 +1087,9 @@ namespace Network_A.Tests.Realtime
                 Log("Created room exists in list: " + (listedRoom != null));
             }
 
+            UpdateConnectionButtons();
+            UpdateCreateRoomButton();
+            UpdateSendMessageButton();
             return true;
         }
 
@@ -931,6 +1286,26 @@ namespace Network_A.Tests.Realtime
             return string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
         }
 
+        private bool IsCurrentRealtimeUserPresence(string playerId, string displayName)
+        {
+            if (IsSameText(playerId, currentRealtimeUserId)) return true;
+            if (IsSameText(playerId, currentRealtimeUserName)) return true;
+            if (IsSameText(displayName, currentRealtimeUserId)) return true;
+            if (IsSameText(displayName, currentRealtimeUserName)) return true;
+
+            string safeDisplayName = string.IsNullOrWhiteSpace(displayName) ? string.Empty : displayName.Trim();
+            string safeUserId = string.IsNullOrWhiteSpace(currentRealtimeUserId) ? string.Empty : currentRealtimeUserId.Trim();
+
+            if (!string.IsNullOrWhiteSpace(safeDisplayName) &&
+                !string.IsNullOrWhiteSpace(safeUserId) &&
+                safeDisplayName.IndexOf(safeUserId, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         //* این تابع درخواست جوین روم را ارسال می کند و تا پایان جوین، دکمه خروج از روم را غیرفعال نگه می دارد.
         public async Task<bool> JoinRoomAsync()
         {
@@ -970,14 +1345,27 @@ namespace Network_A.Tests.Realtime
                     return false;
                 }
 
-                joinedRoom = selectedListedRoom ?? FindLastListedRoom(activeRoomId);
+                RealtimeRoomDto authoritativeJoinedRoom = TryReadJoinedRoomFromJoinAck(result);
+                bool hasAuthoritativeJoinedRoom = authoritativeJoinedRoom != null && authoritativeJoinedRoom.HasValidRoomId();
+
+                joinedRoom = hasAuthoritativeJoinedRoom
+                    ? authoritativeJoinedRoom
+                    : CloneRoomDto(selectedListedRoom ?? FindLastListedRoom(activeRoomId));
                 if (joinedRoom != null)
                 {
                     joinedRoom.Normalize();
-                    joinedRoom.onlineCount = Mathf.Clamp(joinedRoom.onlineCount + 1, 1, joinedRoom.maxPlayers);
+                    if (!hasAuthoritativeJoinedRoom)
+                    {
+                        joinedRoom.onlineCount = Mathf.Clamp(joinedRoom.onlineCount + 1, 1, joinedRoom.maxPlayers);
+                    }
+
                     if (!string.IsNullOrWhiteSpace(joinedRoom.roomName)) activeRoomName = joinedRoom.roomName.Trim();
 
                     UpdateRoomDisplay(joinedRoom, true);
+                    Log("Joined room display source: " + (hasAuthoritativeJoinedRoom ? "join_ack_authoritative_room" : "listed_room_fallback_plus_one")
+                        + " | roomId=" + SafeText(joinedRoom.roomId)
+                        + " | owner=" + SafeText(joinedRoom.ownerUserName)
+                        + " | users=" + joinedRoom.onlineCount + "/" + joinedRoom.maxPlayers);
                     ShowRealtimeSuccessMessage("You joined to " + joinedRoom.roomName + ". Start chat.");
                 }
                 else
@@ -1003,6 +1391,58 @@ namespace Network_A.Tests.Realtime
                 UpdateConnectionButtons();
                 UpdateSendMessageButton();
             }
+        }
+
+        //* این تابع روم authoritative برگشتی از ack جوین را می خواند تا UI به اسنپ شات قدیمی لیست وابسته نباشد.
+        private RealtimeRoomDto TryReadJoinedRoomFromJoinAck(RealtimeReliableSendResult result)
+        {
+            string detailsJson = result != null && result.ack != null ? result.ack.detailsJson : string.Empty;
+            if (string.IsNullOrWhiteSpace(detailsJson)) return null;
+
+            RealtimeRoomDto directRoom = TryParseRoomDtoFromRawJson(RealtimeJsonUtil.ReadRawValue(detailsJson, "room", string.Empty));
+            if (directRoom != null && directRoom.HasValidRoomId()) return directRoom;
+
+            string resultJson = RealtimeJsonUtil.ReadRawValue(detailsJson, "result", string.Empty);
+            RealtimeRoomDto nestedRoom = TryParseRoomDtoFromRawJson(RealtimeJsonUtil.ReadRawValue(resultJson, "room", string.Empty));
+            if (nestedRoom != null && nestedRoom.HasValidRoomId()) return nestedRoom;
+
+            RealtimeRoomDto rootRoom = TryParseRoomDtoFromRawJson(detailsJson);
+            return rootRoom != null && rootRoom.HasValidRoomId() ? rootRoom : null;
+        }
+
+        private RealtimeRoomDto TryParseRoomDtoFromRawJson(string roomJson)
+        {
+            if (string.IsNullOrWhiteSpace(roomJson)) return null;
+
+            RealtimeRoomDto room = RealtimeRoomDto.FromJson(roomJson);
+            if (room == null || !room.HasValidRoomId()) return null;
+
+            room.Normalize();
+            return room;
+        }
+
+        private RealtimeRoomDto CloneRoomDto(RealtimeRoomDto room)
+        {
+            if (room == null) return null;
+
+            room.Normalize();
+            return new RealtimeRoomDto
+            {
+                roomId = room.roomId,
+                roomName = room.roomName,
+                description = room.description,
+                ownerUserId = room.ownerUserId,
+                ownerUserName = room.ownerUserName,
+                visibility = room.visibility,
+                status = room.status,
+                maxPlayers = room.maxPlayers,
+                onlineCount = room.onlineCount,
+                createdAtUnix = room.createdAtUnix,
+                updatedAtUnix = room.updatedAtUnix,
+                lastActiveAtUnix = room.lastActiveAtUnix,
+                closedAtUnix = room.closedAtUnix,
+                canJoin = room.canJoin
+            };
         }
 
         public async Task<bool> JoinFirstListedRoomAsync()
@@ -1095,13 +1535,22 @@ namespace Network_A.Tests.Realtime
                 Log("Leave skipped. Client is not joined.");
                 isJoined = false;
                 joinedRoom = null;
+                selectedListedRoom = null;
+                activeRoomId = string.Empty;
+                activeRoomName = string.Empty;
+                isUserRequestedExitFlow = false;
+                SetRoomListInteractable(true);
+                UpdateRoomDisplay();
                 UpdateConnectionButtons();
+                UpdateCreateRoomButton();
                 UpdateSendMessageButton();
                 return true;
             }
 
+            bool leaveAcknowledged = false;
             isLeaveRoomRunning = true;
             UpdateConnectionButtons();
+            UpdateCreateRoomButton();
             UpdateSendMessageButton();
 
             try
@@ -1113,11 +1562,16 @@ namespace Network_A.Tests.Realtime
 
                 bool ack = await WaitForBoolAsync(leaveAckWaiter, waitTimeoutMs, lifecycleCts.Token);
                 isJoined = !ack;
+                leaveAcknowledged = ack;
 
                 if (ack)
                 {
                     string leftRoomIdFor3D = activeRoomId;
+
+                    // این فلگ فقط هنگام اجرای خروج رسمی از روم فعال است تا افت هم‌زمان ترنسپورت،
+                    // به‌اشتباه یک حلقه Reconnect جدید نسازد. بعد از پایان Leave دوباره آزاد می‌شود.
                     isUserRequestedExitFlow = true;
+
                     OnRoomLeftFor3D?.Invoke(leftRoomIdFor3D);
                     CleanupSharedWorldAfterUserExit("manual_leave_room:" + leftRoomIdFor3D);
 
@@ -1126,9 +1580,7 @@ namespace Network_A.Tests.Realtime
                     activeRoomId = string.Empty;
                     activeRoomName = string.Empty;
                     SetRoomListInteractable(true);
-                    UpdateListRoomsButton();
                     UpdateRoomDisplay();
-                    UpdateSendMessageButton();
                 }
 
                 Log("Leave room ack result: " + ack);
@@ -1136,13 +1588,24 @@ namespace Network_A.Tests.Realtime
                 else ShowRealtimeErrorMessage("Leave timeout.");
 
                 UpdateConnectionButtons();
+                UpdateCreateRoomButton();
                 UpdateSendMessageButton();
                 return ack;
             }
             finally
             {
                 isLeaveRoomRunning = false;
+
+                if (leaveAcknowledged)
+                {
+                    isUserRequestedExitFlow = false;
+                    transportDropAlreadyHandled = false;
+                    Log("Room-only exit completed. Realtime lobby monitoring remains active.");
+                }
+
+                SetRoomListInteractable(!isJoined);
                 UpdateConnectionButtons();
+                UpdateCreateRoomButton();
                 UpdateSendMessageButton();
             }
         }
@@ -1318,6 +1781,23 @@ namespace Network_A.Tests.Realtime
         private void HandleTransportError(string error)
         {
             Log("Transport error: " + error);
+
+            if (ShouldTreatReasonAsActualInternetLost(error) ||
+                IsRealtimeNetworkIssueReason(error) ||
+                ShouldSuppressRealtimePopupBecauseInternetIsDown(error))
+            {
+                // نمایش پنل به مسیر واحد Disconnect/Reconnect سپرده می شود.
+                // این Guard از نمایش دوباره پنل برای Error و سپس Disconnected جلوگیری می کند.
+                Log(
+                    "Transport error UI deferred to the single reconnect classification flow. reason=" +
+                    SafeText(error)
+                );
+
+                UpdateConnectionButtons();
+                UpdateSendMessageButton();
+                return;
+            }
+
             ShowRealtimeErrorMessage("Transport error: " + error);
             UpdateConnectionButtons();
             UpdateSendMessageButton();
@@ -1326,9 +1806,11 @@ namespace Network_A.Tests.Realtime
         private void HandleDisconnected(string reason)
         {
             StopKeepAliveLoop();
-            transportDropAlreadyHandled = true;
 
-            bool userRequestedExit = isUserRequestedExitFlow || isCleaningUp || IsUserRequestedExitReason(reason);
+            bool userRequestedExit =
+                isUserRequestedExitFlow ||
+                isCleaningUp ||
+                IsUserRequestedExitReason(reason);
 
             isConnected = false;
             isAuthenticated = false;
@@ -1348,19 +1830,31 @@ namespace Network_A.Tests.Realtime
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
 
-            Log("Disconnected: " + reason + " | userRequestedExit=" + userRequestedExit);
+            Log(
+                "Disconnected: " +
+                reason +
+                " | userRequestedExit=" +
+                userRequestedExit
+            );
 
             if (userRequestedExit)
             {
-                ShowRealtimeWarningMessage("Realtime disconnected. You left all rooms.");
-                CleanupSharedWorldAfterUserExit("manual_realtime_disconnect:" + SafeText(reason));
+                transportDropAlreadyHandled = true;
+                ShowRealtimeWarningMessage(
+                    "Realtime disconnected. You left all rooms."
+                );
+
+                CleanupSharedWorldAfterUserExit(
+                    "manual_realtime_disconnect:" + SafeText(reason)
+                );
+
                 OnRealtimeDisconnectedFor3D?.Invoke(reason);
                 return;
             }
 
-            ShowRealtimeWarningMessage("Realtime connection lost. Reconnect is allowed.");
-            StartPermanentReconnectFailureCleanupWatch(reason);
-            OnRealtimeConnectionLostForReconnectFor3D?.Invoke(reason);
+            // پنل و Event قطع فقط در مسیر واحد Reconnect و بعد از نتیجه CheckNet اعمال می شوند.
+            transportDropAlreadyHandled = true;
+            StartRealtimeReconnectFlowAfterConnectionLoss(reason);
         }
         private void HandleReliableLog(string message)
         {
@@ -1374,12 +1868,20 @@ namespace Network_A.Tests.Realtime
 
         private void HandleAuthenticated(string connectionId, string userId)
         {
+            if (!isRealtimeReconnectRunning) StopRealtimeReconnectLoop("realtime_authenticated_event");
             StopPermanentReconnectFailureCleanupWatch("realtime_authenticated_event");
             permanentReconnectFailureCleanupApplied = false;
+
+            //* یک اتصال تازه و سالم برقرار شد؛ نسل اتصال بالا می‌رود تا نتیجه‌ی پروب‌های قدیمی و دیرهنگام نادیده گرفته شود.
+            connectionGenerationId++;
+            immediateInternetLostHandled = false;
+            internetLostPanelShownForCurrentOutage = false;
+
             isAuthenticated = true;
             currentRealtimeUserId = string.IsNullOrWhiteSpace(userId) ? currentRealtimeUserId : userId.Trim();
             UpdateCurrentUserIdentityFromStoredToken();
             Log("Authenticated. connectionId=" + connectionId + " userId=" + currentRealtimeUserId + " userName=" + currentRealtimeUserName);
+            if (isRealtimeReconnectRunning) ReleaseRealtimeNetworkIssueUiLock("realtime_authenticated_during_reconnect");
             if (isJoined && !string.IsNullOrWhiteSpace(activeRoomId)) ActivateSharedWorldForRoomEntry("realtime_reauthenticated:" + SafeText(activeRoomId));
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
@@ -1430,6 +1932,21 @@ namespace Network_A.Tests.Realtime
         {
             if (room == null) return;
 
+            room.Normalize();
+
+            bool matchesCurrentRoom =
+                room.HasValidRoomId() &&
+                ((!string.IsNullOrWhiteSpace(activeRoomId) && IsSameText(room.roomId, activeRoomId)) ||
+                 (joinedRoom != null && IsSameText(room.roomId, joinedRoom.roomId)) ||
+                 (selectedListedRoom != null && IsSameText(room.roomId, selectedListedRoom.roomId)));
+
+            if (matchesCurrentRoom)
+            {
+                lastAuthoritativeLobbyRoomId = room.roomId;
+                lastAuthoritativeLobbyOnlineCount = room.onlineCount;
+                lastAuthoritativeLobbyUpdateAt = Time.realtimeSinceStartup;
+            }
+
             Log("Lobby broadcast room_updated: " + room.roomId + " | online=" + room.onlineCount);
             ApplyRoomUpdateToCurrentRoom(room, "lobby_room_updated");
         }
@@ -1449,9 +1966,28 @@ namespace Network_A.Tests.Realtime
         {
             if (ack == null) return;
 
-            Log("Game ack: " + ack.originalMessageId + " | processed=" + ack.IsProcessed());
+            string messageId = string.IsNullOrWhiteSpace(ack.originalMessageId)
+                ? string.Empty
+                : ack.originalMessageId.Trim();
 
-            if (ack.originalMessageId.StartsWith("leave_room_", StringComparison.OrdinalIgnoreCase))
+            float now = Time.realtimeSinceStartup;
+            bool duplicateAck =
+                !string.IsNullOrWhiteSpace(messageId) &&
+                string.Equals(messageId, lastHandledGameAckMessageId, StringComparison.Ordinal) &&
+                lastHandledGameAckTime >= 0f &&
+                now - lastHandledGameAckTime <= 0.5f;
+
+            if (duplicateAck)
+            {
+                return;
+            }
+
+            lastHandledGameAckMessageId = messageId;
+            lastHandledGameAckTime = now;
+
+            Log("Game ack: " + messageId + " | processed=" + ack.IsProcessed());
+
+            if (messageId.StartsWith("leave_room_", StringComparison.OrdinalIgnoreCase))
             {
                 CompleteBoolWaiter(leaveAckWaiter, ack.IsProcessed());
             }
@@ -1470,15 +2006,17 @@ namespace Network_A.Tests.Realtime
             string playerId = ResolvePresencePlayerIdFor3D(presence);
             string displayName = ResolvePresenceDisplayName(presence, playerId);
 
+            if (IsCurrentRealtimeUserPresence(playerId, displayName))
+            {
+                Log("Self player_joined ignored. playerId=" + SafeText(playerId) + " | displayName=" + SafeText(displayName));
+                return;
+            }
+
             OnPlayerJoinedFor3D?.Invoke(playerId, displayName);
 
             Log("Player joined: " + displayName);
             ShowRealtimeInfoMessage(displayName + " joined");
-
-            if (!IsSameText(playerId, currentRealtimeUserId))
-            {
-                ApplyPresenceOnlineCountDelta(1, "player_joined", displayName);
-            }
+            ApplyPresenceOnlineCountDelta(1, "player_joined", displayName);
         }
 
         private void HandlePlayerLeftReceived(GameServerPresenceEvent presence)
@@ -1488,15 +2026,29 @@ namespace Network_A.Tests.Realtime
             string playerId = ResolvePresencePlayerIdFor3D(presence);
             string displayName = ResolvePresenceDisplayName(presence, playerId);
 
+            if (IsCurrentRealtimeUserPresence(playerId, displayName))
+            {
+                Log("Self player_left ignored. playerId=" + SafeText(playerId) + " | displayName=" + SafeText(displayName));
+                return;
+            }
+
+            if (ShouldSuppressPlayerLeftUiBecauseDedicatedGameServerIsSourceOfTruth(playerId, displayName))
+            {
+                Log("Realtime player_left suppressed because Dedicated Game Server is source of truth. playerId=" + SafeText(playerId) + " | displayName=" + SafeText(displayName));
+                return;
+            }
+
+            if (ShouldSuppressPlayerLeftUiBecauseRealtimeReconnect(playerId, displayName))
+            {
+                Log("Player left suppressed during reconnect grace. playerId=" + SafeText(playerId) + " | displayName=" + SafeText(displayName));
+                return;
+            }
+
             OnPlayerLeftFor3D?.Invoke(playerId, displayName);
 
             Log("Player left: " + displayName);
             ShowRealtimeWarningMessage(displayName + " left");
-
-            if (!IsSameText(playerId, currentRealtimeUserId))
-            {
-                ApplyPresenceOnlineCountDelta(-1, "player_left", displayName);
-            }
+            ApplyPresenceOnlineCountDelta(-1, "player_left", displayName);
         }
 
         private void HandleIncomingPlayerActionEnvelope(RealtimeEnvelope envelope)
@@ -1548,6 +2100,21 @@ namespace Network_A.Tests.Realtime
             if (!isJoined || joinedRoom == null || string.IsNullOrWhiteSpace(activeRoomId)) return;
             if (!IsSameText(joinedRoom.roomId, activeRoomId)) return;
 
+            if (ShouldIgnorePresenceOnlineCountDelta(source))
+            {
+                int maxPlayersForIgnoredDelta = Mathf.Max(1, joinedRoom.maxPlayers);
+                Log(
+                    "Room users delta ignored from " + source +
+                    " because lobby_room_updated is authoritative. player=" +
+                    displayName +
+                    " | users=" +
+                    joinedRoom.onlineCount +
+                    "/" +
+                    maxPlayersForIgnoredDelta
+                );
+                return;
+            }
+
             int maxPlayersSafe = Mathf.Max(1, joinedRoom.maxPlayers);
             int minUsersSafe = isJoined ? 1 : 0;
             int currentOnlineCount = Mathf.Max(minUsersSafe, joinedRoom.onlineCount);
@@ -1555,6 +2122,92 @@ namespace Network_A.Tests.Realtime
             joinedRoom.onlineCount = Mathf.Clamp(currentOnlineCount + delta, minUsersSafe, maxPlayersSafe);
             UpdateRoomDisplay(joinedRoom, true);
             Log("Room users updated from " + source + ". player=" + displayName + " | users=" + joinedRoom.onlineCount + "/" + maxPlayersSafe);
+        }
+
+        //* این تابع جلوی دوباره شمردن player_joined/player_left را می گیرد، چون عدد رسمی از lobby_room_updated می آید.
+        private bool ShouldIgnorePresenceOnlineCountDelta(string source)
+        {
+            if (!useAuthoritativeLobbyRoomUpdatedForPresenceCount) return false;
+            if (string.IsNullOrWhiteSpace(source)) return false;
+
+            string safeSource = source.Trim();
+            return
+                IsSameText(safeSource, "player_joined") ||
+                IsSameText(safeSource, "player_left");
+        }
+
+        //* این تابع تغییر تعداد حضور Dedicated را بدون نیاز به تغییر فایل های مشترک روی Users روم فعلی اعمال می کند.
+        public void ApplyDedicatedPresenceOnlineCountDelta(int delta, string source, string displayName)
+        {
+            ApplyPresenceOnlineCountDelta(
+                delta,
+                source,
+                string.IsNullOrWhiteSpace(displayName) ? "Dedicated Player" : displayName.Trim()
+            );
+        }
+
+        //* این تابع عدد authoritative ددیکیتد را مستقیم روی Users روم فعلی اعمال می کند و از خطای delta جلوگیری می کند.
+        public void ApplyDedicatedAuthoritativeOnlineCount(int onlineCount, string source)
+        {
+            if (!isJoined || joinedRoom == null || string.IsNullOrWhiteSpace(activeRoomId)) return;
+            if (!IsSameText(joinedRoom.roomId, activeRoomId)) return;
+
+            int maxPlayersSafe = Mathf.Max(1, joinedRoom.maxPlayers);
+            int safeOnlineCount = Mathf.Clamp(onlineCount, 1, maxPlayersSafe);
+
+            if (ShouldRejectFallbackRoomCountOverwrite(safeOnlineCount, source, out float authoritativeAgeSeconds))
+            {
+                Log(
+                    "Fallback room users ignored because a newer lobby_room_updated value is authoritative. source=" +
+                    SafeText(source) +
+                    " | fallbackUsers=" +
+                    safeOnlineCount +
+                    "/" +
+                    maxPlayersSafe +
+                    " | authoritativeUsers=" +
+                    lastAuthoritativeLobbyOnlineCount +
+                    "/" +
+                    maxPlayersSafe +
+                    " | authoritativeAgeSeconds=" +
+                    authoritativeAgeSeconds.ToString("F3")
+                );
+                return;
+            }
+
+            if (joinedRoom.onlineCount == safeOnlineCount)
+            {
+                Log("Dedicated authoritative room users unchanged from " + source + ". users=" + joinedRoom.onlineCount + "/" + maxPlayersSafe);
+                return;
+            }
+
+            joinedRoom.onlineCount = safeOnlineCount;
+            UpdateRoomDisplay(joinedRoom, true);
+            Log("Dedicated authoritative room users applied from " + source + ". users=" + joinedRoom.onlineCount + "/" + maxPlayersSafe);
+        }
+
+        //* این تابع فقط مقادیر fallback و trusted قدیمی Wrapper را پس از دریافت room_updated رسمی رد می کند.
+        private bool ShouldRejectFallbackRoomCountOverwrite(int onlineCount, string source, out float authoritativeAgeSeconds)
+        {
+            authoritativeAgeSeconds = -1f;
+
+            if (!useAuthoritativeLobbyRoomUpdatedForPresenceCount) return false;
+            if (string.IsNullOrWhiteSpace(source)) return false;
+            if (lastAuthoritativeLobbyUpdateAt < 0f) return false;
+            if (!IsSameText(lastAuthoritativeLobbyRoomId, activeRoomId)) return false;
+
+            string safeSource = source.Trim();
+            bool isFallbackSource =
+                safeSource.IndexOf("wrapper_realtime_player_joined", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                safeSource.IndexOf("without_authoritative_count", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!isFallbackSource) return false;
+
+            authoritativeAgeSeconds = Time.realtimeSinceStartup - lastAuthoritativeLobbyUpdateAt;
+            float protectionSeconds = Mathf.Max(0.1f, authoritativeRoomUpdateProtectionSeconds);
+
+            if (authoritativeAgeSeconds < 0f || authoritativeAgeSeconds > protectionSeconds) return false;
+
+            return onlineCount != lastAuthoritativeLobbyOnlineCount;
         }
 
 
@@ -1854,8 +2507,8 @@ namespace Network_A.Tests.Realtime
         {
             bool ready = IsRealtimeReady();
 
-            if (connectButton != null) connectButton.interactable = !isConnectAndAuthRunning && !isCleaningUp && !ready;
-            if (disconnectButton != null) disconnectButton.interactable = !isConnectAndAuthRunning && !isCleaningUp && ready;
+            if (connectButton != null) connectButton.interactable = !isConnectAndAuthRunning && !isRealtimeReconnectRunning && !isCleaningUp && !ready;
+            if (disconnectButton != null) disconnectButton.interactable = !isConnectAndAuthRunning && !isRealtimeReconnectRunning && !isCleaningUp && ready;
             UpdateListRoomsButton();
             UpdateLeaveRoomButton();
             UpdateCreateRoomButton();
@@ -1877,6 +2530,7 @@ namespace Network_A.Tests.Realtime
                    && !isJoiningFromRoomList
                    && !isLeaveRoomRunning
                    && !isConnectAndAuthRunning
+                   && !isRealtimeReconnectRunning
                    && !isCleaningUp;
         }
 
@@ -1890,6 +2544,7 @@ namespace Network_A.Tests.Realtime
             if (isJoiningFromRoomList) return buttonState + "reason=joining_from_room_list";
             if (isLeaveRoomRunning) return buttonState + "reason=leave_running";
             if (isConnectAndAuthRunning) return buttonState + "reason=connect_auth_running";
+            if (isRealtimeReconnectRunning) return buttonState + "reason=realtime_reconnect_running";
             if (isCleaningUp) return buttonState + "reason=cleanup_running";
             return buttonState + "reason=ready_to_list_rooms";
         }
@@ -1919,6 +2574,7 @@ namespace Network_A.Tests.Realtime
                    && !isJoinRoomRunning
                    && !isJoiningFromRoomList
                    && !isLeaveRoomRunning
+                   && !isRealtimeReconnectRunning
                    && !isCleaningUp;
         }
 
@@ -1932,6 +2588,7 @@ namespace Network_A.Tests.Realtime
             if (isJoinRoomRunning) return buttonState + "reason=join_running";
             if (isJoiningFromRoomList) return buttonState + "reason=joining_from_room_list";
             if (isLeaveRoomRunning) return buttonState + "reason=leave_running";
+            if (isRealtimeReconnectRunning) return buttonState + "reason=realtime_reconnect_running";
             if (isCleaningUp) return buttonState + "reason=cleanup_running";
             return buttonState + "reason=user_joined | roomId=" + activeRoomId;
         }
@@ -1994,10 +2651,9 @@ namespace Network_A.Tests.Realtime
         //* این تابع مشخص می کند دکمه ارسال پیام در این لحظه اجازه فعال بودن دارد یا نه.
         private bool CanUseSendMessageButton()
         {
-            bool messageRulePassed = !disableSendButtonWhenMessageInputEmpty || IsMessageInputValid();
             return IsRealtimeReady()
                    && isJoined
-                   && messageRulePassed
+                   && IsMessageInputValid()
                    && !isJoinRoomRunning
                    && !isJoiningFromRoomList
                    && !isLeaveRoomRunning
@@ -2011,7 +2667,7 @@ namespace Network_A.Tests.Realtime
             string buttonState = sendMessageButton == null ? "button=missing | " : "button=assigned | ";
             if (!IsRealtimeReady()) return buttonState + "reason=realtime_not_ready | connected=" + isConnected + " | authenticated=" + isAuthenticated;
             if (!isJoined) return buttonState + "reason=user_not_joined | roomId=" + activeRoomId;
-            if (disableSendButtonWhenMessageInputEmpty && !IsMessageInputValid()) return buttonState + "reason=message_empty | messageLength=" + GetMessageInputLength();
+            if (!IsMessageInputValid()) return buttonState + "reason=message_empty | messageLength=" + GetMessageInputLength();
             if (isJoinRoomRunning) return buttonState + "reason=join_running";
             if (isJoiningFromRoomList) return buttonState + "reason=joining_from_room_list";
             if (isLeaveRoomRunning) return buttonState + "reason=leave_running";
@@ -2023,6 +2679,8 @@ namespace Network_A.Tests.Realtime
         private void DetectRealtimeConnectionDrop()
         {
             if (!monitorRealtimeConnectionDropInUpdate) return;
+            if (isCleaningUp || isUserRequestedExitFlow) return;
+            if (isRealtimeReconnectRunning) return;
             if (!isConnected && !isAuthenticated && !isJoined) return;
 
             bool clientConnected = realtimeClient != null && realtimeClient.IsConnected;
@@ -2037,29 +2695,962 @@ namespace Network_A.Tests.Realtime
 
         private void MarkRealtimeDisconnectedByTransport(string reason)
         {
-            if (transportDropAlreadyHandled) return;
+            if (isCleaningUp ||
+                isUserRequestedExitFlow ||
+                IsUserRequestedExitReason(reason))
+            {
+                Log(
+                    "Realtime transport drop ignored because user exit or cleanup is active. reason=" +
+                    SafeText(reason)
+                );
+
+                return;
+            }
+
+            if (transportDropAlreadyHandled || isRealtimeReconnectRunning)
+            {
+                Log(
+                    "Realtime transport drop ignored because reconnect is already handled/running. reason=" +
+                    SafeText(reason)
+                );
+
+                return;
+            }
 
             transportDropAlreadyHandled = true;
             StopKeepAliveLoop();
 
-            Log(reason + " | connected=" + isConnected
-                + " | authenticated=" + isAuthenticated
-                + " | joined=" + isJoined
-                + " | clientConnected=" + (realtimeClient != null && realtimeClient.IsConnected)
-                + " | authClientAuthenticated=" + (realtimeAuthClient != null && realtimeAuthClient.IsAuthenticated));
+            Log(
+                reason +
+                " | connected=" +
+                isConnected +
+                " | authenticated=" +
+                isAuthenticated +
+                " | joined=" +
+                isJoined +
+                " | clientConnected=" +
+                (realtimeClient != null && realtimeClient.IsConnected) +
+                " | authClientAuthenticated=" +
+                (realtimeAuthClient != null &&
+                 realtimeAuthClient.IsAuthenticated)
+            );
 
             isConnected = false;
             isAuthenticated = false;
-            isJoined = false;
 
             SetRoomListInteractable(false);
             SetListRoomsButtonInteractable(false);
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
-            ShowRealtimeWarningMessage("Realtime connection lost. Reconnect is allowed.");
-            StartPermanentReconnectFailureCleanupWatch(reason);
-            OnRealtimeConnectionLostForReconnectFor3D?.Invoke(reason);
+
+            // مسیر Reconnect مالک یکتای تشخیص نوع قطعی و نمایش پنل است.
+            StartRealtimeReconnectFlowAfterConnectionLoss(reason);
+        }
+
+        private void StartRealtimeReconnectFlowAfterConnectionLoss(string reason)
+        {
+            if (isUserRequestedExitFlow ||
+                isCleaningUp ||
+                IsUserRequestedExitReason(reason))
+            {
+                return;
+            }
+
+            if (!enableAutomaticRealtimeReconnect)
+            {
+                OnRealtimeConnectionLostForReconnectFor3D?.Invoke(reason);
+
+                if (ShouldTreatReasonAsActualInternetLost(reason))
+                {
+                    ShowServerDebugPanelForInternetLost(reason);
+                }
+                else
+                {
+                    ShowServerDebugPanelForRealtimeTransportDrop(reason);
+                }
+
+                StartPermanentReconnectFailureCleanupWatch(reason);
+                return;
+            }
+
+            // در حالت Auto Reconnect، خود حلقه بعد از CheckNet فقط یک بار
+            // نوع قطعی را مشخص می کند و سپس Event و پنل مناسب را اعمال می کند.
+            StartRealtimeReconnectLoop(reason);
+        }
+
+        //* این تابع حلقه واقعی ریکانکت را شروع می کند و فقط تایمر خاموشی نیست.
+        private void StartRealtimeReconnectLoop(string reason)
+        {
+            if (isRealtimeReconnectRunning)
+            {
+                Log(
+                    "Realtime reconnect loop already running. reason=" +
+                    SafeText(reason)
+                );
+
+                return;
+            }
+
+            StopPermanentReconnectFailureCleanupWatch(
+                "automatic_reconnect_loop_started"
+            );
+
+            string targetRoomId = string.IsNullOrWhiteSpace(activeRoomId)
+                ? string.Empty
+                : activeRoomId.Trim();
+
+            string targetRoomName = string.IsNullOrWhiteSpace(activeRoomName)
+                ? string.Empty
+                : activeRoomName.Trim();
+
+            bool shouldRejoinRoom =
+                rejoinLastRoomAfterRealtimeReconnect &&
+                !string.IsNullOrWhiteSpace(targetRoomId) &&
+                (isJoined ||
+                 joinedRoom != null ||
+                 selectedListedRoom != null);
+
+            realtimeReconnectCts?.Cancel();
+            realtimeReconnectCts?.Dispose();
+            realtimeReconnectCts = new CancellationTokenSource();
+
+            isRealtimeReconnectRunning = true;
+            realtimeReconnectAttemptCount = 0;
+            permanentReconnectFailureCleanupApplied = false;
+
+            Log(
+                "Realtime reconnect loop started. CheckNet owns outage classification before UI and transport creation. reason=" +
+                SafeText(reason) +
+                " | roomId=" +
+                SafeText(targetRoomId) +
+                " | rejoin=" +
+                shouldRejoinRoom
+            );
+
+            UpdateConnectionButtons();
+            UpdateCreateRoomButton();
+            UpdateSendMessageButton();
+
+            _ = RunRealtimeReconnectLoopAsync(
+                reason,
+                targetRoomId,
+                targetRoomName,
+                shouldRejoinRoom,
+                realtimeReconnectCts.Token
+            );
+        }
+
+        //* این تابع حلقه واقعی ریکانکت را اجرا می کند و اگر تا زمان مشخص موفق نشود، نتیجه نهایی شکست را نشان می دهد.
+        //* این تابع حلقه واقعی ریکانکت را اجرا می کند و اگر تا زمان مشخص موفق نشود، نتیجه نهایی شکست را نشان می دهد.
+        //* نتیجه موفق CheckNet همین دور به Attempt منتقل می شود تا Preflight دوباره همان درخواست را تکرار نکند.
+        //* این تابع حلقه واقعی ریکانکت را اجرا می کند و نتیجه موفق CheckNet همان دور را به Attempt بعدی منتقل می کند.
+        //* این تابع حلقه واقعی Reconnect را اجرا می کند.
+        //* CheckNet در این حلقه مالک یکتا است و تا قبل از تایید دسترسی سرور، Attempt ساخته نمی شود.
+        private async Task RunRealtimeReconnectLoopAsync(
+            string reason,
+            string targetRoomId,
+            string targetRoomName,
+            bool shouldRejoinRoom,
+            CancellationToken cancellationToken
+        )
+        {
+            float timeoutSeconds = GetPermanentReconnectFailureTimeoutSeconds();
+            float startedAt = Time.realtimeSinceStartup;
+            float nextDelaySeconds = 0f;
+            string safeReason = SafeText(reason);
+
+            bool connectionLossEventRaised = false;
+            bool reconnectStartUiShown = false;
+
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    if (isCleaningUp || isUserRequestedExitFlow)
+                    {
+                        Log(
+                            "Realtime reconnect loop stopped because cleanup/user exit started. reason=" +
+                            safeReason
+                        );
+
+                        return;
+                    }
+
+                    if (Time.realtimeSinceStartup - startedAt >= timeoutSeconds)
+                    {
+                        break;
+                    }
+
+                    if (nextDelaySeconds > 0f)
+                    {
+                        int delayMs = Mathf.RoundToInt(
+                            nextDelaySeconds * 1000f
+                        );
+
+                        ShowServerDebugPanelForRealtimeProgress(
+                            (string.IsNullOrWhiteSpace(
+                                realtimeReconnectAttemptMessage
+                            )
+                                ? "در حال تلاش برای اتصال دوباره..."
+                                : realtimeReconnectAttemptMessage) +
+                            " تلاش بعدی تا " +
+                            nextDelaySeconds.ToString("F0") +
+                            " ثانیه دیگر.",
+                            "REALTIME_RECONNECT_WAIT",
+                            "Reason=" +
+                            safeReason +
+                            " | nextDelaySeconds=" +
+                            nextDelaySeconds.ToString("F1"),
+                            true
+                        );
+
+                        await Task.Delay(delayMs, cancellationToken);
+                        nextDelaySeconds = 0f;
+                    }
+
+                    bool serverReachabilityAlreadyConfirmed = false;
+                    bool checkNetEnabled =
+                        enableCheckNetFastReconnectWatch &&
+                        AuthManager.Instance != null;
+
+                    if (checkNetEnabled)
+                    {
+                        // اگر Watch قبلی هنوز در حال پایان است، حلقه درخواست همزمان جدید نمی سازد.
+                        while (checkNetFastWatchRunning &&
+                               !cancellationToken.IsCancellationRequested)
+                        {
+                            await Task.Delay(25, cancellationToken);
+                        }
+
+                        float probeIntervalSeconds = Mathf.Clamp(
+                            checkNetFastWatchIntervalSeconds,
+                            0.5f,
+                            1.5f
+                        );
+
+                        bool localNetworkUnavailable =
+                            IsLocalNetworkUnavailableFast();
+
+                        bool knownOutageStillInsideInterval =
+                            checkNetFastOutageActive &&
+                            Time.realtimeSinceStartup <
+                            nextCheckNetFastWatchAt;
+
+                        bool serverReachable = false;
+
+                        if (checkNetFastReconnectKickRequested)
+                        {
+                            checkNetFastReconnectKickRequested = false;
+                            serverReachable = true;
+                        }
+                        else if (localNetworkUnavailable ||
+                                 knownOutageStillInsideInterval)
+                        {
+                            serverReachable = false;
+
+                            if (localNetworkUnavailable &&
+                                nextCheckNetFastWatchAt <=
+                                Time.realtimeSinceStartup)
+                            {
+                                nextCheckNetFastWatchAt =
+                                    Time.realtimeSinceStartup +
+                                    probeIntervalSeconds;
+                            }
+                        }
+                        else
+                        {
+                            serverReachable =
+                                await AuthManager.Instance.CheckNetFastSilentAsync(
+                                    checkNetFastTimeoutMs,
+                                    cancellationToken
+                                );
+
+                            nextCheckNetFastWatchAt =
+                                Time.realtimeSinceStartup +
+                                probeIntervalSeconds;
+                        }
+
+                        if (!serverReachable)
+                        {
+                            checkNetFastOutageActive = true;
+                            immediateInternetLostHandled = true;
+
+                            checkNetFastConsecutiveFailures = Mathf.Max(
+                                checkNetFastConsecutiveFailures,
+                                Mathf.Max(
+                                    1,
+                                    checkNetFastFailuresBeforeDisconnect
+                                )
+                            );
+
+                            if (!connectionLossEventRaised)
+                            {
+                                connectionLossEventRaised = true;
+
+                                OnRealtimeConnectionLostForReconnectFor3D?.Invoke(
+                                    "checknet_fast_server_unreachable"
+                                );
+                            }
+
+                            ShowServerDebugPanelForInternetLost(
+                                "checknet_fast_server_unreachable"
+                            );
+
+                            float waitSeconds = Mathf.Max(
+                                0.05f,
+                                nextCheckNetFastWatchAt -
+                                Time.realtimeSinceStartup
+                            );
+
+                            await Task.Delay(
+                                Mathf.Max(
+                                    1,
+                                    Mathf.RoundToInt(
+                                        waitSeconds * 1000f
+                                    )
+                                ),
+                                cancellationToken
+                            );
+
+                            continue;
+                        }
+
+                        bool recoveredFromOutage =
+                            checkNetFastOutageActive ||
+                            immediateInternetLostHandled;
+
+                        checkNetFastOutageActive = false;
+                        checkNetFastConsecutiveFailures = 0;
+                        immediateInternetLostHandled = false;
+                        serverReachabilityAlreadyConfirmed = true;
+
+                        if (recoveredFromOutage)
+                        {
+                            Log(
+                                "CheckNet fast recovered inside reconnect loop. Reconnect attempt starts now. reason=" +
+                                safeReason
+                            );
+                        }
+                    }
+
+                    if (!connectionLossEventRaised)
+                    {
+                        connectionLossEventRaised = true;
+                        OnRealtimeConnectionLostForReconnectFor3D?.Invoke(
+                            reason
+                        );
+                    }
+
+                    if (!reconnectStartUiShown)
+                    {
+                        reconnectStartUiShown = true;
+
+                        ShowServerDebugPanelForRealtimeProgress(
+                            GetRealtimeReconnectStartMessageForReason(reason),
+                            "REALTIME_RECONNECT_STARTED",
+                            "Reason=" +
+                            safeReason +
+                            " | roomId=" +
+                            SafeText(targetRoomId) +
+                            " | rejoin=" +
+                            shouldRejoinRoom,
+                            true
+                        );
+                    }
+
+                    realtimeReconnectAttemptCount++;
+
+                    ShowServerDebugPanelForRealtimeProgress(
+                        (string.IsNullOrWhiteSpace(
+                            realtimeReconnectAttemptMessage
+                        )
+                            ? "در حال تلاش برای اتصال دوباره..."
+                            : realtimeReconnectAttemptMessage) +
+                        " تلاش " +
+                        realtimeReconnectAttemptCount,
+                        "REALTIME_RECONNECT_ATTEMPT_" +
+                        realtimeReconnectAttemptCount,
+                        "Reason=" +
+                        safeReason +
+                        " | roomId=" +
+                        SafeText(targetRoomId) +
+                        " | elapsedSeconds=" +
+                        (Time.realtimeSinceStartup - startedAt).ToString("F1"),
+                        true
+                    );
+
+                    bool reconnected = await TryRealtimeReconnectOnceAsync(
+                        targetRoomId,
+                        targetRoomName,
+                        shouldRejoinRoom,
+                        realtimeReconnectAttemptCount,
+                        serverReachabilityAlreadyConfirmed,
+                        cancellationToken
+                    );
+
+                    if (reconnected)
+                    {
+                        CompleteRealtimeReconnectLoop(
+                            targetRoomId,
+                            shouldRejoinRoom,
+                            realtimeReconnectAttemptCount
+                        );
+
+                        return;
+                    }
+
+                    nextDelaySeconds = CalculateNextRealtimeReconnectDelay(
+                        nextDelaySeconds
+                    );
+                }
+
+                Log(
+                    "Realtime reconnect loop timeout reached. timeoutSeconds=" +
+                    timeoutSeconds.ToString("F1") +
+                    " | reason=" +
+                    safeReason
+                );
+
+                isRealtimeReconnectRunning = false;
+
+                ShowRealtimeReconnectFinalFailurePanel(
+                    "automatic_reconnect_loop_timeout:" + safeReason,
+                    "REALTIME_RECONNECT_TIMEOUT_KEEP_RETRYING",
+                    realtimeReconnectAttemptCount
+                );
+
+                StartRealtimeReconnectLoop(
+                    "automatic_reconnect_loop_timeout_keep_retrying:" +
+                    safeReason
+                );
+            }
+            catch (OperationCanceledException)
+            {
+                Log(
+                    "Realtime reconnect loop cancelled. reason=" +
+                    safeReason
+                );
+            }
+            catch (ObjectDisposedException)
+            {
+                Log(
+                    "Realtime reconnect loop stopped because client objects were disposed. reason=" +
+                    safeReason
+                );
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "Realtime reconnect loop exception: " +
+                    ex.Message +
+                    " | reason=" +
+                    safeReason
+                );
+
+                isRealtimeReconnectRunning = false;
+
+                ShowRealtimeReconnectFinalFailurePanel(
+                    "automatic_reconnect_loop_exception:" +
+                    safeReason +
+                    " | " +
+                    ex.Message,
+                    "REALTIME_RECONNECT_EXCEPTION_KEEP_RETRYING",
+                    realtimeReconnectAttemptCount
+                );
+
+                StartRealtimeReconnectLoop(
+                    "automatic_reconnect_loop_exception_keep_retrying:" +
+                    safeReason
+                );
+            }
+            finally
+            {
+                if (!IsRealtimeReady())
+                {
+                    if (realtimeReconnectCts == null ||
+                        realtimeReconnectCts.IsCancellationRequested)
+                    {
+                        isRealtimeReconnectRunning = false;
+                    }
+
+                    UpdateConnectionButtons();
+                    UpdateCreateRoomButton();
+                    UpdateSendMessageButton();
+                }
+            }
+        }
+        //* این تابع یک تلاش کامل برای کانکت، آث و جوین دوباره همان روم انجام می دهد.
+        //* اگر حلقه Reconnect در همین دور دسترسی سرور را تایید کرده باشد، CheckNet دوم اجرا نمی شود.
+        //* این تابع یک تلاش کامل برای Connect، Auth و Join دوباره همان Room انجام می دهد.
+        //* اگر حلقه Reconnect دسترسی سرور را تایید کرده باشد، CheckNet دوم اجرا نمی شود.
+        private async Task<bool> TryRealtimeReconnectOnceAsync(
+            string targetRoomId,
+            string targetRoomName,
+            bool shouldRejoinRoom,
+            int attempt,
+            bool serverReachabilityAlreadyConfirmed,
+            CancellationToken cancellationToken
+        )
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            EnsureLifecycleToken();
+
+            if (serverReachabilityAlreadyConfirmed)
+            {
+                Log(
+                    "Realtime reconnect preflight reused CheckNet success from current reconnect loop. attempt=" +
+                    attempt
+                );
+            }
+            else if (enableCheckNetFastReconnectWatch &&
+                     AuthManager.Instance != null)
+            {
+                bool serverReachable;
+
+                try
+                {
+                    serverReachable =
+                        await AuthManager.Instance.CheckNetFastSilentAsync(
+                            checkNetFastTimeoutMs,
+                            cancellationToken
+                        );
+                }
+                catch (OperationCanceledException)
+                {
+                    return false;
+                }
+
+                float probeIntervalSeconds = Mathf.Clamp(
+                    checkNetFastWatchIntervalSeconds,
+                    0.5f,
+                    1.5f
+                );
+
+                nextCheckNetFastWatchAt =
+                    Time.realtimeSinceStartup + probeIntervalSeconds;
+
+                if (!serverReachable)
+                {
+                    checkNetFastOutageActive = true;
+
+                    checkNetFastConsecutiveFailures = Mathf.Max(
+                        checkNetFastConsecutiveFailures,
+                        Mathf.Max(
+                            1,
+                            checkNetFastFailuresBeforeDisconnect
+                        )
+                    );
+
+                    Log(
+                        "Realtime reconnect attempt blocked before transport creation because CheckNet is unreachable. attempt=" +
+                        attempt +
+                        " | timeoutMs=" +
+                        checkNetFastTimeoutMs
+                    );
+
+                    return false;
+                }
+
+                checkNetFastOutageActive = false;
+                checkNetFastConsecutiveFailures = 0;
+
+                Log(
+                    "Realtime reconnect preflight CheckNet passed. attempt=" +
+                    attempt +
+                    " | timeoutMs=" +
+                    checkNetFastTimeoutMs
+                );
+            }
+
+            CleanupTransportObjectsForRealtimeReconnect(
+                "reconnect_attempt_" + attempt
+            );
+
+            if (!string.IsNullOrWhiteSpace(targetRoomId))
+            {
+                activeRoomId = targetRoomId.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(targetRoomName))
+            {
+                activeRoomName = targetRoomName.Trim();
+            }
+
+            CreateClientObjects();
+
+            bool connected = await ConnectAsync();
+            if (!connected)
+            {
+                Log(
+                    "Realtime reconnect attempt failed at connect. attempt=" +
+                    attempt
+                );
+
+                return false;
+            }
+
+            string refreshedAccessToken =
+                await EnsureFreshAccessTokenBeforeRealtimeAuthAsync(
+                    SecureTokenStorage.GetAccessToken(),
+                    "reconnect_attempt_" + attempt
+                );
+
+            if (string.IsNullOrWhiteSpace(refreshedAccessToken))
+            {
+                Log(
+                    "Realtime reconnect attempt failed because access token is empty after refresh gate. attempt=" +
+                    attempt
+                );
+
+                return false;
+            }
+
+            UpdateCurrentUserIdentityFromStoredToken();
+
+            bool authenticated = await AuthenticateWithStoredTokenAsync();
+            if (!authenticated)
+            {
+                Log(
+                    "Realtime reconnect attempt failed at auth. attempt=" +
+                    attempt
+                );
+
+                return false;
+            }
+
+            if (!shouldRejoinRoom)
+            {
+                isJoined = false;
+                StartKeepAliveLoop();
+
+                Log(
+                    "Realtime reconnect succeeded without room rejoin. attempt=" +
+                    attempt
+                );
+
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(targetRoomId))
+            {
+                Log(
+                    "Realtime reconnect cannot rejoin because target room id is empty. attempt=" +
+                    attempt
+                );
+
+                return false;
+            }
+
+            ShowServerDebugPanelForRealtimeProgress(
+                GetRealtimeReconnectPrepareGameServerMessage(),
+                "REALTIME_RECONNECT_PREPARE_GAME_SERVER",
+                "roomId=" +
+                SafeText(targetRoomId) +
+                " | attempt=" +
+                attempt,
+                true
+            );
+
+            RealtimeReliableSendResult joinResult =
+                await gameServerClient.JoinRoomReliableAsync(
+                    targetRoomId,
+                    CreateReliableOptions(),
+                    lifecycleCts.Token
+                );
+
+            bool joined = joinResult != null && joinResult.isSuccess;
+
+            if (!joined)
+            {
+                Log(
+                    "Realtime reconnect rejoin failed. attempt=" +
+                    attempt +
+                    " | room=" +
+                    targetRoomId +
+                    " | error=" +
+                    (joinResult == null
+                        ? "null"
+                        : joinResult.errorMessage)
+                );
+
+                isJoined = false;
+                return false;
+            }
+
+            isJoined = true;
+            activeRoomId = targetRoomId;
+            activeRoomName = targetRoomName;
+            manualExitWorldCleanupApplied = false;
+            isUserRequestedExitFlow = false;
+
+            UpdateRoomDisplay();
+            SetRoomListInteractable(false);
+            SetListRoomsButtonInteractable(false);
+            StartKeepAliveLoop();
+
+            Log(
+                "Realtime reconnect rejoin succeeded. attempt=" +
+                attempt +
+                " | room=" +
+                targetRoomId
+            );
+
+            OnRoomJoinedFor3D?.Invoke(targetRoomId);
+            return true;
+        }
+
+        //* این تابع نتیجه موفق ریکانکت را ثبت می کند.
+        //* این تابع نتیجه موفق ریکانکت را ثبت می کند.
+        //* این تابع نتیجه موفق ریکانکت را ثبت می کند و اجرای CheckNet بعدی را تا یک بازه کامل عقب می اندازد.
+        private void CompleteRealtimeReconnectLoop(
+            string targetRoomId,
+            bool rejoinedRoom,
+            int attempt
+        )
+        {
+            isRealtimeReconnectRunning = false;
+            transportDropAlreadyHandled = false;
+            permanentReconnectFailureCleanupApplied = false;
+
+            float nextProbeDelaySeconds = Mathf.Clamp(
+                checkNetFastWatchIntervalSeconds,
+                0.5f,
+                3f
+            );
+
+            nextCheckNetFastWatchAt =
+                Time.realtimeSinceStartup + nextProbeDelaySeconds;
+
+            ReleaseRealtimeNetworkIssueUiLock("realtime_reconnect_loop_success");
+            StopPermanentReconnectFailureCleanupWatch(
+                "realtime_reconnect_loop_success"
+            );
+
+            if (!rejoinedRoom)
+            {
+                string successMessage =
+                    string.IsNullOrWhiteSpace(realtimeReconnectSuccessMessage)
+                        ? "اتصال دوباره به بلادرنگ انجام شد."
+                        : realtimeReconnectSuccessMessage.Trim();
+
+                ShowServerDebugPanelForRealtimeProgress(
+                    successMessage,
+                    "REALTIME_RECONNECT_SUCCESS",
+                    "roomId=" +
+                    SafeText(targetRoomId) +
+                    " | rejoined=" +
+                    rejoinedRoom +
+                    " | attempts=" +
+                    attempt,
+                    false
+                );
+
+                ShowRealtimeSuccessMessage("Realtime reconnected.");
+            }
+            else
+            {
+                Log(
+                    "Realtime reconnect room restore completed. Game Server final panel message is owned by Dedicated binder. roomId=" +
+                    SafeText(targetRoomId) +
+                    " | attempts=" +
+                    attempt
+                );
+            }
+
+            UpdateConnectionButtons();
+            UpdateCreateRoomButton();
+            UpdateSendMessageButton();
+
+            if (!rejoinedRoom &&
+                refreshRoomListAfterRealtimeReconnectWithoutRejoin)
+            {
+                _ = RefreshRoomListAfterRealtimeReconnectAsync(attempt);
+            }
+        }
+
+        //* این تابع بعد از ریکانکت موفق بدون جوین روم، لیست روم را دوباره از سرور می گیرد تا لابی خالی نماند.
+        private async Task RefreshRoomListAfterRealtimeReconnectAsync(int attempt)
+        {
+            await Task.Yield();
+
+            if (!refreshRoomListAfterRealtimeReconnectWithoutRejoin) return;
+
+            if (!IsRealtimeReady())
+            {
+                Log("Reconnect room list refresh skipped because realtime is not ready. attempt=" + attempt);
+                ShowServerDebugPanelForRealtimeProgress(
+                    "اتصال Realtime برگشت، اما لیست روم‌ها هنوز قابل دریافت نیست.",
+                    "REALTIME_RECONNECT_LIST_ROOMS_SKIPPED",
+                    "Reason=realtime_not_ready | attempt=" + attempt,
+                    false
+                );
+                return;
+            }
+
+            if (isJoined)
+            {
+                Log("Reconnect room list refresh skipped because user is already inside a room. attempt=" + attempt + " | roomId=" + SafeText(activeRoomId));
+                HideServerDebugPanelAfterRealtimeConnectSuccess();
+                return;
+            }
+
+            if (realtimeLobbyClient == null)
+            {
+                Log("Reconnect room list refresh skipped because lobby client is null. attempt=" + attempt);
+                ShowServerDebugPanelForRealtimeProgress(
+                    "اتصال Realtime برگشت، اما کلاینت لابی آماده نیست.",
+                    "REALTIME_RECONNECT_LIST_ROOMS_SKIPPED",
+                    "Reason=lobby_client_null | attempt=" + attempt,
+                    false
+                );
+                return;
+            }
+
+            try
+            {
+                ShowServerDebugPanelForRealtimeProgress(
+                    realtimeRoomSyncMessage,
+                    "REALTIME_RECONNECT_LIST_ROOMS",
+                    "Refreshing lobby rooms after reconnect. attempt=" + attempt,
+                    true
+                );
+
+                RealtimeLobbyListRoomsResult result = await realtimeLobbyClient.ListRoomsAsync(
+                    CreateReliableOptions(),
+                    lifecycleCts.Token
+                );
+
+                if (result == null)
+                {
+                    Log("Reconnect room list refresh failed. result=null | attempt=" + attempt);
+                    UpdateListRoomsButton();
+
+                    ShowServerDebugPanelForRealtimeProgress(
+                        "اتصال Realtime برگشت، اما دریافت لیست روم‌ها ناموفق بود.",
+                        "REALTIME_RECONNECT_LIST_ROOMS_FAILED",
+                        "Reason=result_null | attempt=" + attempt,
+                        false
+                    );
+
+                    return;
+                }
+
+                if (!result.isSuccess)
+                {
+                    Log("Reconnect room list refresh failed. error=" + SafeText(result.errorMessage) + " | attempt=" + attempt);
+                    UpdateListRoomsButton();
+
+                    ShowServerDebugPanelForRealtimeProgress(
+                        "اتصال Realtime برگشت، اما دریافت لیست روم‌ها ناموفق بود.",
+                        "REALTIME_RECONNECT_LIST_ROOMS_FAILED",
+                        "Reason=" + SafeText(result.errorMessage) + " | attempt=" + attempt,
+                        false
+                    );
+
+                    return;
+                }
+
+                lastListedRooms = result.Rooms ?? Array.Empty<RealtimeRoomDto>();
+                RenderRooms(lastListedRooms);
+                RenderRoomListButtons(lastListedRooms);
+                SetListRoomsButtonInteractable(!isJoined);
+                UpdateCreateRoomButton();
+                UpdateSendMessageButton();
+
+                ShowRealtimeInfoMessage("Rooms refreshed after reconnect. Count: " + result.Count);
+                Log("Reconnect room list refresh completed. count=" + result.Count + " | attempt=" + attempt);
+
+                ShowServerDebugPanelForRealtimeProgress(
+                    "اتصال Realtime برگشت و لیست روم‌ها به‌روزرسانی شد.",
+                    "REALTIME_RECONNECT_LIST_ROOMS_SUCCESS",
+                    "count=" + result.Count + " | attempt=" + attempt,
+                    false
+                );
+
+                HideServerDebugPanelAfterRealtimeConnectSuccess();
+            }
+            catch (Exception ex)
+            {
+                Log("Reconnect room list refresh exception: " + ex.Message + " | attempt=" + attempt);
+                UpdateListRoomsButton();
+
+                ShowServerDebugPanelForRealtimeProgress(
+                    "اتصال Realtime برگشت، اما دریافت لیست روم‌ها خطا داد.",
+                    "REALTIME_RECONNECT_LIST_ROOMS_EXCEPTION",
+                    "Exception=" + SafeText(ex.Message) + " | attempt=" + attempt,
+                    false
+                );
+            }
+        }
+        //* این تابع منابع ترنسپورت قبلی را برای ساخت استریم جدید پاک می کند اما کانتکست روم را نگه می دارد.
+        private void CleanupTransportObjectsForRealtimeReconnect(string reason)
+        {
+            StopKeepAliveLoop();
+            UnbindEvents();
+
+            try
+            {
+                gameServerClient?.Dispose();
+                realtimeLobbyClient?.Dispose();
+                realtimeAuthClient?.Dispose();
+                realtimeClient?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log("Reconnect transport cleanup warning: " + ex.Message + " | reason=" + SafeText(reason));
+            }
+
+            gameServerClient = null;
+            realtimeLobbyClient = null;
+            realtimeAuthClient = null;
+            realtimeClient = null;
+
+            authWaiter = null;
+            leaveAckWaiter = null;
+
+            isConnected = false;
+            isAuthenticated = false;
+            isConnectAndAuthRunning = false;
+            isCreateRoomRunning = false;
+            isJoinRoomRunning = false;
+            isLeaveRoomRunning = false;
+            isSendMessageRunning = false;
+            transportDropAlreadyHandled = true;
+
+            lifecycleCts?.Dispose();
+            lifecycleCts = null;
+        }
+
+        private float CalculateNextRealtimeReconnectDelay(float currentDelaySeconds)
+        {
+            float maxDelay = Mathf.Max(1f, realtimeReconnectMaxDelaySeconds);
+            if (currentDelaySeconds <= 0f) return Mathf.Min(1f, maxDelay);
+            return Mathf.Min(currentDelaySeconds * 2f, maxDelay);
+        }
+
+        private void StopRealtimeReconnectLoop(string reason)
+        {
+            if (!isRealtimeReconnectRunning && realtimeReconnectCts == null) return;
+
+            try
+            {
+                realtimeReconnectCts?.Cancel();
+            }
+            catch
+            {
+                // لغو ریکانکت فقط برای توقف تسک پس زمینه است.
+            }
+
+            realtimeReconnectCts?.Dispose();
+            realtimeReconnectCts = null;
+            isRealtimeReconnectRunning = false;
+            realtimeReconnectAttemptCount = 0;
+            Log("Realtime reconnect loop stopped. reason=" + SafeText(reason));
         }
 
         private void StartPermanentReconnectFailureCleanupWatch(string reason)
@@ -2102,7 +3693,12 @@ namespace Network_A.Tests.Realtime
             }
 
             permanentReconnectFailureCleanupCoroutine = null;
-            ForceLocalExitAfterPermanentReconnectFailure(reason);
+            ShowRealtimeReconnectFinalFailurePanel(
+                "permanent_reconnect_failure_watch_timeout:" + SafeText(reason),
+                "REALTIME_RECONNECT_WATCH_TIMEOUT_KEEP_RETRYING",
+                realtimeReconnectAttemptCount
+            );
+            Log("Permanent reconnect failure watch timeout reached without forced exit. reason=" + SafeText(reason));
         }
 
         private float GetPermanentReconnectFailureTimeoutSeconds()
@@ -2118,8 +3714,10 @@ namespace Network_A.Tests.Realtime
             return false;
         }
 
+        //* این تابع بعد از شکست قطعی یا لغو ریکانکت، خروج محلی امن از روم را انجام می دهد.
         private void ForceLocalExitAfterPermanentReconnectFailure(string reason)
         {
+            StopRealtimeReconnectLoop("permanent_reconnect_failure_local_exit");
             if (!cleanupSharedWorldAfterPermanentReconnectFailure) return;
             if (permanentReconnectFailureCleanupApplied) return;
 
@@ -2139,6 +3737,7 @@ namespace Network_A.Tests.Realtime
             isJoinRoomRunning = false;
             isLeaveRoomRunning = false;
             isSendMessageRunning = false;
+            isRealtimeReconnectRunning = false;
             transportDropAlreadyHandled = true;
             isUserRequestedExitFlow = false;
 
@@ -2149,7 +3748,6 @@ namespace Network_A.Tests.Realtime
             UpdateSendMessageButton();
 
             CleanupSharedWorldAfterUserExit(safeReason);
-            ShowRealtimeWarningMessage("Reconnect failed. You were removed from the room locally.");
 
             OnRealtimeReconnectFailedPermanentlyFor3D?.Invoke(safeReason);
             if (invokeDisconnectedFor3DAfterPermanentReconnectFailure) OnRealtimeDisconnectedFor3D?.Invoke(safeReason);
@@ -2295,8 +3893,8 @@ namespace Network_A.Tests.Realtime
         {
             if (!enableTestKeepAlive)
             {
-                Log("KeepAlive skipped. enableTestKeepAlive=false");
-                return;
+                enableTestKeepAlive = true;
+                Log("KeepAlive forced on. Realtime gRPC stream must not stay idle.");
             }
 
             if (!IsRealtimeReady()) return;
@@ -2321,7 +3919,7 @@ namespace Network_A.Tests.Realtime
                         continue;
                     }
 
-                    using (CancellationTokenSource pingCts = CreateLinkedTimeoutToken(Mathf.Max(1000, sendTimeoutMs)))
+                    using (CancellationTokenSource pingCts = CreateLinkedTimeoutToken(Mathf.Max(1000, keepAlivePingTimeoutMs)))
                     {
                         bool sent = await realtimeClient.SendPingAsync(pingCts.Token);
                         if (!sent)
@@ -2356,6 +3954,7 @@ namespace Network_A.Tests.Realtime
         //* این تابع منابع تست جی‌آر‌پی‌سی را هنگام حذف آبجکت بدون دیسکانکت شبکه ای آزاد می کند تا ادیتور قفل نشود.
         private void ReleaseForDestroyWithoutNetworkAwait()
         {
+            StopRealtimeReconnectLoop("object_destroy_release");
             StopKeepAliveLoop();
             ClearRoomListButtons();
             UnbindEvents();
@@ -2408,8 +4007,17 @@ namespace Network_A.Tests.Realtime
             if (isCleaningUp) return;
 
             isCleaningUp = true;
+
+            if (userRequestedExit)
+            {
+                isUserRequestedExitFlow = true;
+                transportDropAlreadyHandled = true;
+                isRealtimeReconnectRunning = false;
+            }
+
+            StopRealtimeReconnectLoop("cleanup_started:" + SafeText(reason));
             StopPermanentReconnectFailureCleanupWatch("cleanup_started:" + SafeText(reason));
-            if (userRequestedExit) isUserRequestedExitFlow = true;
+
             Log("Cleanup started: " + reason + " | objectDestroy=" + objectDestroy + " | userRequestedExit=" + userRequestedExit);
             UpdateConnectionButtons();
             UpdateCreateRoomButton();
@@ -2445,9 +4053,12 @@ namespace Network_A.Tests.Realtime
                     Log("Disconnect cleanup warning: " + ex.Message);
                 }
 
-                CleanupClientObjectsOnly();
+                CleanupClientObjectsOnly(!userRequestedExit);
 
-                if (userRequestedExit && !objectDestroy) CleanupSharedWorldAfterUserExit("manual_disconnect:" + SafeText(reason));
+                if (userRequestedExit && !objectDestroy)
+                {
+                    CleanupSharedWorldAfterUserExit("manual_disconnect:" + SafeText(reason));
+                }
 
                 isConnected = false;
                 isAuthenticated = false;
@@ -2456,14 +4067,40 @@ namespace Network_A.Tests.Realtime
                 isCreateRoomRunning = false;
                 isJoinRoomRunning = false;
                 isLeaveRoomRunning = false;
+                isSendMessageRunning = false;
+                isRealtimeReconnectRunning = false;
                 transportDropAlreadyHandled = true;
 
+                joinedRoom = null;
+                selectedListedRoom = null;
+                activeRoomId = string.Empty;
+                activeRoomName = string.Empty;
+
+                SetRoomListInteractable(false);
                 SetListRoomsButtonInteractable(false);
-                if (!objectDestroy) ShowRealtimeWarningMessage("Disconnected. You left all rooms.");
+                UpdateRoomDisplay();
+
+                if (!objectDestroy)
+                {
+                    if (userRequestedExit)
+                    {
+                        ShowServerDebugPanelForManualRealtimeDisconnectSuccess(reason);
+                    }
+                    else
+                    {
+                        ShowRealtimeWarningMessage("Disconnected. You left all rooms.");
+                    }
+                }
             }
             finally
             {
                 isCleaningUp = false;
+
+                if (userRequestedExit)
+                {
+                    isUserRequestedExitFlow = false;
+                }
+
                 Log("Cleanup completed: " + reason);
                 UpdateConnectionButtons();
                 UpdateCreateRoomButton();
@@ -2471,18 +4108,26 @@ namespace Network_A.Tests.Realtime
             }
         }
 
-        private void CleanupClientObjectsOnly()
+        private void CleanupClientObjectsOnly(bool clearRoomList = true)
         {
             StopKeepAliveLoop();
-            ClearRoomListButtons();
+
+            if (clearRoomList)
+            {
+                ClearRoomListButtons();
+                lastListedRooms = Array.Empty<RealtimeRoomDto>();
+                lastCreatedRoomId = string.Empty;
+            }
+            else
+            {
+                SetRoomListInteractable(false);
+            }
 
             selectedListedRoom = null;
             joinedRoom = null;
             isJoiningFromRoomList = false;
             isJoinRoomRunning = false;
             isLeaveRoomRunning = false;
-            lastListedRooms = Array.Empty<RealtimeRoomDto>();
-            lastCreatedRoomId = string.Empty;
             isCreateRoomRunning = false;
 
             UnbindEvents();
@@ -2504,7 +4149,6 @@ namespace Network_A.Tests.Realtime
             UpdateCreateRoomButton();
             UpdateSendMessageButton();
         }
-
         private bool EnsureReadyForRoomMessage()
         {
             if (!IsRealtimeReady()) return Fail("Client is not connected/authenticated.");
@@ -2704,14 +4348,21 @@ namespace Network_A.Tests.Realtime
                 if (foundPanel != null) pnlServerDebug = foundPanel;
             }
 
-            if (serverDebugMessageText == null && pnlServerDebug != null)
+            if (pnlServerDebug != null)
             {
-                serverDebugMessageText = pnlServerDebug.GetComponentInChildren<TextMeshProUGUI>(true);
+                if (txtServerDebugTitle == null) txtServerDebugTitle = FindTextMeshChildByName(pnlServerDebug.transform, "Txt_ServerDebugTitle");
+                if (txtServerDebugMessage == null) txtServerDebugMessage = FindTextMeshChildByName(pnlServerDebug.transform, "Txt_ServerDebugMessage");
+                if (txtServerDebugTechnical == null) txtServerDebugTechnical = FindTextMeshChildByName(pnlServerDebug.transform, "Txt_ServerDebugTechnical");
+                if (btnServerDebugClose == null) btnServerDebugClose = FindButtonChildByName(pnlServerDebug.transform, "Btn_Close");
+                if (btnServerDebugRetry == null) btnServerDebugRetry = FindButtonChildByName(pnlServerDebug.transform, "Btn_Retry");
+                if (btnServerDebugRelogin == null) btnServerDebugRelogin = FindButtonChildByName(pnlServerDebug.transform, "Btn_Relogin");
             }
 
-            if (pnlServerDebug != null || serverDebugMessageText != null)
+            BindServerDebugButtonHandlers(source);
+
+            if (pnlServerDebug != null || txtServerDebugMessage != null)
             {
-                Log("Server debug UI refs resolved | source=" + SafeText(source) + " | panel=" + (pnlServerDebug != null) + " | text=" + (serverDebugMessageText != null));
+                Log("Server debug UI refs resolved | source=" + SafeText(source) + " | panel=" + (pnlServerDebug != null) + " | title=" + (txtServerDebugTitle != null) + " | message=" + (txtServerDebugMessage != null) + " | technical=" + (txtServerDebugTechnical != null));
             }
         }
 
@@ -2735,27 +4386,254 @@ namespace Network_A.Tests.Realtime
             return null;
         }
 
+        private static TextMeshProUGUI FindTextMeshChildByName(Transform root, string childName)
+        {
+            if (root == null || string.IsNullOrWhiteSpace(childName)) return null;
+
+            TextMeshProUGUI[] texts = root.GetComponentsInChildren<TextMeshProUGUI>(true);
+            for (int i = 0; i < texts.Length; i++)
+            {
+                TextMeshProUGUI candidate = texts[i];
+                if (candidate == null) continue;
+                if (string.Equals(candidate.name, childName, StringComparison.Ordinal)) return candidate;
+            }
+
+            return null;
+        }
+
+        private static Button FindButtonChildByName(Transform root, string childName)
+        {
+            if (root == null || string.IsNullOrWhiteSpace(childName)) return null;
+
+            Button[] buttons = root.GetComponentsInChildren<Button>(true);
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                Button candidate = buttons[i];
+                if (candidate == null) continue;
+                if (string.Equals(candidate.name, childName, StringComparison.Ordinal)) return candidate;
+            }
+
+            return null;
+        }
+        //* این تابع عنوان پنل دیباگ را بر اساس مرحله فعلی انتخاب می کند.
+        private string GetServerDebugProgressTitleForStage(string stage)
+        {
+            string safeStage = SafeText(stage);
+            lastRealtimeServerDebugStage = safeStage;
+            string upperStage = safeStage.ToUpperInvariant();
+
+            if (IsRealtimeInternetLostStage(upperStage)) return FixedInternetLostDebugTitle;
+
+            bool isGameServerStage =
+                upperStage.Contains("GAME_SERVER") ||
+                upperStage.Contains("DEDICATED");
+
+            if (isGameServerStage)
+            {
+                return string.IsNullOrWhiteSpace(gameServerReconnectProgressTitle)
+                    ? "اتصال به گیم سرور"
+                    : gameServerReconnectProgressTitle.Trim();
+            }
+
+            return string.IsNullOrWhiteSpace(realtimeConnectProgressTitle)
+                ? "اتصال به Realtime"
+                : realtimeConnectProgressTitle.Trim();
+        }
+
+        //* این تابع مشخص می کند آیا مرحله فعلی فقط اعلام قطع اینترنت است یا نه.
+        private static bool IsRealtimeInternetLostStage(string upperStage)
+        {
+            if (string.IsNullOrWhiteSpace(upperStage)) return false;
+            return upperStage.Contains("INTERNET_CONNECTION_LOST")
+                   || upperStage.Contains("NETWORK_LOST")
+                   || upperStage.Contains("LOCAL_INTERNET_NOT_REACHABLE");
+        }
+
+        //* این تابع متن قدیمی قطع اینترنت را که از اینسپکتور مانده باشد تشخیص می دهد.
+        private static bool IsLegacyInternetLostReconnectMessage(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            string safeValue = value.Trim();
+            bool mentionsInternetLoss = safeValue.Contains("اینترنت قطع شد") || safeValue.Contains("نت قطع") || safeValue.Contains("قطع اینترنت");
+            bool mentionsReconnectAction = safeValue.Contains("تلاش برای اتصال") || safeValue.Contains("بازیابی اتصال") || safeValue.Contains("ریکانکت");
+            return mentionsInternetLoss && mentionsReconnectAction;
+        }
+
+        //* این تابع برای قطع اینترنت، متن نهایی کاربر را مستقل از مقدار ذخیره شده در اینسپکتور برمی گرداند.
+        private static string NormalizeInternetLostMessageForUi(string message)
+        {
+            return IsLegacyInternetLostReconnectMessage(message) ? FixedInternetLostUserMessage : message;
+        }
+        //* این تابع پیام پیشرفت اتصال را روی پنل دیباگ سرور نشان می دهد.
+        private void ShowServerDebugPanelForRealtimeProgress(string message, string stage, string technicalDetails, bool isRunning)
+        {
+            if (!openServerDebugPanelOnRealtimeConnectProgress) return;
+
+            AutoResolveServerDebugReferences("realtime_progress:" + stage);
+
+            string safeStage = SafeText(stage);
+            string upperStage = safeStage.ToUpperInvariant();
+            if (ShouldSuppressRealtimeProgressUiForNetworkIssue(upperStage))
+            {
+                if (keepInternetLostStatusWhileNetworkIssueUiLocked) SetStatus(GetRealtimeInternetLostImmediateMessage());
+                Log("Realtime progress UI suppressed while network issue is active | stage=" + safeStage);
+                return;
+            }
+
+            string safeMessage = string.IsNullOrWhiteSpace(message) ? realtimeConnectPreparingMessage : message.Trim();
+            if (IsRealtimeInternetLostStage(upperStage) || IsLegacyInternetLostReconnectMessage(safeMessage)) safeMessage = FixedInternetLostUserMessage;
+            string safeTitle = GetServerDebugProgressTitleForStage(safeStage);
+            if (string.Equals(safeMessage, FixedInternetLostUserMessage, StringComparison.Ordinal)) safeTitle = FixedInternetLostDebugTitle;
+            string safeTechnical = string.IsNullOrWhiteSpace(technicalDetails) ? safeStage : technicalDetails.Trim();
+
+            if (pnlServerDebug != null && !pnlServerDebug.activeSelf) pnlServerDebug.SetActive(true);
+            if (txtServerDebugTitle != null) ApplyTextMeshValue(txtServerDebugTitle, safeTitle);
+            if (txtServerDebugMessage != null) ApplyTextMeshValue(txtServerDebugMessage, safeMessage);
+            if (txtServerDebugTechnical != null) ApplyTextMeshValue(txtServerDebugTechnical, safeStage + "\n" + safeTechnical);
+
+            ApplyServerDebugButtonsForRealtimeFlow(isRunning, safeStage);
+            SetStatus(safeMessage);
+            Log("Realtime debug progress | stage=" + safeStage + " | running=" + isRunning + " | message=" + SafeText(safeMessage));
+        }
+
         private void ShowServerDebugPanelForRealtimeConnectFailure(string reason)
         {
             if (!openServerDebugPanelOnRealtimeConnectFailure) return;
 
-            AutoResolveServerDebugReferences("connect_failure");
-
             string message = string.IsNullOrWhiteSpace(realtimeConnectFailureDebugMessage)
-                ? "Realtime connection failed. Please try again."
+                ? "اتصال به Realtime انجام نشد. لطفاً دوباره تلاش کنید."
                 : realtimeConnectFailureDebugMessage.Trim();
 
-            if (pnlServerDebug != null && !pnlServerDebug.activeSelf) pnlServerDebug.SetActive(true);
-            if (serverDebugMessageText != null) ApplyTextMeshValue(serverDebugMessageText, message);
+            ShowServerDebugPanelForRealtimeProgress(message, "REALTIME_CONNECT_FAILED", "Reason=" + SafeText(reason), false);
+        }
 
-            SetStatus(message);
-            Log("Realtime connect failure debug panel requested | reason=" + SafeText(reason) + " | panel=" + (pnlServerDebug != null) + " | text=" + (serverDebugMessageText != null));
+        private void ShowServerDebugPanelForRealtimeConnectSuccess(string reason)
+        {
+            string message = string.IsNullOrWhiteSpace(realtimeConnectSuccessDebugMessage)
+                ? "اتصال به Realtime با موفقیت انجام شد."
+                : realtimeConnectSuccessDebugMessage.Trim();
+
+            ShowServerDebugPanelForRealtimeProgress(message, "REALTIME_CONNECT_SUCCESS", "Reason=" + SafeText(reason), false);
+            HideServerDebugPanelAfterRealtimeConnectSuccess();
+        }
+
+        //* این تابع وضعیت دکمه های پنل دیباگ را بر اساس مرحله ریکانکت تنظیم می کند.
+        private void ApplyServerDebugButtonsForRealtimeFlow(bool isRunning, string stage)
+        {
+            string safeStage = SafeText(stage);
+            string upperStage = safeStage.ToUpperInvariant();
+
+            bool isFailureStage = IsRealtimeDebugFailureStage(safeStage);
+
+            bool isRecoveringConnection =
+                upperStage.Contains("RECONNECT") ||
+                upperStage.Contains("CONNECTION_LOST") ||
+                upperStage.Contains("INTERNET_CONNECTION_LOST");
+
+            if (isRunning)
+            {
+                SetButtonGameObjectActive(btnServerDebugClose, true);
+                SetButtonInteractable(btnServerDebugClose, true);
+
+                SetButtonGameObjectActive(btnServerDebugRetry, false);
+                SetButtonGameObjectActive(btnServerDebugRelogin, false);
+                return;
+            }
+
+            SetButtonGameObjectActive(btnServerDebugClose, true);
+            SetButtonInteractable(btnServerDebugClose, true);
+
+            SetButtonGameObjectActive(btnServerDebugRetry, isFailureStage);
+            SetButtonInteractable(btnServerDebugRetry, isFailureStage);
+
+            SetButtonGameObjectActive(btnServerDebugRelogin, false);
+        }
+
+        //* این تابع مشخص می کند مرحله فعلی یک نتیجه شکست نهایی یا قابل تلاش دوباره است یا نه.
+        private bool IsRealtimeDebugFailureStage(string stage)
+        {
+            if (string.IsNullOrWhiteSpace(stage)) return false;
+
+            string value = stage.Trim().ToUpperInvariant();
+            return value.Contains("FAILED")
+                   || value.Contains("FAILURE")
+                   || value.Contains("EXCEPTION")
+                   || value.Contains("TIMEOUT");
+        }
+
+        private static void SetButtonGameObjectActive(Button button, bool active)
+        {
+            if (button == null) return;
+            if (button.gameObject.activeSelf != active) button.gameObject.SetActive(active);
+        }
+
+        private static void SetButtonInteractable(Button button, bool interactable)
+        {
+            if (button == null) return;
+            if (button.interactable != interactable) button.interactable = interactable;
+        }
+
+        //* این تابع دکمه های پنل دیباگ را به هندلرهای امن وصل می کند.
+        private void BindServerDebugButtonHandlers(string source)
+        {
+            if (serverDebugButtonHandlersBound) return;
+            if (btnServerDebugClose == null && btnServerDebugRetry == null && btnServerDebugRelogin == null) return;
+
+            if (btnServerDebugClose != null) btnServerDebugClose.onClick.AddListener(HideServerDebugPanelFromDebugButton);
+            if (btnServerDebugRetry != null) btnServerDebugRetry.onClick.AddListener(RetryRealtimeFromServerDebugButton);
+
+            serverDebugButtonHandlersBound = true;
+            Log("Server debug button handlers bound. source=" + SafeText(source));
+        }
+
+        //* این تابع فقط پنل پیام را می بندد و هیچ نقشی در توقف ریکانکت، خروج از روم، یا پاکسازی گیم سرور ندارد.
+        public void HideServerDebugPanelFromDebugButton()
+        {
+            AutoResolveServerDebugReferences("debug_close_button_hide_message_only");
+            if (pnlServerDebug != null && pnlServerDebug.activeSelf) pnlServerDebug.SetActive(false);
+            Log("Server debug close hidden only. Reconnect and room/game-server context were not changed.");
+        }
+
+        //* این تابع بعد از شکست ریکانکت، تلاش دوباره را از همان پنل دیباگ شروع می کند.
+        public void RetryRealtimeFromServerDebugButton()
+        {
+            if (!IsRealtimeRetryButtonOwnedByRealtimePanel())
+            {
+                Log("Server debug retry ignored because current panel is not owned by realtime. stage=" + SafeText(lastRealtimeServerDebugStage));
+                return;
+            }
+
+            if (isConnectAndAuthRunning || isRealtimeReconnectRunning)
+            {
+                Log("Server debug retry ignored because realtime flow is already running.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeRoomId))
+            {
+                StartRealtimeReconnectLoop("server_debug_retry_button");
+                return;
+            }
+
+            if (!CanStartNormalRealtimeConnectNow("server_debug_retry_button")) return;
+
+            ConnectAndAuthButton();
+        }
+
+        private bool IsRealtimeRetryButtonOwnedByRealtimePanel()
+        {
+            if (string.IsNullOrWhiteSpace(lastRealtimeServerDebugStage)) return false;
+
+            string upperStage = lastRealtimeServerDebugStage.Trim().ToUpperInvariant();
+
+            if (!upperStage.Contains("REALTIME") && !upperStage.Contains("RECONNECT")) return false;
+            if (upperStage.Contains("AUTH_NOT_READY")) return false;
+
+            return IsRealtimeDebugFailureStage(upperStage);
         }
 
         private void HideServerDebugPanelAfterRealtimeConnectSuccess()
         {
-            if (!closeServerDebugPanelOnRealtimeConnectSuccess) return;
-
             AutoResolveServerDebugReferences("connect_success");
             if (pnlServerDebug != null && pnlServerDebug.activeSelf) pnlServerDebug.SetActive(false);
         }
@@ -2849,12 +4727,17 @@ namespace Network_A.Tests.Realtime
             }
         }
 
-        //* این تابع مقدار تکست را اعمال می کند و در صورت نیاز مش تکست مش پرو را تازه سازی می کند.
+        //* این تابع مقدار تکست را با پشتیبانی از آر تی ال تکست مش پرو اعمال می کند.
         private void ApplyTextMeshValue(TextMeshProUGUI targetText, string value)
         {
             if (targetText == null) return;
 
-            targetText.text = value ?? string.Empty;
+            string safeValue = value ?? string.Empty;
+
+            if (!TryApplyRtlTextMeshProValue(targetText, safeValue))
+            {
+                targetText.text = safeValue;
+            }
 
             if (!forceTextMeshRefreshAfterUiApply) return;
 
@@ -2862,7 +4745,60 @@ namespace Network_A.Tests.Realtime
             targetText.SetLayoutDirty();
             targetText.ForceMeshUpdate(true, true);
         }
+        //* این تابع اگر روی آبجکت تکست، کامپوننت آر تی ال تکست مش پرو وجود داشته باشد، متن را از همان مسیر اعمال می کند.
+        private bool TryApplyRtlTextMeshProValue(TextMeshProUGUI targetText, string value)
+        {
+            if (targetText == null) return false;
 
+            Component[] components = targetText.GetComponents<Component>();
+
+            for (int i = 0; i < components.Length; i++)
+            {
+                Component component = components[i];
+                if (component == null) continue;
+
+                Type componentType = component.GetType();
+                string typeName = componentType.Name;
+
+                bool isRtlTextMeshPro =
+                    typeName.IndexOf("RtlTextMeshpro", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    typeName.IndexOf("RtlTextMeshPro", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    typeName.IndexOf("RTLTextMeshPro", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                if (!isRtlTextMeshPro) continue;
+
+                try
+                {
+                    System.Reflection.PropertyInfo textProperty = componentType.GetProperty("text");
+                    if (textProperty != null && textProperty.CanWrite && textProperty.PropertyType == typeof(string))
+                    {
+                        textProperty.SetValue(component, value);
+                        return true;
+                    }
+
+                    System.Reflection.PropertyInfo originalTextProperty = componentType.GetProperty("OriginalText");
+                    if (originalTextProperty != null && originalTextProperty.CanWrite && originalTextProperty.PropertyType == typeof(string))
+                    {
+                        originalTextProperty.SetValue(component, value);
+                        return true;
+                    }
+
+                    System.Reflection.MethodInfo setTextMethod = componentType.GetMethod("SetText", new Type[] { typeof(string) });
+                    if (setTextMethod != null)
+                    {
+                        setTextMethod.Invoke(component, new object[] { value });
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[G7-gRPC-RoomLobby] RTL text apply failed | object=" +
+                                     targetText.name + " | component=" + typeName + " | error=" + ex.Message);
+                }
+            }
+
+            return false;
+        }
         //* این تابع وضعیت وصل بودن رفرنس های یو آی را مستقیم در کنسول چاپ می کند.
         private void LogUiReferences(string source)
         {
@@ -3047,6 +4983,7 @@ namespace Network_A.Tests.Realtime
             }
 
             room.Normalize();
+            RepairRoomDisplayFieldsFromKnownRoom(room);
 
             int onlineCount = joined ? Mathf.Max(1, room.onlineCount) : room.onlineCount;
             string ownerName = string.IsNullOrWhiteSpace(room.ownerUserName) ? "-" : room.ownerUserName;
@@ -3058,5 +4995,1318 @@ namespace Network_A.Tests.Realtime
                 "\nUsers: " + onlineCount + "/" + room.maxPlayers
             );
         }
+
+        //* این تابع اجازه نمی دهد ورود به Game Server یا DTO ناقص، owner/name/maxPlayers روم نمایش داده شده را پاک کند.
+        private void RepairRoomDisplayFieldsFromKnownRoom(RealtimeRoomDto room)
+        {
+            if (room == null || string.IsNullOrWhiteSpace(room.roomId)) return;
+
+            RealtimeRoomDto knownRoom = FindKnownRoomForDisplayRepair(room.roomId);
+            if (knownRoom == null || ReferenceEquals(knownRoom, room)) return;
+
+            knownRoom.Normalize();
+
+            if (string.IsNullOrWhiteSpace(room.roomName) &&
+                !string.IsNullOrWhiteSpace(knownRoom.roomName))
+            {
+                room.roomName = knownRoom.roomName;
+            }
+
+            if (string.IsNullOrWhiteSpace(room.ownerUserName) &&
+                !string.IsNullOrWhiteSpace(knownRoom.ownerUserName))
+            {
+                room.ownerUserName = knownRoom.ownerUserName;
+            }
+
+            if (string.IsNullOrWhiteSpace(room.ownerUserId) &&
+                !string.IsNullOrWhiteSpace(knownRoom.ownerUserId))
+            {
+                room.ownerUserId = knownRoom.ownerUserId;
+            }
+
+            if (room.maxPlayers <= 0 && knownRoom.maxPlayers > 0)
+            {
+                room.maxPlayers = knownRoom.maxPlayers;
+            }
+        }
+
+        //* این تابع نسخه شناخته شده همان روم را برای ترمیم UI پیدا می کند.
+        private RealtimeRoomDto FindKnownRoomForDisplayRepair(string roomId)
+        {
+            if (string.IsNullOrWhiteSpace(roomId)) return null;
+
+            if (selectedListedRoom != null &&
+                !ReferenceEquals(selectedListedRoom, joinedRoom) &&
+                IsSameText(selectedListedRoom.roomId, roomId))
+            {
+                return selectedListedRoom;
+            }
+
+            RealtimeRoomDto listedRoom = FindLastListedRoom(roomId);
+            if (listedRoom != null && !ReferenceEquals(listedRoom, joinedRoom))
+            {
+                return listedRoom;
+            }
+
+            return null;
+        }
+
+        //* این تابع اجازه می دهد اسکریپت های دیگر، پیام تستی را داخل لاگ تکست ریل تایم چاپ کنند.
+        public void AppendExternalLogTextLine(string source, string message)
+        {
+            string safeSource = string.IsNullOrWhiteSpace(source) ? "External" : source.Trim();
+            string safeMessage = string.IsNullOrWhiteSpace(message) ? string.Empty : message.Trim();
+
+            if (string.Equals(safeSource, "DedicatedMove", StringComparison.OrdinalIgnoreCase) ||
+                safeMessage.StartsWith("GAME_SERVER_MOVE_SENT", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendDedicatedMoveOnlyLogText(safeSource, safeMessage);
+                return;
+            }
+
+            Log("[" + safeSource + "] " + safeMessage);
+        }
+
+        //* این تابع برای تست حرکت، لاگ تکست را فقط با دیتای ارسال حرکت گیم سرور پر می کند.
+        private void AppendDedicatedMoveOnlyLogText(string source, string message)
+        {
+            string safeSource = string.IsNullOrWhiteSpace(source) ? "DedicatedMove" : source.Trim();
+            string safeMessage = string.IsNullOrWhiteSpace(message) ? string.Empty : message.Trim();
+
+            string line = "[G7-gRPC-RoomLobby] [" + safeSource + "] " + safeMessage;
+
+            Debug.Log(line);
+
+            List<string> moveLines = new List<string>();
+
+            string current = logBuffer.ToString();
+            string[] lines = current.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string item = lines[i];
+                if (string.IsNullOrWhiteSpace(item)) continue;
+
+                if (item.Contains("[DedicatedMove] GAME_SERVER_MOVE_SENT"))
+                {
+                    moveLines.Add(item);
+                }
+            }
+
+            moveLines.Add(line);
+
+            while (moveLines.Count > 12)
+            {
+                moveLines.RemoveAt(0);
+            }
+
+            logBuffer.Length = 0;
+            logBuffer.AppendLine("=== GAME SERVER MOVE SEND LOG ===");
+
+            for (int i = 0; i < moveLines.Count; i++)
+            {
+                logBuffer.AppendLine(moveLines[i]);
+            }
+
+            QueueLogText(logBuffer.ToString());
+        }
+
+
+        //* این تابع قطع شدن اینترنت سیستم را قبل از خطای دیرهنگام ترنسپورت تشخیص می دهد.
+        private void DetectImmediateInternetLostByLocalNetwork()
+        {
+            if (!showServerDebugPanelImmediatelyOnInternetLost) return;
+            if (isUserRequestedExitFlow || isCleaningUp) return;
+            if (!HasActiveRealtimeNetworkContextForInternetLostWatch()) return;
+
+            if (IsLocalNetworkUnavailableFast())
+            {
+                if (immediateInternetLostHandled && isRealtimeReconnectRunning) return;
+
+                immediateInternetLostHandled = true;
+                MarkRealtimeDisconnectedByTransport("local_internet_not_reachable");
+                return;
+            }
+
+            immediateInternetLostHandled = false;
+            consecutiveFastRealtimeProbeFailures = 0;
+        }
+
+        //* این تابع مسیر واقعی تی سی پی به سرور ریل تایم را جدا از جی آر پی سی بررسی می کند تا یو آی منتظر تایم اوت استریم نماند.
+        private void DetectImmediateInternetLostByFastProbe()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+    return;
+#else
+            if (!enableFastRealtimeTcpConnectivityProbe) return;
+            if (isUserRequestedExitFlow || isCleaningUp) return;
+            if (!HasActiveRealtimeNetworkContextForInternetLostWatch()) return;
+            if (immediateInternetLostHandled && isRealtimeReconnectRunning) return;
+            if (fastRealtimeProbeRunning) return;
+
+            float now = Time.realtimeSinceStartup;
+            float interval = Mathf.Clamp(fastRealtimeConnectivityProbeIntervalSeconds, 0.15f, 0.75f);
+
+            if (now < nextFastRealtimeProbeAt) return;
+
+            nextFastRealtimeProbeAt = now + interval;
+            _ = RunFastRealtimeConnectivityProbeAsync();
+#endif
+        }
+
+        //* این تابع نتیجه پروب سریع سرور ریل تایم را می گیرد و نتیجه دیررس یا شکست تکی را بدون ساختن ریکانکت جعلی کنترل می کند.
+        private async Task RunFastRealtimeConnectivityProbeAsync()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            await Task.CompletedTask;
+#else
+            fastRealtimeProbeRunning = true;
+
+            //* نسل اتصال را همین لحظه‌ی شروع پروب ثبت می کنیم تا اگر تا لحظه‌ی برگشت پروب یک اتصال جدید و سالم
+            //* برقرار شده باشد (مثلاً ریکانکت اصلی سریع‌تر موفق شده)، نتیجه‌ی این پروبِ کهنه نادیده گرفته شود.
+            int probeGenerationId = connectionGenerationId;
+
+            try
+            {
+                string host;
+                int port;
+
+                if (!TryResolveRealtimeTcpProbeTarget(out host, out port)) return;
+
+                bool reachable = await TryConnectTcpProbeAsync(host, port, fastRealtimeConnectivityProbeTimeoutMs);
+
+                //* در فاصله‌ی زمانی awaitِ بالا ممکن است یک اتصال کاملاً جدید authenticate شده باشد؛
+                //* در این صورت نتیجه‌ی این پروب دیگر معتبر نیست و نباید هیچ اقدامی (نه ریست، نه شمارش شکست) انجام دهد.
+                if (probeGenerationId != connectionGenerationId)
+                {
+                    Log("Fast realtime connectivity probe result discarded as stale. probeGenerationId=" + probeGenerationId + " | currentGenerationId=" + connectionGenerationId);
+                    return;
+                }
+
+                if (reachable)
+                {
+                    consecutiveFastRealtimeProbeFailures = 0;
+                    if (!isRealtimeReconnectRunning) immediateInternetLostHandled = false;
+                    return;
+                }
+
+                consecutiveFastRealtimeProbeFailures++;
+                Log("Fast realtime connectivity probe failed but reconnect is not started by probe alone. target=" + SafeText(host) + ":" + port
+                    + " | failures=" + consecutiveFastRealtimeProbeFailures
+                    + " | allowProbeReconnect=" + allowFastRealtimeTcpProbeToStartReconnect
+                    + " | localNetworkUnavailable=" + IsLocalNetworkUnavailableFast());
+
+                int failuresNeeded = Mathf.Clamp(fastRealtimeConnectivityProbeFailuresBeforeReconnect, 1, 2);
+                if (consecutiveFastRealtimeProbeFailures < failuresNeeded) return;
+                if (isUserRequestedExitFlow || isCleaningUp) return;
+                if (!HasActiveRealtimeNetworkContextForInternetLostWatch()) return;
+                if (immediateInternetLostHandled && isRealtimeReconnectRunning) return;
+
+                immediateInternetLostHandled = true;
+
+                MarkRealtimeDisconnectedByTransport(
+                    "local_internet_not_reachable_fast_probe:" + SafeText(host) + ":" + port
+                );
+            }
+            catch (Exception ex)
+            {
+                Log("Fast realtime connectivity probe warning: " + ex.Message);
+            }
+            finally
+            {
+                fastRealtimeProbeRunning = false;
+            }
+#endif
+        }
+
+        //* این تابع هاست و پورت ریل تایم را برای پروب سریع از همان آدرس فعال کنترلر استخراج می کند.
+        private bool TryResolveRealtimeTcpProbeTarget(out string host, out int port)
+        {
+            host = string.Empty;
+            port = 0;
+
+            string source = !string.IsNullOrWhiteSpace(activeServerUrl) ? activeServerUrl.Trim() : ResolveRealtimeServerUrl();
+            if (string.IsNullOrWhiteSpace(source)) return false;
+
+            Uri uri;
+            if (Uri.TryCreate(source, UriKind.Absolute, out uri))
+            {
+                host = uri.Host;
+                port = uri.Port > 0 ? uri.Port : ResolveRealtimeTcpProbeDefaultPort(uri.Scheme);
+                return !string.IsNullOrWhiteSpace(host) && port > 0;
+            }
+
+            string value = source.Trim();
+            int slashIndex = value.IndexOf('/');
+            if (slashIndex >= 0) value = value.Substring(0, slashIndex);
+
+            int colonIndex = value.LastIndexOf(':');
+            if (colonIndex > 0 && colonIndex < value.Length - 1 && int.TryParse(value.Substring(colonIndex + 1), out int parsedPort))
+            {
+                host = value.Substring(0, colonIndex);
+                port = parsedPort;
+                return !string.IsNullOrWhiteSpace(host) && port > 0;
+            }
+
+            host = value;
+            port = ServerConfig.RealtimeGrpcStreamingEndpoint.Port;
+            return !string.IsNullOrWhiteSpace(host) && port > 0;
+        }
+
+        //* این تابع پورت پیش فرض پروب ریل تایم را بر اساس اسکیم آدرس مشخص می کند.
+        private int ResolveRealtimeTcpProbeDefaultPort(string scheme)
+        {
+            string safeScheme = string.IsNullOrWhiteSpace(scheme) ? string.Empty : scheme.Trim().ToLowerInvariant();
+            if (safeScheme == "https" || safeScheme == "grpcs") return 443;
+            if (safeScheme == "http" || safeScheme == "grpc") return 80;
+            return ServerConfig.RealtimeGrpcStreamingEndpoint.Port;
+        }
+
+        //* این تابع اتصال تی سی پی کوتاه به سرور ریل تایم را با تایم اوت محدود تست می کند.
+        private static async Task<bool> TryConnectTcpProbeAsync(string host, int port, int timeoutMs)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            await Task.CompletedTask;
+            return true;
+#else
+            if (string.IsNullOrWhiteSpace(host) || port <= 0) return false;
+
+            try
+            {
+                using (System.Net.Sockets.TcpClient client = new System.Net.Sockets.TcpClient())
+                {
+                    Task connectTask = client.ConnectAsync(host, port);
+                    Task timeoutTask = Task.Delay(Mathf.Max(250, timeoutMs));
+                    Task completedTask = await Task.WhenAny(connectTask, timeoutTask);
+
+                    if (completedTask != connectTask) return false;
+
+                    await connectTask;
+                    return client.Connected;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+#endif
+        }
+
+        //* این تابع پیام فوری قطع اینترنت را برای پنل ریل تایم برمی گرداند و مقدار قدیمی اینسپکتور را نادیده می گیرد.
+        private string GetRealtimeInternetLostImmediateMessage()
+        {
+            return FixedInternetLostUserMessage;
+        }
+
+        //* این تابع مشخص می کند آیا دلیل خطا مربوط به قطع اینترنت کاربر است یا نه.
+        private bool IsUserInternetUnavailableReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            return value.Contains("local_internet_not_reachable")
+                   || value.Contains("not_reachable")
+                   || value.Contains("internet");
+        }
+
+        //* این تابع تشخیص می دهد آیا علت فعلی واقعاً قطع اینترنت کاربر است یا فقط افت ترنسپورت ریل تایم.
+        private bool ShouldTreatReasonAsActualInternetLost(string reason)
+        {
+            if (IsLocalNetworkUnavailableFast())
+            {
+                return true;
+            }
+
+            if (checkNetFastOutageActive)
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                string value = reason.Trim().ToLowerInvariant();
+
+                if (value.Contains("checknet_fast_server_unreachable"))
+                {
+                    return true;
+                }
+            }
+
+            return IsUserInternetUnavailableReason(reason);
+        }
+
+        //* این تابع خطاهای ترنسپورت را که در قطعی شبکه رخ می دهند برای کنترل یو آی تشخیص می دهد.
+        private bool IsRealtimeNetworkIssueReason(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason)) return false;
+
+            string value = reason.Trim().ToLowerInvariant();
+            return IsUserInternetUnavailableReason(value)
+                   || value.Contains("dns")
+                   || value.Contains("unavailable")
+                   || value.Contains("stream removed")
+                   || value.Contains("receive failed")
+                   || value.Contains("send failed")
+                   || value.Contains("closed by remote")
+                   || value.Contains("socket")
+                   || value.Contains("transport")
+                   || value.Contains("network")
+                   || value.Contains("ssl")
+                   || value.Contains("timeout");
+        }
+
+        //* این تابع قفل یو آی قطع اینترنت واقعی را فعال می کند.
+        //* افت ترنسپورت ریل تایم مثل End of TCP stream نباید پیام «اینترنت قطع است» بسازد.
+        //* این تابع قفل UI قطع اینترنت واقعی را فعال می کند.
+        //* افت مستقل Transport نباید پیام قطع اینترنت بسازد.
+        private void MarkRealtimeNetworkIssueUiLocked(string reason)
+        {
+            bool actualInternetLost =
+                checkNetFastOutageActive ||
+                ShouldTreatReasonAsActualInternetLost(reason);
+
+            if (!actualInternetLost)
+            {
+                Log(
+                    "Realtime network issue lock skipped because reason is transport drop, not actual internet loss. reason=" +
+                    SafeText(reason)
+                );
+
+                ShowServerDebugPanelForRealtimeTransportDrop(reason);
+                return;
+            }
+
+            if (!suppressRealtimeReconnectProgressUiDuringNetworkIssue)
+            {
+                return;
+            }
+
+            realtimeNetworkIssueUiLocked = true;
+
+            realtimeNetworkIssueUiLockedUntil =
+                Time.realtimeSinceStartup +
+                Mathf.Max(3f, realtimeNetworkIssueUiLockSeconds);
+
+            suppressPlayerLeftUiUntil = Mathf.Max(
+                suppressPlayerLeftUiUntil,
+                realtimeNetworkIssueUiLockedUntil
+            );
+
+            ShowServerDebugPanelForInternetLost(reason);
+        }
+
+        //* این تابع بعد از احراز موفق ریل تایم، قفل پیام قطع شبکه را آزاد می کند ولی برای player_left قدیمی مهلت محافظتی نگه می دارد.
+        private void ReleaseRealtimeNetworkIssueUiLock(string reason)
+        {
+            bool wasLocked = realtimeNetworkIssueUiLocked;
+            realtimeNetworkIssueUiLocked = false;
+            realtimeNetworkIssueUiLockedUntil = 0f;
+            internetLostPanelShownForCurrentOutage = false;
+
+            if (suppressPlayerLeftUiDuringRealtimeReconnect)
+            {
+                suppressPlayerLeftUiUntil = Mathf.Max(
+                    suppressPlayerLeftUiUntil,
+                    Time.realtimeSinceStartup + Mathf.Max(1f, playerLeftSuppressSecondsAfterRealtimeReconnect)
+                );
+            }
+
+            if (wasLocked) Log("Realtime network issue UI lock released. reason=" + SafeText(reason));
+        }
+
+        //* این تابع وضعیت فعال بودن قفل پیام قطع شبکه را برمی گرداند.
+        private bool IsRealtimeNetworkIssueUiLockActive()
+        {
+            if (!realtimeNetworkIssueUiLocked) return false;
+            if (Time.realtimeSinceStartup <= realtimeNetworkIssueUiLockedUntil) return true;
+
+            realtimeNetworkIssueUiLocked = false;
+            realtimeNetworkIssueUiLockedUntil = 0f;
+            return false;
+        }
+
+        //* این تابع مشخص می کند کدام مراحل ریکانکت نباید هنگام قطعی شبکه روی یو آی نوشته شوند.
+        private bool ShouldSuppressRealtimeProgressUiForNetworkIssue(string upperStage)
+        {
+            if (!suppressRealtimeReconnectProgressUiDuringNetworkIssue) return false;
+            if (!IsRealtimeNetworkIssueUiLockActive()) return false;
+            if (string.IsNullOrWhiteSpace(upperStage)) return false;
+
+            return upperStage.Contains("REALTIME_RECONNECT_STARTED")
+                   || upperStage.Contains("REALTIME_RECONNECT_WAIT")
+                   || upperStage.Contains("REALTIME_RECONNECT_ATTEMPT")
+                   || upperStage.Contains("REALTIME_SOCKET_CONNECTING")
+                   || upperStage.Contains("REALTIME_CONNECT_FAILED");
+        }
+
+        //* این تابع پیام مناسب برای شروع ریکانکت را بر اساس علت واقعی انتخاب می کند.
+        private string GetRealtimeReconnectTransportDropMessage()
+        {
+            return FixedRealtimeTransportDropUserMessage;
+        }
+
+        //* این تابع وقتی ددیکیتد گیم‌سرور فعال است، player_left های مسیر ریل‌تایم را از یو آی و مسیر سه‌بعدی حذف می کند.
+        //* در این حالت منبع درست حضور پلیرها، پیام های خود ددیکیتد گیم‌سرور است نه presence قدیمی ریل‌تایم.
+        private bool ShouldSuppressPlayerLeftUiBecauseDedicatedGameServerIsSourceOfTruth(string playerId, string displayName)
+        {
+            if (!suppressRealtimePlayerLeftUiWhileDedicatedGameServerActive) return false;
+            if (dedicatedGameServerPresenceGuardActive) return true;
+            if (Time.realtimeSinceStartup <= dedicatedGameServerPresenceGuardUntil) return true;
+            return false;
+        }
+
+        //* این تابع player_left های قدیمی بعد از ریکانکت را که مربوط به نشست قبلی هستند از یو آی حذف می کند.
+        private bool ShouldSuppressPlayerLeftUiBecauseRealtimeReconnect(string playerId, string displayName)
+        {
+            if (!suppressPlayerLeftUiDuringRealtimeReconnect) return false;
+            if (isRealtimeReconnectRunning) return true;
+            if (IsRealtimeNetworkIssueUiLockActive()) return true;
+            if (Time.realtimeSinceStartup <= suppressPlayerLeftUiUntil) return true;
+            return false;
+        }
+
+        //* این تابع جلوی نمایش پاپ آپ های فنی را وقتی اینترنت کاربر قطع است می گیرد.
+        private bool ShouldSuppressRealtimePopupBecauseInternetIsDown(string reason)
+        {
+            if (isRealtimeReconnectRunning || immediateInternetLostHandled) return true;
+            if (IsUserInternetUnavailableReason(reason)) return true;
+            return IsLocalNetworkUnavailableFast();
+        }
+
+        //* این تابع فقط وقتی اینترنت واقعی قطع است، پیام های تلاش برای ریکانکت را روی یو آی مخفی می کند.
+        //* افت ترنسپورت ریل تایم نباید با اینترنت قطع شده یکی شود.
+        private bool ShouldSuppressReconnectProgressBecauseInternetIsDown(string reason)
+        {
+            bool actualInternetLost = ShouldTreatReasonAsActualInternetLost(reason);
+            if (!actualInternetLost && !immediateInternetLostHandled) return false;
+            if (IsRealtimeNetworkIssueUiLockActive() && actualInternetLost) return true;
+            if (immediateInternetLostHandled && IsLocalNetworkUnavailableFast()) return true;
+            return false;
+        }
+
+        //* این تابع مشخص می کند آیا کلاینت در وضعیتی هست که باید قطع اینترنت برای او نمایش داده شود یا نه.
+        private bool HasActiveRealtimeNetworkContextForInternetLostWatch()
+        {
+            if (isConnectAndAuthRunning || isRealtimeReconnectRunning) return true;
+            if (isConnected || isAuthenticated || isJoined) return true;
+            if (realtimeClient != null && realtimeClient.IsConnected) return true;
+
+            return false;
+        }
+
+        //* این تابع قطع بودن شبکه محلی را بدون انتظار برای خطای دیرهنگام جی آر پی سی بررسی می کند.
+        private bool IsLocalNetworkUnavailableFast()
+        {
+            if (Application.internetReachability == NetworkReachability.NotReachable) return true;
+
+#if !UNITY_WEBGL
+            try
+            {
+                if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable()) return true;
+            }
+            catch
+            {
+            }
+#endif
+
+            return false;
+        }
+        //* این تابع نتیجه خروج دستی از ریل تایم را روی پنل دیباگ نشان می دهد و پیام های قدیمی ریکانکت را پاک می کند.
+        private void ShowServerDebugPanelForManualRealtimeDisconnectSuccess(string reason)
+        {
+            AutoResolveServerDebugReferences("manual_realtime_disconnect_complete");
+
+            string safeTitle = "خروج از ریل تایم";
+            string safeMessage = "اتصال ریل تایم قطع شد. از روم و گیم سرور خارج شدید.";
+            string safeStage = "MANUAL_REALTIME_DISCONNECT_COMPLETE";
+            string safeReason = SafeText(reason);
+
+            if (pnlServerDebug != null && !pnlServerDebug.activeSelf) pnlServerDebug.SetActive(true);
+            if (txtServerDebugTitle != null) ApplyTextMeshValue(txtServerDebugTitle, safeTitle);
+            if (txtServerDebugMessage != null) ApplyTextMeshValue(txtServerDebugMessage, safeMessage);
+            if (txtServerDebugTechnical != null) ApplyTextMeshValue(txtServerDebugTechnical, safeStage + "\nReason=" + safeReason);
+
+            SetButtonGameObjectActive(btnServerDebugClose, true);
+            SetButtonInteractable(btnServerDebugClose, true);
+
+            SetButtonGameObjectActive(btnServerDebugRetry, false);
+            SetButtonGameObjectActive(btnServerDebugRelogin, false);
+
+            SetStatus(safeMessage);
+            Log("Manual realtime disconnect panel shown. reason=" + safeReason);
+        }
+        //* این تابع افت موقت ترنسپورت ریل تایم را جدا از قطع واقعی اینترنت نشان می دهد.
+        private void ShowServerDebugPanelForRealtimeTransportDrop(string reason)
+        {
+            AutoResolveServerDebugReferences("realtime_transport_drop");
+
+            string safeTitle = FixedRealtimeTransportDropDebugTitle;
+            string safeMessage = FixedRealtimeTransportDropUserMessage;
+            string safeReason = SafeText(reason);
+
+            if (pnlServerDebug != null && !pnlServerDebug.activeSelf) pnlServerDebug.SetActive(true);
+            if (txtServerDebugTitle != null) ApplyTextMeshValue(txtServerDebugTitle, safeTitle);
+            if (txtServerDebugMessage != null) ApplyTextMeshValue(txtServerDebugMessage, safeMessage);
+            if (txtServerDebugTechnical != null) ApplyTextMeshValue(txtServerDebugTechnical, "REALTIME_TRANSPORT_DROP\nReason=" + safeReason);
+
+            ApplyServerDebugButtonsForRealtimeFlow(true, "REALTIME_TRANSPORT_DROP");
+
+            SetStatus(safeMessage);
+            Log("Realtime transport drop panel shown. reason=" + safeReason);
+        }
+
+        //* این تابع پیام قطع اینترنت را در هر دوره قطعی فقط یک بار روی پنل دیباگ نشان می دهد و پاپ آپ جدا باز نمی کند.
+        private void ShowServerDebugPanelForInternetLost(string reason)
+        {
+            if (!showServerDebugPanelImmediatelyOnInternetLost) return;
+            if (internetLostPanelShownForCurrentOutage) return;
+
+            internetLostPanelShownForCurrentOutage = true;
+
+            AutoResolveServerDebugReferences("internet_connection_lost");
+
+            string safeTitle = FixedInternetLostDebugTitle;
+            string safeMessage = GetRealtimeInternetLostImmediateMessage();
+            string safeStage = "INTERNET_CONNECTION_LOST";
+
+            string safeReason = SafeText(reason);
+
+            lastRealtimeServerDebugStage = safeStage;
+
+            if (pnlServerDebug != null && !pnlServerDebug.activeSelf) pnlServerDebug.SetActive(true);
+            if (txtServerDebugTitle != null) ApplyTextMeshValue(txtServerDebugTitle, safeTitle);
+            if (txtServerDebugMessage != null) ApplyTextMeshValue(txtServerDebugMessage, safeMessage);
+            if (txtServerDebugTechnical != null) ApplyTextMeshValue(txtServerDebugTechnical, safeStage + "\nReason=" + safeReason);
+
+            ApplyServerDebugButtonsForRealtimeFlow(true, safeStage);
+
+            SetStatus(safeMessage);
+            Log("Internet connection lost panel shown once for current outage. reason=" + safeReason);
+        }
+
+        private void ShowCheckNetFastWarningOnlyPanel(string reason)
+        {
+            if (!showServerDebugPanelImmediatelyOnInternetLost) return;
+
+            checkNetFastWarningOnlyPanelActive = true;
+
+            if (internetLostPanelShownForCurrentOutage) return;
+
+            ShowServerDebugPanelForInternetLost(reason);
+
+            Log("CheckNet fast warning-only panel shown without starting reconnect. reason=" + SafeText(reason));
+        }
+
+        private void ClearCheckNetFastWarningOnlyPanelIfActive(string reason)
+        {
+            if (!checkNetFastWarningOnlyPanelActive) return;
+
+            checkNetFastWarningOnlyPanelActive = false;
+            internetLostPanelShownForCurrentOutage = false;
+
+            bool canHideWarningPanel =
+                !isRealtimeReconnectRunning &&
+                !checkNetFastOutageActive &&
+                !immediateInternetLostHandled &&
+                string.Equals(
+                    lastRealtimeServerDebugStage,
+                    "INTERNET_CONNECTION_LOST",
+                    StringComparison.Ordinal
+                );
+
+            if (canHideWarningPanel)
+            {
+                AutoResolveServerDebugReferences("checknet_fast_warning_clear");
+                if (pnlServerDebug != null && pnlServerDebug.activeSelf) pnlServerDebug.SetActive(false);
+                RestoreStatusTextAfterCheckNetWarningCleared(reason);
+            }
+
+            Log("CheckNet fast warning-only panel cleared. reason=" + SafeText(reason));
+        }
+
+        //* این تابع بعد از برگشت موفق CheckNet، متن قطع اینترنت را از Status Text خارج می کند.
+        private void RestoreStatusTextAfterCheckNetWarningCleared(string reason)
+        {
+            if (isRealtimeReconnectRunning) return;
+            if (checkNetFastOutageActive) return;
+            if (immediateInternetLostHandled) return;
+            if (IsRealtimeNetworkIssueUiLockActive()) return;
+            if (!IsRealtimeReady()) return;
+
+            string safeMessage = string.IsNullOrWhiteSpace(checkNetWarningClearedStatusMessage)
+                ? "اتصال برقرار است."
+                : checkNetWarningClearedStatusMessage.Trim();
+
+            SetStatus(safeMessage);
+            Log(
+                "Status text restored after CheckNet warning clear. reason=" +
+                SafeText(reason) +
+                " | joined=" +
+                isJoined +
+                " | message=" +
+                safeMessage
+            );
+        }
+
+        //* این تابع متن مرحله بازیابی روم و آماده سازی اتصال دوباره به گیم سرور را برمی گرداند.
+        private string GetRealtimeReconnectPrepareGameServerMessage()
+        {
+            return "اتصال بلادرنگ برگشت. در حال بازیابی روم و آماده سازی اتصال دوباره به گیم سرور...";
+        }
+
+        //* این تابع متن انتظار برای نتیجه نهایی اتصال دوباره به گیم سرور را برمی گرداند.
+        private string GetRealtimeReconnectWaitingForGameServerMessage()
+        {
+            return "روم بازیابی شد. در حال اتصال دوباره به گیم سرور...";
+        }
+        //* این تابع پیام شروع ریکانکت را بر اساس دلیل قطع اتصال انتخاب می کند.
+        private string GetRealtimeReconnectStartMessageForReason(string reason)
+        {
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                string value = reason.Trim().ToLowerInvariant();
+
+                if (ShouldTreatReasonAsActualInternetLost(value))
+                {
+                    return GetRealtimeInternetLostImmediateMessage();
+                }
+
+                if (IsRealtimeNetworkIssueReason(value))
+                {
+                    return GetRealtimeReconnectTransportDropMessage();
+                }
+            }
+
+            return string.IsNullOrWhiteSpace(realtimeReconnectStartingMessage)
+                ? "اتصال Realtime قطع شد. در حال تلاش برای اتصال دوباره..."
+                : realtimeReconnectStartingMessage.Trim();
+        }
+
+
+
+        //* این تابع وقتی ریکانکت به نتیجه نرسد، پیام نهایی شکست را روی پنل دیباگ نشان می دهد.
+        private void ShowRealtimeReconnectFinalFailurePanel(string reason, string stage, int attempts)
+        {
+            string safeReason = SafeText(reason);
+            string safeStage = string.IsNullOrWhiteSpace(stage) ? "REALTIME_RECONNECT_FAILED_PERMANENTLY" : stage.Trim();
+
+            ShowServerDebugPanelForRealtimeProgress(
+                "اتصال دوباره انجام نشد. لطفاً اینترنت خود را بررسی کنید و دوباره تلاش کنید.",
+                safeStage,
+                "Reason=" + safeReason + " | attempts=" + attempts,
+                false
+            );
+
+            SetStatus("اتصال دوباره انجام نشد. لطفاً اینترنت خود را بررسی کنید و دوباره تلاش کنید.");
+        }
+
+        private void BindAuthLoginReadyEvent(string source)
+        {
+            AuthManager.OnLoginReady -= HandleAuthLoginReadyForRealtime;
+            AuthManager.OnLoginReady += HandleAuthLoginReadyForRealtime;
+            Log("Auth login ready event bound. source=" + SafeText(source));
+        }
+
+        private void UnbindAuthLoginReadyEvent()
+        {
+            AuthManager.OnLoginReady -= HandleAuthLoginReadyForRealtime;
+        }
+
+        private void HandleAuthLoginReadyForRealtime(AuthUserDto user)
+        {
+            Log("Auth login ready received. Realtime auto connect is disabled. User must press Connect Realtime.");
+            UpdateConnectionButtons();
+            UpdateCreateRoomButton();
+            UpdateSendMessageButton();
+        }
+
+        private async void TryStartAutoConnectRealtimeAfterAuth(string source, AuthUserDto user)
+        {
+            if (!autoConnectRealtimeAfterAuthLogin) return;
+            if (!isActiveAndEnabled) return;
+            if (isAutoConnectRealtimeAfterAuthRunning) return;
+            if (isConnectAndAuthRunning || isRealtimeReconnectRunning || isCleaningUp) return;
+
+            AuthManager authManager = AuthManager.Instance;
+            if (authManager == null || !authManager.isLogin || authManager.CurrentUser == null) return;
+
+            if (autoConnectRealtimeOnlyWhenDisconnected && IsRealtimeReady())
+            {
+                if (autoListRoomsAfterAuthRealtimeConnect && !isJoined)
+                {
+                    Log("Realtime already ready after auth login. Refreshing room list. source=" + SafeText(source));
+                    await ListRoomsAsync();
+                }
+
+                return;
+            }
+
+            isAutoConnectRealtimeAfterAuthRunning = true;
+
+            try
+            {
+                float delay = Mathf.Max(0f, autoConnectRealtimeAfterAuthDelaySeconds);
+                if (delay > 0f) await Task.Delay(Mathf.RoundToInt(delay * 1000f));
+                if (!isActiveAndEnabled) return;
+
+                Log("Auto realtime connect started after auth login. source=" + SafeText(source) + " | user=" + (user != null ? SafeText(user.emailOrUsername) : "empty"));
+
+                ShowServerDebugPanelForRealtimeProgress(
+                    realtimeConnectPreparingMessage,
+                    "REALTIME_AUTO_CONNECT_AFTER_AUTH_LOGIN",
+                    "source=" + SafeText(source),
+                    true
+                );
+
+                bool ok = await LoginCheckConnectAndAuthAsync();
+
+                if (!ok)
+                {
+                    Log("Auto realtime connect after auth login failed. source=" + SafeText(source));
+                    ShowServerDebugPanelForRealtimeConnectFailure("auto_connect_after_auth_login_failed:" + SafeText(source));
+                    return;
+                }
+
+                Log("Auto realtime connect after auth login succeeded. source=" + SafeText(source));
+
+                if (autoListRoomsAfterAuthRealtimeConnect && !isJoined)
+                {
+                    Log("Room list refresh requested after auth login realtime connect. source=" + SafeText(source));
+                    await ListRoomsAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Auto realtime connect after auth login exception: " + ex.Message);
+                ShowServerDebugPanelForRealtimeConnectFailure("auto_connect_after_auth_login_exception:" + ex.Message);
+            }
+            finally
+            {
+                isAutoConnectRealtimeAfterAuthRunning = false;
+                UpdateConnectionButtons();
+                UpdateCreateRoomButton();
+                UpdateSendMessageButton();
+            }
+        }
+
+
+        //* این تابع تنها زمانی CheckNet را اجرا می کند که حلقه Reconnect مالک بررسی شبکه نباشد.
+        private void CheckNetFastReconnectWatch()
+        {
+            if (!enableCheckNetFastReconnectWatch) return;
+            if (AuthManager.Instance == null) return;
+            if (isCleaningUp || isUserRequestedExitFlow) return;
+            if (checkNetFastWatchRunning) return;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (singleCheckNetFailureTestRunning) return;
+#endif
+
+            // هنگام اجرای Reconnect، فقط خود حلقه Reconnect مالک CheckNet است.
+            if (isRealtimeReconnectRunning) return;
+
+            bool clientConnected = realtimeClient != null && realtimeClient.IsConnected;
+            bool authReady = realtimeAuthClient != null && realtimeAuthClient.IsAuthenticated;
+
+            bool normalConnectOrAuthIsRunning =
+                isConnectAndAuthRunning ||
+                isAutoConnectRealtimeAfterAuthRunning ||
+                (clientConnected && !authReady && !checkNetFastOutageActive);
+
+            if (normalConnectOrAuthIsRunning)
+            {
+                checkNetFastConsecutiveFailures = 0;
+                checkNetFastOutageActive = false;
+                checkNetFastReconnectKickRequested = false;
+                return;
+            }
+
+            bool realtimeLobbyOnlyReady =
+                IsRealtimeReady() &&
+                !isJoined &&
+                !IsDedicatedGameServerConnectedAndAuthenticated() &&
+                Application.internetReachability !=
+                NetworkReachability.NotReachable;
+
+            if (realtimeLobbyOnlyReady)
+            {
+                checkNetFastConsecutiveFailures = 0;
+                checkNetFastOutageActive = false;
+                immediateInternetLostHandled = false;
+                checkNetFastReconnectKickRequested = false;
+                return;
+            }
+
+            bool shouldWatch =
+                IsRealtimeReady() ||
+                isJoined ||
+                checkNetFastOutageActive;
+
+            if (!shouldWatch)
+            {
+                checkNetFastConsecutiveFailures = 0;
+                checkNetFastOutageActive = false;
+                checkNetFastReconnectKickRequested = false;
+                return;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            float interval = Mathf.Clamp(checkNetFastWatchIntervalSeconds, 0.5f, 3f);
+
+            if (now < nextCheckNetFastWatchAt) return;
+
+            nextCheckNetFastWatchAt = now + interval;
+
+            if (!checkNetFastOutageActive && IsDedicatedGameServerProvingNetworkIsAlive(false))
+            {
+                checkNetFastConsecutiveFailures = 0;
+                checkNetFastReconnectKickRequested = false;
+                return;
+            }
+
+            _ = RunCheckNetFastReconnectWatchAsync();
+        }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        //* این تابع آرگومان تست را فقط یک بار می خواند و بعد از آماده شدن کامل Realtime و Dedicated تست را شروع می کند.
+        private void ProcessSingleCheckNetFailureValidationTest()
+        {
+            if (!networkValidationCommandLineChecked)
+            {
+                networkValidationCommandLineChecked = true;
+
+                string[] commandLineArgs = Environment.GetCommandLineArgs();
+                for (int i = 0; i < commandLineArgs.Length; i++)
+                {
+                    if (!string.Equals(
+                            commandLineArgs[i],
+                            SingleCheckNetFailureTestArgument,
+                            StringComparison.OrdinalIgnoreCase
+                        ))
+                    {
+                        continue;
+                    }
+
+                    singleCheckNetFailureTestArmed = true;
+
+                    Log(
+                        "[NETWORK_VALIDATION] SINGLE_CHECKNET_FAILURE_ARMED | " +
+                        "waitingForRealtimeRoomAndDedicated=True"
+                    );
+
+                    break;
+                }
+            }
+
+            if (!singleCheckNetFailureTestArmed) return;
+            if (singleCheckNetFailureTestRunning) return;
+            if (checkNetFastWatchRunning || isRealtimeReconnectRunning) return;
+            if (!IsRealtimeReady() || !isJoined) return;
+            if (!IsDedicatedGameServerConnectedAndAuthenticated()) return;
+            if (!IsDedicatedGameServerProvingNetworkIsAlive(false)) return;
+            if (Application.internetReachability == NetworkReachability.NotReachable) return;
+
+            singleCheckNetFailureTestArmed = false;
+            singleCheckNetFailureTestRunning = true;
+            _ = RunSingleCheckNetFailureValidationAsync();
+        }
+
+        //* این تابع یک نتیجه ناموفق CheckNet را بدون قطع Transport تزریق می کند و نتیجه را با وضعیت واقعی اتصال می سنجد.
+        private async Task RunSingleCheckNetFailureValidationAsync()
+        {
+            int generationBeforeTest = connectionGenerationId;
+            int reconnectAttemptBeforeTest = realtimeReconnectAttemptCount;
+            string roomIdBeforeTest = activeRoomId;
+            CancellationToken cancellationToken =
+                lifecycleCts != null
+                    ? lifecycleCts.Token
+                    : CancellationToken.None;
+
+            checkNetFastConsecutiveFailures = 0;
+            forceNextCheckNetFailureForValidation = true;
+
+            Log(
+                "[NETWORK_VALIDATION] SINGLE_CHECKNET_FAILURE_START | " +
+                "realtimeReady=" +
+                IsRealtimeReady() +
+                " | joined=" +
+                isJoined +
+                " | roomId=" +
+                SafeText(roomIdBeforeTest) +
+                " | dedicatedConnected=" +
+                IsDedicatedGameServerConnectedAndAuthenticated() +
+                " | localNetworkUnavailable=" +
+                (Application.internetReachability == NetworkReachability.NotReachable) +
+                " | generation=" +
+                generationBeforeTest
+            );
+
+            try
+            {
+                await RunCheckNetFastReconnectWatchAsync();
+
+                int failuresAfterInjection = checkNetFastConsecutiveFailures;
+
+                await Task.Delay(
+                    SingleCheckNetFailureValidationWindowMs,
+                    cancellationToken
+                );
+
+                bool realtimeStillReady = IsRealtimeReady();
+                bool dedicatedStillReady =
+                    IsDedicatedGameServerConnectedAndAuthenticated();
+                bool sameRoom =
+                    isJoined &&
+                    string.Equals(
+                        activeRoomId,
+                        roomIdBeforeTest,
+                        StringComparison.Ordinal
+                    );
+                bool reconnectDidNotStart =
+                    !isRealtimeReconnectRunning &&
+                    realtimeReconnectAttemptCount == reconnectAttemptBeforeTest &&
+                    connectionGenerationId == generationBeforeTest;
+                bool noOutageStateWasCreated =
+                    !checkNetFastOutageActive &&
+                    !immediateInternetLostHandled &&
+                    !checkNetFastReconnectKickRequested;
+                bool passed =
+                    failuresAfterInjection == 1 &&
+                    realtimeStillReady &&
+                    dedicatedStillReady &&
+                    sameRoom &&
+                    reconnectDidNotStart &&
+                    noOutageStateWasCreated;
+
+                Log(
+                    "[NETWORK_VALIDATION] SINGLE_CHECKNET_FAILURE_RESULT=" +
+                    (passed ? "PASS" : "FAIL") +
+                    " | failuresAfterInjection=" +
+                    failuresAfterInjection +
+                    " | realtimeReady=" +
+                    realtimeStillReady +
+                    " | dedicatedConnected=" +
+                    dedicatedStillReady +
+                    " | sameRoom=" +
+                    sameRoom +
+                    " | reconnectDidNotStart=" +
+                    reconnectDidNotStart +
+                    " | noOutageState=" +
+                    noOutageStateWasCreated +
+                    " | generationBefore=" +
+                    generationBeforeTest +
+                    " | generationAfter=" +
+                    connectionGenerationId +
+                    " | reconnectAttemptBefore=" +
+                    reconnectAttemptBeforeTest +
+                    " | reconnectAttemptAfter=" +
+                    realtimeReconnectAttemptCount
+                );
+            }
+            catch (OperationCanceledException)
+            {
+                Log(
+                    "[NETWORK_VALIDATION] SINGLE_CHECKNET_FAILURE_RESULT=CANCELLED | " +
+                    "reason=lifecycle_cancelled"
+                );
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    "[NETWORK_VALIDATION] SINGLE_CHECKNET_FAILURE_RESULT=FAIL | " +
+                    "exception=" +
+                    SafeText(ex.Message)
+                );
+            }
+            finally
+            {
+                forceNextCheckNetFailureForValidation = false;
+                checkNetFastConsecutiveFailures = 0;
+                singleCheckNetFailureTestRunning = false;
+            }
+        }
+#endif
+
+        private bool IsDedicatedGameServerConnectedAndAuthenticated()
+        {
+            Network_A.DedicatedGameServer.Client.DedicatedGameServerWsClient dedicatedClient =
+                Network_A.DedicatedGameServer.Client.DedicatedGameServerWsClient.Instance;
+
+            return dedicatedClient != null && dedicatedClient.IsConnected && dedicatedClient.IsAuthenticated;
+        }
+
+        private bool IsDedicatedGameServerProvingNetworkIsAlive()
+        {
+            return IsDedicatedGameServerProvingNetworkIsAlive(true);
+        }
+
+        private bool IsDedicatedGameServerProvingNetworkIsAlive(bool writeLog)
+        {
+            Network_A.DedicatedGameServer.Client.DedicatedGameServerWsClient dedicatedClient =
+                Network_A.DedicatedGameServer.Client.DedicatedGameServerWsClient.Instance;
+
+            if (dedicatedClient == null) return false;
+            if (!dedicatedClient.IsConnected || !dedicatedClient.IsAuthenticated) return false;
+
+            float proofSeconds = Mathf.Clamp(dedicatedGameServerInboundAliveProofSeconds, 1.25f, 6f);
+            bool hasRecentInbound = dedicatedClient.HasRecentInboundMessage(proofSeconds);
+            if (!hasRecentInbound) return false;
+
+            if (writeLog)
+            {
+                Log("Dedicated Game Server proves network is alive. CheckNet fast failure ignored. lastRoute=" +
+                    SafeText(dedicatedClient.LastInboundRoute) + " | proofSeconds=" + proofSeconds.ToString("F2"));
+            }
+
+            return true;
+        }
+
+        private async Task RunCheckNetFastReconnectWatchAsync()
+        {
+            checkNetFastWatchRunning = true;
+
+            int watchGenerationId = connectionGenerationId;
+
+            bool wasNormalConnectRunningAtStart =
+                isConnectAndAuthRunning ||
+                isAutoConnectRealtimeAfterAuthRunning ||
+                (realtimeClient != null &&
+                 realtimeClient.IsConnected &&
+                 realtimeAuthClient != null &&
+                 !realtimeAuthClient.IsAuthenticated &&
+                 !isRealtimeReconnectRunning);
+
+            try
+            {
+                bool serverReachable = AuthManager.Instance != null &&
+                                       await AuthManager.Instance.CheckNetFastSilentAsync(checkNetFastTimeoutMs);
+                bool forcedSingleFailureForValidation = false;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if (forceNextCheckNetFailureForValidation)
+                {
+                    forceNextCheckNetFailureForValidation = false;
+                    forcedSingleFailureForValidation = true;
+                    serverReachable = false;
+
+                    Log(
+                        "[NETWORK_VALIDATION] FORCED_SINGLE_CHECKNET_FAILURE_INJECTED | " +
+                        "realtimeReady=" +
+                        IsRealtimeReady() +
+                        " | joined=" +
+                        isJoined +
+                        " | dedicatedConnected=" +
+                        IsDedicatedGameServerConnectedAndAuthenticated() +
+                        " | localNetworkUnavailable=" +
+                        (Application.internetReachability == NetworkReachability.NotReachable)
+                    );
+                }
+#endif
+
+                bool generationChangedAfterCheck = watchGenerationId != connectionGenerationId;
+
+                if (serverReachable)
+                {
+                    if (checkNetFastOutageActive || immediateInternetLostHandled)
+                    {
+                        Log("CheckNet fast says server is reachable again. Reconnect kick requested.");
+
+                        checkNetFastOutageActive = false;
+                        checkNetFastConsecutiveFailures = 0;
+                        immediateInternetLostHandled = false;
+                        checkNetFastReconnectKickRequested = true;
+
+                        if (!isRealtimeReconnectRunning && !IsRealtimeReady())
+                        {
+                            StartRealtimeReconnectLoop("checknet_fast_recovered_without_running_loop");
+                        }
+                    }
+                    else
+                    {
+                        checkNetFastConsecutiveFailures = 0;
+                        ClearCheckNetFastWarningOnlyPanelIfActive("server_reachable_without_reconnect");
+                    }
+
+                    return;
+                }
+
+                bool localNetworkUnavailableAfterCheck =
+                    Application.internetReachability ==
+                    NetworkReachability.NotReachable;
+                bool realtimeLobbyOnlyReadyAfterCheck =
+                    IsRealtimeReady() &&
+                    !isJoined &&
+                    !IsDedicatedGameServerConnectedAndAuthenticated();
+
+                if (realtimeLobbyOnlyReadyAfterCheck &&
+                    !localNetworkUnavailableAfterCheck)
+                {
+                    Log(
+                        "CheckNet fast failed result ignored because realtime lobby transport is still ready and no room or dedicated session is active. " +
+                        "watchGenerationId=" +
+                        watchGenerationId +
+                        " | currentGenerationId=" +
+                        connectionGenerationId +
+                        " | realtimeReady=" +
+                        IsRealtimeReady() +
+                        " | joined=" +
+                        isJoined +
+                        " | dedicatedConnected=" +
+                        IsDedicatedGameServerConnectedAndAuthenticated() +
+                        " | localNetworkUnavailable=" +
+                        localNetworkUnavailableAfterCheck
+                    );
+
+                    checkNetFastConsecutiveFailures = 0;
+                    checkNetFastOutageActive = false;
+                    immediateInternetLostHandled = false;
+                    checkNetFastReconnectKickRequested = false;
+                    ClearCheckNetFastWarningOnlyPanelIfActive("lobby_only_ready");
+                    return;
+                }
+
+                if (wasNormalConnectRunningAtStart || (generationChangedAfterCheck && IsRealtimeReady()))
+                {
+                    Log("CheckNet fast failed result ignored because realtime connect/auth completed or connection generation changed. watchGenerationId="
+                        + watchGenerationId + " | currentGenerationId=" + connectionGenerationId
+                        + " | ready=" + IsRealtimeReady());
+
+                    checkNetFastConsecutiveFailures = 0;
+                    checkNetFastOutageActive = false;
+                    checkNetFastReconnectKickRequested = false;
+                    ClearCheckNetFastWarningOnlyPanelIfActive("connect_generation_changed");
+                    return;
+                }
+
+                if (isConnectAndAuthRunning && !isRealtimeReconnectRunning)
+                {
+                    Log("CheckNet fast failed result ignored because normal Connect/Auth is running.");
+                    checkNetFastConsecutiveFailures = 0;
+                    ClearCheckNetFastWarningOnlyPanelIfActive("normal_connect_running");
+                    return;
+                }
+
+                if (!forcedSingleFailureForValidation &&
+                    IsDedicatedGameServerProvingNetworkIsAlive())
+                {
+                    checkNetFastConsecutiveFailures = 0;
+                    checkNetFastOutageActive = false;
+                    immediateInternetLostHandled = false;
+                    checkNetFastReconnectKickRequested = false;
+                    ClearCheckNetFastWarningOnlyPanelIfActive("dedicated_inbound_alive");
+                    return;
+                }
+
+                checkNetFastConsecutiveFailures++;
+
+                bool realtimeReady = IsRealtimeReady();
+                bool dedicatedGameServerConnected =
+                    IsDedicatedGameServerConnectedAndAuthenticated();
+                bool localNetworkUnavailable =
+                    Application.internetReachability ==
+                    NetworkReachability.NotReachable;
+                bool bothLiveTransportsUnavailable =
+                    !realtimeReady &&
+                    !dedicatedGameServerConnected;
+                bool singleFailureHasIndependentConfirmation =
+                    useSingleCheckNetFailureInsideDedicatedGameServer &&
+                    (localNetworkUnavailable || bothLiveTransportsUnavailable);
+
+                Log("CheckNet fast failed. failures=" + checkNetFastConsecutiveFailures +
+                    " | realtimeReady=" + realtimeReady +
+                    " | reconnectRunning=" + isRealtimeReconnectRunning +
+                    " | joined=" + isJoined +
+                    " | dedicatedConnected=" + dedicatedGameServerConnected +
+                    " | localNetworkUnavailable=" + localNetworkUnavailable +
+                    " | bothLiveTransportsUnavailable=" + bothLiveTransportsUnavailable +
+                    " | forcedSingleFailureTest=" + forcedSingleFailureForValidation +
+                    " | singleFailureConfirmed=" + singleFailureHasIndependentConfirmation);
+
+                int failuresNeeded = singleFailureHasIndependentConfirmation
+                    ? 1
+                    : Mathf.Clamp(checkNetFastFailuresBeforeDisconnect, 2, 4);
+
+                if (checkNetFastConsecutiveFailures < failuresNeeded) return;
+
+                bool realtimeRoomStillJoinedWithoutOutageProof =
+                    realtimeReady &&
+                    isJoined &&
+                    !localNetworkUnavailable &&
+                    !bothLiveTransportsUnavailable &&
+                    !singleFailureHasIndependentConfirmation;
+
+                if (!forcedSingleFailureForValidation &&
+                    realtimeRoomStillJoinedWithoutOutageProof)
+                {
+                    ShowCheckNetFastWarningOnlyPanel(
+                        "checknet_fast_warning_without_transport_drop"
+                    );
+
+                    Log("CheckNet fast failure threshold ignored because realtime room is still joined and no independent outage confirmation exists. failures="
+                        + checkNetFastConsecutiveFailures +
+                        " | realtimeReady=" + realtimeReady +
+                        " | joined=" + isJoined +
+                        " | dedicatedConnected=" + dedicatedGameServerConnected +
+                        " | localNetworkUnavailable=" + localNetworkUnavailable +
+                        " | bothLiveTransportsUnavailable=" + bothLiveTransportsUnavailable);
+
+                    checkNetFastConsecutiveFailures = 0;
+                    checkNetFastOutageActive = false;
+                    immediateInternetLostHandled = false;
+                    checkNetFastReconnectKickRequested = false;
+                    return;
+                }
+
+                if (!forcedSingleFailureForValidation &&
+                    IsDedicatedGameServerProvingNetworkIsAlive())
+                {
+                    checkNetFastConsecutiveFailures = 0;
+                    checkNetFastOutageActive = false;
+                    immediateInternetLostHandled = false;
+                    checkNetFastReconnectKickRequested = false;
+                    ClearCheckNetFastWarningOnlyPanelIfActive("dedicated_inbound_alive_after_threshold");
+                    return;
+                }
+
+                bool wasOutageActive = checkNetFastOutageActive;
+
+                checkNetFastOutageActive = true;
+                immediateInternetLostHandled = true;
+                checkNetFastReconnectKickRequested = false;
+                checkNetFastWarningOnlyPanelActive = false;
+
+                if (!isRealtimeReconnectRunning)
+                {
+                    MarkRealtimeDisconnectedByTransport("checknet_fast_server_unreachable");
+                    return;
+                }
+
+                ShowServerDebugPanelForInternetLost("checknet_fast_server_unreachable_while_reconnecting");
+
+                if (!wasOutageActive)
+                {
+                    OnRealtimeConnectionLostForReconnectFor3D?.Invoke("checknet_fast_server_unreachable_while_reconnecting");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("CheckNet fast reconnect watch warning: " + ex.Message);
+            }
+            finally
+            {
+                checkNetFastWatchRunning = false;
+            }
+        }
+
+        private void RestartRealtimeReconnectLoopImmediately(string reason)
+        {
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "checknet_fast_recovered" : reason.Trim();
+
+            Log("Restarting realtime reconnect loop immediately. reason=" + SafeText(safeReason));
+
+            StopRealtimeReconnectLoop(safeReason + ":restart_before_immediate_attempt");
+
+            StartRealtimeReconnectLoop(safeReason);
+        }
+
     }
 }

@@ -19,6 +19,7 @@ namespace Network_A.Core
     {
         private static Channel _channel;
         private static CallInvoker _callInvoker;
+        private static readonly object SharedChannelSync = new object();
         private const int ShutdownTimeoutMs = 1500;
 
         private static readonly Marshaller<byte[]> ByteArrayMarshaller = Marshallers.Create(
@@ -71,8 +72,18 @@ namespace Network_A.Core
         //* این تابع در بیلد نیتیو از کانال مشترک استفاده می‌کند تا برای هر درخواست کانال جدید ساخته نشود.
         private static async Task<ApiResult<byte[]>> SendWithSharedChannelAsync(string serviceName, string methodName, byte[] protoMessage, bool auth, Dictionary<string, string> headers, CancellationToken ct, string logTag)
         {
-            EnsureSharedChannel();
-            return await SendWithInvokerAsync(_callInvoker, serviceName, methodName, protoMessage, auth, headers, ct, logTag);
+            CallInvoker sharedInvoker = GetOrCreateSharedCallInvoker();
+            ApiResult<byte[]> result = await SendWithInvokerAsync(sharedInvoker, serviceName, methodName, protoMessage, auth, headers, ct, logTag);
+
+            /*
+             * در بیلد نیتیو، کانال مشترک ممکن است بعد از قطع کامل شبکه در وضعیت شکست باقی بماند.
+             * همان درخواست دوباره ارسال نمی شود؛ فقط کانال خراب کنار گذاشته می شود تا درخواست بعدی
+             * روی یک کانال تازه اجرا شود و عملیات Login یا Refresh تکراری نشود.
+             */
+            if (result != null && !result.IsSuccess && result.IsNetworkError)
+                ResetSharedChannel("network_error:" + (logTag ?? string.Empty));
+
+            return result;
         }
 #endif
 
@@ -111,12 +122,16 @@ namespace Network_A.Core
         }
 
 #if !UNITY_EDITOR
-        //* این تابع کانال مشترک جی‌آر‌پی‌سی نیتیو را در بیلد نیتیو می‌سازد و نگه می‌دارد.
-        private static void EnsureSharedChannel()
+        //* این تابع کانال مشترک جی‌آر‌پی‌سی نیتیو را به شکل امن می‌سازد و کال اینوکر همان کانال را برمی‌گرداند.
+        private static CallInvoker GetOrCreateSharedCallInvoker()
         {
-            if (_channel != null && _callInvoker != null) return;
+            lock (SharedChannelSync)
+            {
+                if (_channel == null || _callInvoker == null)
+                    _callInvoker = CreateChannelAndInvoker(out _channel);
 
-            _callInvoker = CreateChannelAndInvoker(out _channel);
+                return _callInvoker;
+            }
         }
 #endif
 
@@ -133,12 +148,40 @@ namespace Network_A.Core
             return channel.CreateCallInvoker();
         }
 
+        //* این تابع کانال مشترک خراب را فوراً از دسترس خارج می‌کند تا درخواست بعدی کانال تازه بسازد.
+        public static void ResetSharedChannel(string reason = "")
+        {
+            Channel channel;
+
+            lock (SharedChannelSync)
+            {
+                channel = _channel;
+                _channel = null;
+                _callInvoker = null;
+            }
+
+            if (channel == null) return;
+
+            NetworkFileLogger.Warning(
+                "NATIVE_GRPC",
+                "Shared native gRPC channel reset. reason=" +
+                (string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason.Trim())
+            );
+
+            _ = ShutdownChannelWithTimeoutAsync(channel, "NATIVE_GRPC_RESET");
+        }
+
         //* این تابع کانال مشترک را با تایم‌اوت کوتاه خاموش می‌کند تا خروج از Play Mode گیر نکند.
         public static async Task ShutdownAsync()
         {
-            Channel channel = _channel;
-            _channel = null;
-            _callInvoker = null;
+            Channel channel;
+
+            lock (SharedChannelSync)
+            {
+                channel = _channel;
+                _channel = null;
+                _callInvoker = null;
+            }
 
             await ShutdownChannelWithTimeoutAsync(channel, "NATIVE_GRPC_SHUTDOWN");
         }

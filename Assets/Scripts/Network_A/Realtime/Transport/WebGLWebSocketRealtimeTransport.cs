@@ -34,7 +34,11 @@ namespace Network_A.Realtime.Transport
 
         public RealtimeTransportKind Kind => RealtimeTransportKind.WebSocket;
         public RealtimeTransportState State => state;
-        public bool IsConnected => state == RealtimeTransportState.Connected && RealtimeWebGLWebSocketGetReadyState(handle) == BrowserOpenState;
+        public static bool IsBrowserOnline => RealtimeWebGLWebSocketGetBrowserOnlineState() == 1;
+        public bool IsConnected =>
+            state == RealtimeTransportState.Connected &&
+            RealtimeWebGLWebSocketGetReadyState(handle) == BrowserOpenState &&
+            IsBrowserOnline;
 
         //* نمونه WebGL را با handle یکتا می‌سازد تا Callbackهای JavaScript به همین ترنسپورت برگردند.
         public WebGLWebSocketRealtimeTransport()
@@ -277,6 +281,9 @@ namespace Network_A.Realtime.Transport
 
         [DllImport("__Internal")]
         private static extern int RealtimeWebGLWebSocketGetReadyState(int handle);
+
+        [DllImport("__Internal")]
+        private static extern int RealtimeWebGLWebSocketGetBrowserOnlineState();
 
         [DllImport("__Internal")]
         private static extern void RealtimeWebGLWebSocketDispose(int handle);

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Network_A.GameServer.Players;
+using Network_A.GameServer.Gameplay;
 using UnityEngine;
 
 public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
@@ -8,6 +9,7 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
     [SerializeField] private MetaverseSpawnManager spawnManager;
     [SerializeField] private MetaverseNetworkOwnershipBridge ownershipBridge;
     [SerializeField] private DedicatedPlayerRegistry playerRegistry;
+    [SerializeField] private DedicatedPlayerStateStore stateStore;
     [SerializeField] private MetaverseDedicatedServerRuntimeConfig config;
 
     [Header("Debug")]
@@ -17,7 +19,7 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
     private bool smokeCompletedLogged;
     private string lastPlayerObjectRejectReason = string.Empty;
     private readonly Dictionary<string, MetaverseNetworkIdentity> dict_playerObjectsByConnectionId = new Dictionary<string, MetaverseNetworkIdentity>();
-
+    private readonly Dictionary<string, MetaverseNetworkIdentity> dict_playerObjectsByUserId = new Dictionary<string, MetaverseNetworkIdentity>();
     public int PlayerObjectCount => dict_playerObjectsByConnectionId.Count;
     public string LastPlayerObjectRejectReason => lastPlayerObjectRejectReason;
     public bool IsReady => spawnManager != null;
@@ -61,6 +63,11 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
     {
         identity = null;
 
+        if (TryRebindExistingPlayerObjectForReconnect(session, out identity))
+        {
+            return true;
+        }
+
         if (!CanSpawnPlayerObject(session))
         {
             if (logMessages)
@@ -73,13 +80,23 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
         }
 
         string prefabId = config != null ? config.NetworkPlayerObjectSmokePrefabId : MetaverseNetworkPlayerObjectSmokePrefabInstaller.DefaultPrefabId;
-        Vector3 position = BuildSpawnPosition(dict_playerObjectsByConnectionId.Count);
+        Vector3 position = BuildSpawnPositionForSession(session, dict_playerObjectsByConnectionId.Count);
 
         bool spawned = MetaverseNetworkServer.SpawnPrefab(prefabId, position, Quaternion.identity, session, out identity);
         if (!spawned || identity == null)
         {
             if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
-            spawned = spawnManager != null && spawnManager.TrySpawnPrefab(prefabId, position, Quaternion.identity, -1, out identity);
+            spawned = spawnManager != null && spawnManager.TrySpawnPrefab(
+                prefabId,
+                position,
+                Quaternion.identity,
+                -1,
+                string.Empty,
+                SafeTrim(session.userId),
+                SafeTrim(session.playerId),
+                SafeTrim(session.roomId),
+                false,
+                out identity);
             if (spawned && identity != null) AssignOwner(identity, session);
         }
 
@@ -91,7 +108,16 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
         }
 
         dict_playerObjectsByConnectionId[session.connectionId] = identity;
+
+        string safeUserId = SafeTrim(session.userId);
+        string roomUserKey = BuildRoomUserKey(session.roomId, session.userId);
+        if (!string.IsNullOrWhiteSpace(safeUserId))
+        {
+            dict_playerObjectsByUserId[roomUserKey] = identity;
+        }
+
         AssignOwner(identity, session);
+        TryRebindPlayerStateForReconnect(session, "player_object_spawn_state_rebind");
 
         if (logMessages)
         {
@@ -107,7 +133,6 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
         SetRejectReason(string.Empty);
         return true;
     }
-
     public bool DespawnPlayerObject(DedicatedPlayerSession session, string reason = "player_object_owner_left")
     {
         if (session == null || string.IsNullOrWhiteSpace(session.connectionId))
@@ -135,6 +160,8 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
         }
 
         dict_playerObjectsByConnectionId.Remove(safeConnectionId);
+        RemoveUserMappingForIdentity(identity);
+
         MetaverseNetworkServer.Despawn(identity, SafeTrim(reason));
 
         if (logMessages)
@@ -152,7 +179,17 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
     {
         identity = null;
         if (session == null) return false;
-        return TryGetPlayerObject(session.connectionId, out identity);
+
+        if (TryGetPlayerObject(session.connectionId, out identity))
+        {
+            return true;
+        }
+
+        string safeUserId = SafeTrim(session.userId);
+        if (string.IsNullOrWhiteSpace(safeUserId)) return false;
+
+        string roomUserKey = BuildRoomUserKey(session.roomId, session.userId);
+        return dict_playerObjectsByUserId.TryGetValue(roomUserKey, out identity) && identity != null;
     }
 
     public bool TryGetPlayerObject(string connectionId, out MetaverseNetworkIdentity identity)
@@ -192,7 +229,21 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
     private void HandlePlayerRemoved(DedicatedPlayerSession session, string reason)
     {
         if (session == null || string.IsNullOrWhiteSpace(session.connectionId)) return;
-        DespawnPlayerObject(session.connectionId, "player_object_owner_left_" + SafeTrim(reason));
+
+        string safeReason = SafeTrim(reason);
+        if (safeReason == "duplicate_user_replaced")
+        {
+            if (logMessages)
+            {
+                Debug.Log("[MetaverseNetworkPlayerObjectServer] Player object remove skipped for reconnect rebind | userId=" +
+                          SafeTrim(session.userId) + " | connectionId=" + SafeTrim(session.connectionId) +
+                          " | reason=" + safeReason);
+            }
+
+            return;
+        }
+
+        DespawnPlayerObject(session.connectionId, "player_object_owner_left_" + safeReason);
     }
 
     private bool CanSpawnPlayerObject(DedicatedPlayerSession session)
@@ -238,6 +289,7 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
         }
         else
         {
+            identity.SetRoomId(session.roomId);
             identity.SetOwnerInfo(session.connectionId, session.userId, session.playerId, false);
         }
     }
@@ -259,6 +311,23 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
         return new Vector3(safeIndex * 1.5f, 1.25f, 0f);
     }
 
+    private Vector3 BuildSpawnPositionForSession(DedicatedPlayerSession session, int index)
+    {
+        EnsureReferences();
+
+        if (session != null && stateStore != null)
+        {
+            DedicatedPlayerStateRecord stateRecord = stateStore.GetByUserIdInRoom(session.roomId, session.userId);
+
+            if (stateRecord != null)
+            {
+                return stateRecord.Position;
+            }
+        }
+
+        return BuildSpawnPosition(index);
+    }
+
     private void EnsureReferences()
     {
         if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
@@ -271,6 +340,15 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
             playerRegistry = FindFirstObjectByType<DedicatedPlayerRegistry>();
 #else
             playerRegistry = FindObjectOfType<DedicatedPlayerRegistry>();
+#endif
+        }
+
+        if (stateStore == null)
+        {
+#if UNITY_2023_1_OR_NEWER
+            stateStore = FindFirstObjectByType<DedicatedPlayerStateStore>();
+#else
+            stateStore = FindObjectOfType<DedicatedPlayerStateStore>();
 #endif
         }
     }
@@ -301,8 +379,138 @@ public class MetaverseNetworkPlayerObjectServer : MonoBehaviour
         lastPlayerObjectRejectReason = string.IsNullOrWhiteSpace(reason) ? string.Empty : reason.Trim();
     }
 
+    private string BuildRoomUserKey(string roomId, string userId)
+    {
+        return SafeTrim(roomId) + "::" + SafeTrim(userId);
+    }
+
+    public int GetPlayerObjectCountInRoom(string roomId)
+    {
+        string safeRoomId = SafeTrim(roomId);
+        if (string.IsNullOrWhiteSpace(safeRoomId)) return 0;
+        int count = 0;
+        foreach (MetaverseNetworkIdentity identity in dict_playerObjectsByConnectionId.Values)
+        {
+            if (identity == null) continue;
+            if (identity.IsRoom(safeRoomId)) count++;
+        }
+        return count;
+    }
+
     private string SafeTrim(string value)
     {
         return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+    }
+
+
+    //* این تابع هنگام ریکانکت، آبجکت قبلی همان یوزر را به کانکشن جدید وصل می کند.
+    private bool TryRebindExistingPlayerObjectForReconnect(DedicatedPlayerSession session, out MetaverseNetworkIdentity identity)
+    {
+        identity = null;
+
+        if (session == null) return false;
+
+        string safeUserId = SafeTrim(session.userId);
+        string safeConnectionId = SafeTrim(session.connectionId);
+
+        if (string.IsNullOrWhiteSpace(safeUserId) || string.IsNullOrWhiteSpace(safeConnectionId))
+        {
+            return false;
+        }
+
+        string roomUserKey = BuildRoomUserKey(session.roomId, session.userId);
+        if (!dict_playerObjectsByUserId.TryGetValue(roomUserKey, out identity) || identity == null)
+        {
+            if (dict_playerObjectsByUserId.ContainsKey(roomUserKey))
+            {
+                dict_playerObjectsByUserId.Remove(roomUserKey);
+            }
+
+            return false;
+        }
+
+        RemoveConnectionMappingForIdentity(identity);
+
+        dict_playerObjectsByConnectionId[safeConnectionId] = identity;
+        dict_playerObjectsByUserId[roomUserKey] = identity;
+
+        AssignOwner(identity, session);
+        TryRebindPlayerStateForReconnect(session, "duplicate_user_replaced");
+
+        if (logMessages)
+        {
+            Vector3 position = identity.transform != null ? identity.transform.position : Vector3.zero;
+
+            Debug.Log("[MetaverseNetworkPlayerObjectServer] Player object rebound for reconnect | userId=" +
+                      safeUserId + " | newConnectionId=" + safeConnectionId +
+                      " | netId=" + identity.NetId +
+                      " | position=" + position +
+                      " | mirrorRoute=AssignClientAuthority | spawnSkipped=YES | despawnSkipped=YES");
+        }
+
+        SetRejectReason(string.Empty);
+        return true;
+    }
+
+    //* این تابع وضعیت ذخیره شده پلیر را بعد از ریکانکت به کانکشن جدید وصل می کند.
+    private void TryRebindPlayerStateForReconnect(DedicatedPlayerSession session, string reason)
+    {
+        if (session == null) return;
+
+        EnsureReferences();
+
+        if (stateStore == null) return;
+
+        string safeReason = SafeTrim(reason);
+        bool rebound = stateStore.RebindConnectionForUser(session, safeReason);
+
+        if (logMessages)
+        {
+            Debug.Log("[MetaverseNetworkPlayerObjectServer] Player state rebind checked | userId=" +
+                      SafeTrim(session.userId) + " | connectionId=" + SafeTrim(session.connectionId) +
+                      " | reason=" + safeReason + " | rebound=" + rebound);
+        }
+    }
+
+    //* این تابع مپ کانکشن قبلی یک آبجکت را پاک می کند.
+    private void RemoveConnectionMappingForIdentity(MetaverseNetworkIdentity identity)
+    {
+        if (identity == null) return;
+
+        List<string> keysToRemove = new List<string>();
+
+        foreach (KeyValuePair<string, MetaverseNetworkIdentity> pair in dict_playerObjectsByConnectionId)
+        {
+            if (pair.Value == identity)
+            {
+                keysToRemove.Add(pair.Key);
+            }
+        }
+
+        for (int i = 0; i < keysToRemove.Count; i++)
+        {
+            dict_playerObjectsByConnectionId.Remove(keysToRemove[i]);
+        }
+    }
+
+    //* این تابع مپ یوزر یک آبجکت را پاک می کند.
+    private void RemoveUserMappingForIdentity(MetaverseNetworkIdentity identity)
+    {
+        if (identity == null) return;
+
+        List<string> keysToRemove = new List<string>();
+
+        foreach (KeyValuePair<string, MetaverseNetworkIdentity> pair in dict_playerObjectsByUserId)
+        {
+            if (pair.Value == identity)
+            {
+                keysToRemove.Add(pair.Key);
+            }
+        }
+
+        for (int i = 0; i < keysToRemove.Count; i++)
+        {
+            dict_playerObjectsByUserId.Remove(keysToRemove[i]);
+        }
     }
 }

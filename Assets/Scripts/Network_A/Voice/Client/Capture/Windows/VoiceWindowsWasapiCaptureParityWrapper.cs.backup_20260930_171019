@@ -1,0 +1,477 @@
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+using System;
+using System.Reflection;
+using Network_A.Voice.Client.Codec;
+using UnityEngine;
+
+namespace Network_A.Voice.Client.Capture
+{
+    public static class VoiceWindowsWasapiCaptureParityInstaller
+    {
+        private const string RootName = "Voice_Windows_WASAPI_Capture_Parity";
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void Install()
+        {
+            GameObject root = GameObject.Find(RootName);
+            if (root == null) root = new GameObject(RootName);
+            UnityEngine.Object.DontDestroyOnLoad(root);
+
+            if (root.GetComponent<VoiceWindowsWasapiCaptureParityWrapper>() == null)
+                root.AddComponent<VoiceWindowsWasapiCaptureParityWrapper>();
+
+            Debug.Log(
+                "VOICE_WINDOWS_WASAPI_CAPTURE_PARITY=READY" +
+                " | platform=Windows" +
+                " | wrapperOnly=True" +
+                " | unityMicrophoneLivePath=False" +
+                " | capture=WASAPIEventDriven" +
+                " | sampleRate=48000" +
+                " | channels=1" +
+                " | frameMs=20" +
+                " | stableFilesChanged=False" +
+                " | webglPathChanged=False" +
+                " | questPathChanged=False");
+        }
+    }
+
+    [DefaultExecutionOrder(-31997)]
+    [DisallowMultipleComponent]
+    public sealed class VoiceWindowsWasapiCaptureParityWrapper : MonoBehaviour
+    {
+        private const string RuntimeRootName = "Voice_Client_Runtime_Root";
+        private const float DevicePollSeconds = 1f;
+        private const int LevelReportFrames = 50;
+
+        private static readonly FieldInfo CodecField =
+            typeof(VoiceMicrophonePublisher).GetField(
+                "codec",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+        private static readonly FieldInfo FrameEncodedField =
+            typeof(VoiceMicrophonePublisher).GetField(
+                "FrameEncoded",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+        private static readonly FieldInfo FailedField =
+            typeof(VoiceMicrophonePublisher).GetField(
+                "Failed",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+        private static readonly MethodInfo StopLegacyCaptureMethod =
+            typeof(VoiceMicrophonePublisher).GetMethod(
+                "StopCapture",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+        private VoiceMicrophonePublisher publisher;
+        private WindowsWasapiVoiceAudioCapture capture;
+        private string requestedDevice = string.Empty;
+        private float nextDevicePollAt;
+        private bool publisherWasEnabled;
+        private bool publisherIntercepted;
+        private bool firstFrameLogged;
+        private int levelFrameCount;
+        private double levelRmsSum;
+        private float levelPeak;
+        private long encodedFrames;
+        private long noSubscriberDrops;
+        private bool applicationQuitting;
+        private readonly float[] encodeFrame =
+            new float[VoiceNativeOpusCodec.FrameSamples];
+
+        private void Update()
+        {
+            ResolvePublisher();
+            if (publisher == null || !publisherIntercepted) return;
+
+            if (publisher.IsMuted)
+            {
+                StopWasapiCapture();
+                return;
+            }
+
+            EnsureWasapiCapture();
+            PollSelectedDevice();
+        }
+
+        private void ResolvePublisher()
+        {
+            GameObject runtimeRoot = GameObject.Find(RuntimeRootName);
+            VoiceMicrophonePublisher candidate = runtimeRoot != null
+                ? runtimeRoot.GetComponent<VoiceMicrophonePublisher>()
+                : null;
+
+            if (ReferenceEquals(candidate, publisher)) return;
+            UnbindPublisher();
+            if (candidate == null) return;
+
+            VoiceNativeOpusCodec codec = GetPublisherCodec(candidate);
+            if (codec == null) return;
+
+            publisher = candidate;
+            publisherWasEnabled = publisher.enabled;
+            publisher.enabled = false;
+            publisher.MuteChanged += HandleMuteChanged;
+            publisherIntercepted = true;
+
+            Debug.Log(
+                "VOICE_WINDOWS_WASAPI_PUBLISHER_INTERCEPT=PASS" +
+                " | publisher=" + publisher.GetType().Name +
+                " | publisherUpdateDisabled=True" +
+                " | publisherMuteStatePreserved=True" +
+                " | publisherCodecReused=True" +
+                " | publisherFrameEncodedEventReused=True" +
+                " | stablePublisherFileChanged=False");
+
+            if (!publisher.IsMuted)
+            {
+                SuppressUnityMicrophoneCapture();
+                EnsureWasapiCapture();
+            }
+        }
+
+        private void HandleMuteChanged(bool muted)
+        {
+            if (muted)
+            {
+                StopWasapiCapture();
+                return;
+            }
+
+            SuppressUnityMicrophoneCapture();
+            EnsureWasapiCapture();
+        }
+
+        private void SuppressUnityMicrophoneCapture()
+        {
+            if (publisher == null || StopLegacyCaptureMethod == null) return;
+
+            try
+            {
+                StopLegacyCaptureMethod.Invoke(publisher, null);
+            }
+            catch (Exception exception)
+            {
+                ReportFailure(
+                    "Windows WASAPI wrapper could not stop Unity Microphone capture: " +
+                    Unwrap(exception).Message);
+            }
+        }
+
+        private void EnsureWasapiCapture()
+        {
+            if (publisher == null || publisher.IsMuted) return;
+            if (capture != null) return;
+
+            if (!TryGetSelectedDevice(out requestedDevice, out string resolverError))
+            {
+                ReportFailure(
+                    "Windows WASAPI selected input device could not be resolved. " +
+                    resolverError);
+                return;
+            }
+
+            WindowsWasapiVoiceAudioCapture next =
+                new WindowsWasapiVoiceAudioCapture();
+            next.FrameCaptured += HandleWasapiFrame;
+            next.Failed += HandleWasapiFailure;
+            capture = next;
+            nextDevicePollAt = Time.unscaledTime + DevicePollSeconds;
+
+            try
+            {
+                next.Start();
+                Debug.Log(
+                    "VOICE_WINDOWS_WASAPI_CAPTURE_REQUESTED=PASS" +
+                    " | windowsSelected=" + Safe(requestedDevice) +
+                    " | requestedSampleRate=48000" +
+                    " | requestedChannels=1" +
+                    " | requestedSampleType=Float32" +
+                    " | systemAutoConvert=True" +
+                    " | eventDriven=True");
+            }
+            catch (Exception exception)
+            {
+                HandleWasapiFailure(
+                    "Windows WASAPI Start failed: " +
+                    Unwrap(exception).Message);
+            }
+        }
+
+        private void PollSelectedDevice()
+        {
+            if (capture == null || Time.unscaledTime < nextDevicePollAt) return;
+            nextDevicePollAt = Time.unscaledTime + DevicePollSeconds;
+
+            if (!TryGetSelectedDevice(out string selected, out _)) return;
+            if (string.Equals(
+                    selected,
+                    requestedDevice,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            string previous = requestedDevice;
+            requestedDevice = selected;
+
+            Debug.Log(
+                "VOICE_WINDOWS_WASAPI_DEVICE_SWITCH=PASS" +
+                " | previous=" + Safe(previous) +
+                " | current=" + Safe(selected) +
+                " | restartCapture=True");
+
+            RestartWasapiCapture();
+        }
+
+        private void RestartWasapiCapture()
+        {
+            StopWasapiCapture();
+            if (publisher != null && !publisher.IsMuted)
+                EnsureWasapiCapture();
+        }
+
+        private void HandleWasapiFrame(ArraySegment<float> samples)
+        {
+            VoiceMicrophonePublisher activePublisher = publisher;
+            if (activePublisher == null || activePublisher.IsMuted) return;
+            if (samples.Array == null || samples.Count != encodeFrame.Length)
+            {
+                ReportFailure(
+                    "Windows WASAPI frame size is invalid. samples=" +
+                    samples.Count);
+                return;
+            }
+
+            VoiceNativeOpusCodec codec = GetPublisherCodec(activePublisher);
+            if (codec == null)
+            {
+                ReportFailure("Windows WASAPI publisher codec is unavailable.");
+                return;
+            }
+
+            Array.Copy(
+                samples.Array,
+                samples.Offset,
+                encodeFrame,
+                0,
+                encodeFrame.Length);
+
+            MeasureLevel(encodeFrame, out float rms, out float peak);
+
+            try
+            {
+                byte[] packet = codec.Encode(encodeFrame);
+                bool dtx = packet.Length <= 3;
+                encodedFrames += 1;
+                levelFrameCount += 1;
+                levelRmsSum += rms;
+                if (peak > levelPeak) levelPeak = peak;
+
+                Action<byte[], bool> sink = FrameEncodedField != null
+                    ? FrameEncodedField.GetValue(activePublisher) as Action<byte[], bool>
+                    : null;
+
+                if (sink == null)
+                {
+                    noSubscriberDrops += 1;
+                    if (noSubscriberDrops == 1 || noSubscriberDrops % 50 == 0)
+                    {
+                        Debug.LogWarning(
+                            "VOICE_WINDOWS_WASAPI_NO_FRAME_SUBSCRIBER=PASS" +
+                            " | dropped=" + noSubscriberDrops +
+                            " | packetBytes=" + packet.Length);
+                    }
+                }
+                else
+                {
+                    sink.Invoke(packet, dtx);
+                }
+
+                if (!firstFrameLogged)
+                {
+                    firstFrameLogged = true;
+                    Debug.Log(
+                        "VOICE_WINDOWS_WASAPI_FIRST_FRAME=PASS" +
+                        " | device=" + Safe(
+                            capture != null ? capture.ActiveDeviceName : requestedDevice) +
+                        " | samples=" + encodeFrame.Length +
+                        " | packetBytes=" + packet.Length +
+                        " | dtx=" + dtx +
+                        " | publisherEventPath=True");
+                }
+
+                if (levelFrameCount >= LevelReportFrames)
+                {
+                    Debug.Log(
+                        "VOICE_WINDOWS_WASAPI_FRAME_LEVEL" +
+                        " | device=" + Safe(
+                            capture != null ? capture.ActiveDeviceName : requestedDevice) +
+                        " | avgRms=" +
+                        (levelRmsSum / levelFrameCount).ToString("0.000000") +
+                        " | peak=" + levelPeak.ToString("0.000000") +
+                        " | lastPacketBytes=" + packet.Length +
+                        " | dtx=" + dtx +
+                        " | frames=" + levelFrameCount +
+                        " | encodedTotal=" + encodedFrames +
+                        " | noSubscriberDrops=" + noSubscriberDrops);
+
+                    levelFrameCount = 0;
+                    levelRmsSum = 0d;
+                    levelPeak = 0f;
+                }
+            }
+            catch (Exception exception)
+            {
+                ReportFailure(
+                    "Windows WASAPI encode or publish failed: " +
+                    Unwrap(exception).Message);
+            }
+        }
+
+        private void HandleWasapiFailure(string reason)
+        {
+            ReportFailure(reason);
+            StopWasapiCapture();
+        }
+
+        private void StopWasapiCapture()
+        {
+            WindowsWasapiVoiceAudioCapture active = capture;
+            capture = null;
+            requestedDevice = string.Empty;
+            nextDevicePollAt = 0f;
+            firstFrameLogged = false;
+            levelFrameCount = 0;
+            levelRmsSum = 0d;
+            levelPeak = 0f;
+
+            if (active == null) return;
+
+            active.FrameCaptured -= HandleWasapiFrame;
+            active.Failed -= HandleWasapiFailure;
+
+            try { active.Stop(); }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    "VOICE_WINDOWS_WASAPI_STOP_WARNING" +
+                    " | reason=" + Safe(Unwrap(exception).Message));
+            }
+
+            try { active.Dispose(); }
+            catch { }
+
+            Debug.Log("VOICE_WINDOWS_WASAPI_CAPTURE_STOPPED=PASS");
+        }
+
+        private void UnbindPublisher()
+        {
+            StopWasapiCapture();
+
+            if (publisher != null)
+            {
+                publisher.MuteChanged -= HandleMuteChanged;
+                if (!applicationQuitting && publisherWasEnabled)
+                    publisher.enabled = true;
+            }
+
+            publisher = null;
+            publisherWasEnabled = false;
+            publisherIntercepted = false;
+        }
+
+        private void OnApplicationQuit()
+        {
+            applicationQuitting = true;
+        }
+
+        private void OnDisable()
+        {
+            if (Application.isPlaying) UnbindPublisher();
+        }
+
+        private void OnDestroy()
+        {
+            UnbindPublisher();
+        }
+
+        private static VoiceNativeOpusCodec GetPublisherCodec(
+            VoiceMicrophonePublisher target)
+        {
+            if (target == null || CodecField == null) return null;
+            return CodecField.GetValue(target) as VoiceNativeOpusCodec;
+        }
+
+        private static bool TryGetSelectedDevice(
+            out string selected,
+            out string error)
+        {
+            return WindowsSelectedCaptureDeviceResolver
+                .TryGetSoundSettingsInputDevice(out selected, out error);
+        }
+
+        private void ReportFailure(string reason)
+        {
+            string safeReason = string.IsNullOrWhiteSpace(reason)
+                ? "Windows WASAPI capture parity failed."
+                : reason;
+
+            Debug.LogError(
+                "VOICE_WINDOWS_WASAPI_CAPTURE_FAILED" +
+                " | reason=" + Safe(safeReason));
+
+            VoiceMicrophonePublisher activePublisher = publisher;
+            if (activePublisher == null || FailedField == null) return;
+
+            try
+            {
+                Action<string> failed =
+                    FailedField.GetValue(activePublisher) as Action<string>;
+                failed?.Invoke(safeReason);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void MeasureLevel(
+            float[] samples,
+            out float rms,
+            out float peak)
+        {
+            double sum = 0d;
+            float max = 0f;
+
+            for (int index = 0; index < samples.Length; index++)
+            {
+                float value = samples[index];
+                float absolute = Mathf.Abs(value);
+                if (absolute > max) max = absolute;
+                sum += value * value;
+            }
+
+            rms = samples.Length > 0
+                ? (float)Math.Sqrt(sum / samples.Length)
+                : 0f;
+            peak = max;
+        }
+
+        private static Exception Unwrap(Exception exception)
+        {
+            TargetInvocationException invocation =
+                exception as TargetInvocationException;
+            return invocation != null && invocation.InnerException != null
+                ? invocation.InnerException
+                : exception;
+        }
+
+        private static string Safe(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? "<empty>"
+                : value.Trim().Replace("|", "/");
+        }
+    }
+}
+#endif

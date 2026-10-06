@@ -69,6 +69,13 @@
       },
       "url": "https://packages.unity.com"
     },
+    "com.unity.dedicated-server": {
+      "version": "1.6.3",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {},
+      "url": "https://packages.unity.com"
+    },
     "com.unity.device-simulator.devices": {
       "version": "1.0.0",
       "depth": 0,
@@ -454,17 +461,6 @@
         "com.unity.xr.legacyinputhelpers": "2.1.2"
       },
       "url": "https://packages.unity.com"
-    },
-    "org.khronos.unitygltf": {
-      "version": "file:E:/Meta RGB/Packages/UnityGLTF-release-2.15.0/UnityGLTF-release-2.15.0",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {
-        "com.unity.nuget.newtonsoft-json": "2.0.0",
-        "com.unity.modules.imageconversion": "1.0.0",
-        "com.unity.shadergraph": "10.0.0",
-        "com.unity.mathematics": "1.0.0"
-      }
     },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",
