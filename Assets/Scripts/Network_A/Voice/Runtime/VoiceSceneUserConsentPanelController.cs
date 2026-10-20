@@ -25,10 +25,14 @@ namespace Network_A.Voice.Client.Runtime
         private VoiceClientRuntime runtime;
         private bool microphonePermissionRequestRunning;
         private bool speakerOff;
+        private bool displayedStatusInitialized;
+        private bool displayedAuthenticated;
+        private int displayedSessionCount = -1;
 
         //* این تابع هنگام فعال شدن پنل، دکمه‌های دستی صحنه را به کنترل‌های صوت وصل می‌کند.
         private void OnEnable()
         {
+            displayedStatusInitialized = false;
             TryResolveRuntime();
 
             if (microphoneButton != null)
@@ -49,7 +53,9 @@ namespace Network_A.Voice.Client.Runtime
                     HandleSpeakerButtonClicked);
             }
 
-            Debug.Log("VOICE_V6_SCENE_USER_CONSENT_PANEL=READY");
+            Debug.Log("VOICE_V6_SCENE_USER_CONSENT_PANEL=READY" +
+                " | micButtonAssigned=" + (microphoneButton != null) +
+                " | speakerButtonAssigned=" + (speakerButton != null));
 
             UpdateUi();
         }
@@ -57,6 +63,8 @@ namespace Network_A.Voice.Client.Runtime
         //* این تابع هنگام غیرفعال شدن پنل، اتصال دکمه‌ها را آزاد می‌کند.
         private void OnDisable()
         {
+            StopAllCoroutines();
+            microphonePermissionRequestRunning = false;
             if (microphoneButton != null)
             {
                 microphoneButton.onClick.RemoveListener(
@@ -94,6 +102,10 @@ namespace Network_A.Voice.Client.Runtime
         //* این تابع فقط با کلیک مستقیم کاربر اجازه میکروفن را می‌گیرد و سپس میکروفن را روشن می‌کند.
         private void HandleMicrophoneButtonClicked()
         {
+            TryResolveRuntime();
+            Debug.Log("VOICE_W4_MIC_WIDGET_CLICK=RECEIVED" +
+                " | runtimeReady=" + (runtime != null) +
+                " | requestRunning=" + microphonePermissionRequestRunning);
             if (runtime == null)
             {
                 Debug.LogWarning(
@@ -109,7 +121,9 @@ namespace Network_A.Voice.Client.Runtime
                 runtime.SetMicrophoneMuted(true);
 
                 Debug.Log(
-                    "VOICE_V6_MIC_USER_DISABLED=PASS");
+                    "VOICE_V6_MIC_USER_DISABLED=" +
+                    (runtime.IsMicrophoneMuted ? "PASS" : "FAIL") +
+                    " | actualMuted=" + runtime.IsMicrophoneMuted);
 
                 UpdateUi();
                 return;
@@ -117,6 +131,17 @@ namespace Network_A.Voice.Client.Runtime
 
             if (microphonePermissionRequestRunning)
                 return;
+
+            if (Application.HasUserAuthorization(UserAuthorization.Microphone))
+            {
+                runtime.SetMicrophoneMuted(false);
+                Debug.Log("VOICE_W4_MIC_WIDGET_ENABLE=" +
+                    (!runtime.IsMicrophoneMuted ? "PASS" : "FAIL") +
+                    " | authorization=already_granted" +
+                    " | actualMuted=" + runtime.IsMicrophoneMuted);
+                UpdateUi();
+                return;
+            }
 
             StartCoroutine(
                 RequestMicrophonePermissionAndEnable());
@@ -140,6 +165,13 @@ namespace Network_A.Voice.Client.Runtime
 
             microphonePermissionRequestRunning = false;
 
+            if (runtime == null)
+            {
+                Debug.LogWarning("VOICE_W4_MIC_WIDGET_ENABLE=SKIPPED" +
+                    " | reason=runtime_missing_after_permission");
+                yield break;
+            }
+
             if (!Application.HasUserAuthorization(
                     UserAuthorization.Microphone))
             {
@@ -153,13 +185,21 @@ namespace Network_A.Voice.Client.Runtime
                 yield break;
             }
 
+            if (runtime == null)
+            {
+                Debug.LogWarning("VOICE_W4_MIC_WIDGET_ENABLE=SKIPPED" +
+                    " | reason=runtime_lost_during_permission");
+                yield break;
+            }
             runtime.SetMicrophoneMuted(false);
 
             Debug.Log(
                 "VOICE_V6_MIC_PERMISSION=PASS");
 
             Debug.Log(
-                "VOICE_V6_MIC_USER_ENABLED=PASS");
+                "VOICE_V6_MIC_USER_ENABLED=" +
+                (!runtime.IsMicrophoneMuted ? "PASS" : "FAIL") +
+                " | actualMuted=" + runtime.IsMicrophoneMuted);
 
             UpdateUi();
         }
@@ -212,7 +252,10 @@ namespace Network_A.Voice.Client.Runtime
                     ? runtime.ActiveSessionCount
                     : 0;
 
-            if (statusText != null)
+            if (statusText != null &&
+                (!displayedStatusInitialized ||
+                 displayedAuthenticated != authenticated ||
+                 displayedSessionCount != sessionCount))
             {
                 statusText.text =
                     "وضعیت صدا: " +
@@ -222,6 +265,10 @@ namespace Network_A.Voice.Client.Runtime
                     "\n" +
                     "نشست فعال: " +
                     sessionCount;
+
+                displayedAuthenticated = authenticated;
+                displayedSessionCount = sessionCount;
+                displayedStatusInitialized = true;
             }
 
             if (microphoneButton != null &&
@@ -272,15 +319,15 @@ namespace Network_A.Voice.Client.Runtime
 
             if (microphoneButton != null)
             {
-                microphoneButton.interactable =
-                    runtimeReady &&
-                    !microphonePermissionRequestRunning;
+                bool shouldBeInteractable = runtimeReady && !microphonePermissionRequestRunning;
+                if (microphoneButton.interactable != shouldBeInteractable)
+                    microphoneButton.interactable = shouldBeInteractable;
             }
 
             if (speakerButton != null)
             {
-                speakerButton.interactable =
-                    runtimeReady;
+                if (speakerButton.interactable != runtimeReady)
+                    speakerButton.interactable = runtimeReady;
             }
         }
     }

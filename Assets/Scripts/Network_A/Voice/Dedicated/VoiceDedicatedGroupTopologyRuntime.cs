@@ -162,6 +162,10 @@ namespace Network_A.Voice.Dedicated
             new Dictionary<string, string>(StringComparer.Ordinal);
         private readonly Dictionary<string, RuntimeParticipantPosition> participantPositionsByKey =
             new Dictionary<string, RuntimeParticipantPosition>(StringComparer.Ordinal);
+        // Missing-position grace only suspends topology mutations involving an
+        // already active member. It never supplies a synthetic position.
+        private readonly HashSet<string> temporarilyUnavailableParticipantKeys =
+            new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<string, PendingSessionMemberPair> pendingSessionMemberPairsByPairKey =
             new Dictionary<string, PendingSessionMemberPair>(StringComparer.Ordinal);
         private readonly HashSet<string> usedSessionIds =
@@ -209,8 +213,30 @@ namespace Network_A.Voice.Dedicated
             IReadOnlyList<VoiceDedicatedTopologyParticipantPosition> positions,
             long effectiveAtMs)
         {
+            UpdateParticipantPositions(positions, effectiveAtMs, null);
+        }
+
+        // Protected keys must come from the existing session-member snapshot.
+        // Positions are still rebuilt from fresh authoritative samples only.
+        public void UpdateParticipantPositions(
+            IReadOnlyList<VoiceDedicatedTopologyParticipantPosition> positions,
+            long effectiveAtMs,
+            IReadOnlyCollection<string> protectedMemberIdentityKeys)
+        {
             if (positions == null) throw new ArgumentNullException("positions");
             if (effectiveAtMs < 0) throw new ArgumentOutOfRangeException("effectiveAtMs");
+
+            temporarilyUnavailableParticipantKeys.Clear();
+            if (protectedMemberIdentityKeys != null)
+            {
+                foreach (string key in protectedMemberIdentityKeys)
+                {
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        temporarilyUnavailableParticipantKeys.Add(key);
+                    }
+                }
+            }
 
             participantPositionsByKey.Clear();
             latestParticipantPositionEffectiveAtMs = effectiveAtMs;
@@ -529,6 +555,7 @@ namespace Network_A.Voice.Dedicated
 
             RemoveParticipantEdges(participant);
             participantPositionsByKey.Remove(participant.IdentityKey);
+            temporarilyUnavailableParticipantKeys.Remove(participant.IdentityKey);
             previousTargetByParticipantKey.Remove(participant.IdentityKey);
             return deltas;
         }
@@ -573,6 +600,7 @@ namespace Network_A.Voice.Dedicated
             edgesByPairKey.Clear();
             previousTargetByParticipantKey.Clear();
             participantPositionsByKey.Clear();
+            temporarilyUnavailableParticipantKeys.Clear();
             pendingSessionMemberPairsByPairKey.Clear();
             latestParticipantPositionEffectiveAtMs = 0L;
             blockedGroupExitPairKeys.Clear();
@@ -591,6 +619,7 @@ namespace Network_A.Voice.Dedicated
             edgesByPairKey.Clear();
             previousTargetByParticipantKey.Clear();
             participantPositionsByKey.Clear();
+            temporarilyUnavailableParticipantKeys.Clear();
             pendingSessionMemberPairsByPairKey.Clear();
             latestParticipantPositionEffectiveAtMs = 0L;
             blockedGroupExitPairKeys.Clear();
@@ -763,6 +792,9 @@ namespace Network_A.Voice.Dedicated
             for (int sessionIndex = 0; sessionIndex < sessions.Count; sessionIndex += 1)
             {
                 RuntimeSession session = sessions[sessionIndex];
+                // A missing member has no current authoritative coordinate.
+                // Do not move/reform the group using an incomplete centroid.
+                if (SessionHasTemporarilyUnavailableMember(session)) continue;
 
                 while (session.Members.Count > 2)
                 {
@@ -888,6 +920,7 @@ namespace Network_A.Voice.Dedicated
                 VoiceDedicatedGroupParticipant candidate = candidatePosition.Participant;
 
                 if (!session.HasSessionPosition ||
+                    SessionHasTemporarilyUnavailableMember(session) ||
                     session.Contains(candidate) ||
                     !string.Equals(
                         session.AnchorPair.ServerId,
@@ -1029,6 +1062,15 @@ namespace Network_A.Voice.Dedicated
                     CreateParticipantFromPairEndpoint(pending.Pair, true);
                 VoiceDedicatedGroupParticipant second =
                     CreateParticipantFromPairEndpoint(pending.Pair, false);
+
+                if (temporarilyUnavailableParticipantKeys.Contains(first.IdentityKey) ||
+                    temporarilyUnavailableParticipantKeys.Contains(second.IdentityKey) ||
+                    IsParticipantInProtectedSession(first) ||
+                    IsParticipantInProtectedSession(second))
+                {
+                    topologyTransitionPairKeys.Add(pairKey);
+                    continue;
+                }
 
                 if (!PairRequiresSessionMemberDelay(first, second))
                 {
@@ -1493,7 +1535,8 @@ namespace Network_A.Voice.Dedicated
             for (int index = 0; index < orderedSessions.Count; index += 1)
             {
                 RuntimeSession target = orderedSessions[index];
-                if (!target.Contains(connectedPeer) || target.Contains(candidate))
+                if (SessionHasTemporarilyUnavailableMember(target) ||
+                    !target.Contains(connectedPeer) || target.Contains(candidate))
                 {
                     continue;
                 }
@@ -1527,6 +1570,45 @@ namespace Network_A.Voice.Dedicated
             }
 
             selectedPlan = null;
+            return false;
+        }
+
+        private bool SessionHasTemporarilyUnavailableMember(RuntimeSession session)
+        {
+            if (session == null || temporarilyUnavailableParticipantKeys.Count == 0)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < session.Members.Count; index += 1)
+            {
+                if (temporarilyUnavailableParticipantKeys.Contains(
+                        session.Members[index].Participant.IdentityKey))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsParticipantInProtectedSession(
+            VoiceDedicatedGroupParticipant participant)
+        {
+            if (participant == null || temporarilyUnavailableParticipantKeys.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (RuntimeSession session in sessionsById.Values)
+            {
+                if (session.Contains(participant) &&
+                    SessionHasTemporarilyUnavailableMember(session))
+                {
+                    return true;
+                }
+            }
+
             return false;
         }
 

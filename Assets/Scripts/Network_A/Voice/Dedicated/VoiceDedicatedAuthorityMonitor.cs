@@ -28,6 +28,12 @@ namespace Network_A.Voice.Dedicated
             new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> eligibleParticipantKeys =
             new HashSet<string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, float> transientPositionLossStartedAt =
+            new Dictionary<string, float>(StringComparer.Ordinal);
+        private readonly HashSet<string> transientPositionGraceKeys =
+            new HashSet<string>(StringComparer.Ordinal);
+        // Kept serialized for scene/prefab compatibility; no longer expires members.
+        [SerializeField, Min(0f)] private float transientPositionLossGraceSeconds = 1.5f;
         private readonly List<string> pendingTrackerRemovals =
             new List<string>();
         private readonly List<VoiceDedicatedTopologyPairObservation> pairObservations =
@@ -37,12 +43,15 @@ namespace Network_A.Voice.Dedicated
 
         private const int MaximumAuthorityEpochResetCount = 8;
         private const float SessionEligibilityRefreshIntervalSeconds = 0.5f;
+        private const float SessionGuardHeartbeatIntervalSeconds = 2.0f;
+        private const float MissingSessionAuditIntervalSeconds = 2.0f;
 
         private long stabilityDelayMs;
         private string authorityEpochId = string.Empty;
         private long sourceSequence;
         private float sampleIntervalSeconds;
         private float nextSampleAtRealtime;
+        private float nextMissingSessionAuditAtRealtime;
         private bool configured;
         private bool registryEventsBound;
         private bool runtimeEventsBound;
@@ -124,6 +133,8 @@ namespace Network_A.Voice.Dedicated
             currentScopeUserKeys.Clear();
             currentScopeParticipantKeys.Clear();
             currentResolvedParticipantKeys.Clear();
+            transientPositionLossStartedAt.Clear();
+            transientPositionGraceKeys.Clear();
             eligibleParticipantKeys.Clear();
             pairObservations.Clear();
             eligibilitySnapshotReady = false;
@@ -131,6 +142,7 @@ namespace Network_A.Voice.Dedicated
             nextEligibilityRefreshAtRealtime = 0.0f;
             authorityEpochResetCount = 0;
             nextSampleAtRealtime = 0.0f;
+            nextMissingSessionAuditAtRealtime = 0.0f;
 
             ResetEligibilityCancellationSource();
             BindEvents();
@@ -160,6 +172,7 @@ namespace Network_A.Voice.Dedicated
             int tickRate = Mathf.Max(1, config.tickRate);
             sampleIntervalSeconds = 1.0f / tickRate;
             nextSampleAtRealtime = Time.realtimeSinceStartup;
+            nextMissingSessionAuditAtRealtime = 0.0f;
             nextEligibilityRefreshAtRealtime = 0.0f;
             authorityRunning = true;
 
@@ -180,10 +193,13 @@ namespace Network_A.Voice.Dedicated
 
             authorityRunning = false;
             nextSampleAtRealtime = 0.0f;
+            nextMissingSessionAuditAtRealtime = 0.0f;
             eligibilitySnapshotReady = false;
             eligibilityRefreshRunning = false;
             nextEligibilityRefreshAtRealtime = 0.0f;
             eligibleParticipantKeys.Clear();
+            transientPositionLossStartedAt.Clear();
+            transientPositionGraceKeys.Clear();
 
             Debug.Log(
                 "[VoiceDedicatedAuthorityMonitor] Authority stopped" +
@@ -210,6 +226,8 @@ namespace Network_A.Voice.Dedicated
             {
                 eligibilitySnapshotReady = false;
                 eligibleParticipantKeys.Clear();
+                transientPositionLossStartedAt.Clear();
+                transientPositionGraceKeys.Clear();
                 return;
             }
 
@@ -374,6 +392,7 @@ namespace Network_A.Voice.Dedicated
             currentScopeUserKeys.Clear();
             currentScopeParticipantKeys.Clear();
             currentResolvedParticipantKeys.Clear();
+            transientPositionGraceKeys.Clear();
             pairObservations.Clear();
 
             for (int index = 0; index < sessions.Count; index += 1)
@@ -427,6 +446,11 @@ namespace Network_A.Voice.Dedicated
                         authoritativePosition));
 
                 currentResolvedParticipantKeys.Add(participantKey);
+                if (transientPositionLossStartedAt.Remove(participantKey))
+                {
+                    Debug.Log("VOICE_G5_TRANSIENT_POSITION_RECOVERED=PASS" +
+                              " | participantKey=" + CompactForLog(participantKey));
+                }
             }
 
             long stabilityClockMs = ReadMonotonicMilliseconds();
@@ -454,9 +478,18 @@ namespace Network_A.Voice.Dedicated
                         effectiveAtMs));
             }
 
+            // Retain an existing member while the exact registered connection and
+            // voice eligibility are still valid, even when position samples stop.
+            // Never synthesize a position or create a new proximity entry from stale data.
+            // Definitive registry removal, room/connection changes and revoked
+            // eligibility still remove the member through their original paths.
+            List<string> protectedTopologyIdentityKeys =
+                PrepareTransientPositionGraceForCurrentSnapshot();
+
             groupTopologyRuntime.UpdateParticipantPositions(
                 participantPositions,
-                effectiveAtMs);
+                effectiveAtMs,
+                protectedTopologyIdentityKeys);
 
             for (int firstIndex = 0; firstIndex < participants.Count; firstIndex += 1)
             {
@@ -536,6 +569,8 @@ namespace Network_A.Voice.Dedicated
 
             EnqueueAllOrFail(topologyDeltas);
             SynchronizePairTrackerAssignments();
+            ReconcileMissingPairSessions(stabilityClockMs, effectiveAtMs);
+            GuardActivePairSessions(effectiveAtMs);
             CloseAndRemoveUnobservedTrackers(effectiveAtMs);
             RemovePendingTrackers();
         }
@@ -585,6 +620,11 @@ namespace Network_A.Voice.Dedicated
                         tracker.Pair,
                         out activeSessionId))
                 {
+                    if (IsPairTemporarilyMissingPosition(tracker.Pair))
+                    {
+                        continue;
+                    }
+
                     throw new InvalidOperationException(
                         "An unobserved Voice pair remained assigned after participant cleanup" +
                         " | sessionId=" + activeSessionId +
@@ -597,7 +637,48 @@ namespace Network_A.Voice.Dedicated
             }
         }
 
-        //* این تابع عضو فاقد موقعیت معتبر یا خارج‌شده از Scope را یک بار از تمام Sessionهای گروهی حذف می‌کند.
+        // Build per-sample protection for existing session members only.
+        // A position timeout cannot revoke a still-registered, eligible member.
+        // The same live room, connection and identity must remain in the registry.
+        // Protection ends through the existing player removal, room change or
+        // eligibility-revocation paths, not through a position-age timeout.
+        private List<string> PrepareTransientPositionGraceForCurrentSnapshot()
+        {
+            List<string> protectedIdentityKeys = new List<string>();
+            IReadOnlyList<VoiceDedicatedGroupParticipant> existingMembers =
+                groupTopologyRuntime.CreateParticipantSnapshot();
+
+            for (int index = 0; index < existingMembers.Count; index += 1)
+            {
+                VoiceDedicatedGroupParticipant participant = existingMembers[index];
+                string key = BuildScopeParticipantKey(
+                    participant.ServerId,
+                    participant.RoomId,
+                    participant.UserId,
+                    participant.ConnectionId);
+                if (currentResolvedParticipantKeys.Contains(key)) continue;
+
+                bool sameRoomAndUser = currentScopeUserKeys.Contains(
+                    BuildScopeUserKey(
+                        participant.ServerId,
+                        participant.RoomId,
+                        participant.UserId));
+                bool sameLiveConnection = currentScopeParticipantKeys.Contains(key);
+                bool stillEligible = IsVoiceSessionEligible(key);
+
+                if (sameRoomAndUser && sameLiveConnection && stillEligible &&
+                    IsWithinTransientPositionGrace(key))
+                {
+                    protectedIdentityKeys.Add(participant.IdentityKey);
+                }
+            }
+
+            return protectedIdentityKeys;
+        }
+
+        // Remove only definitively absent, rebound, or ineligible participants.
+        // A still-registered, eligible member with missing position is protected
+        // and must not be treated as AvatarDespawned.
         private void RemoveUnavailableTopologyParticipants(long effectiveAtMs)
         {
             IReadOnlyList<VoiceDedicatedGroupParticipant> participants =
@@ -625,6 +706,14 @@ namespace Network_A.Voice.Dedicated
                 bool voiceEligible =
                     IsVoiceSessionEligible(participantKey);
 
+                if (userStillInScope && connectionStillInScope && voiceEligible &&
+                    transientPositionGraceKeys.Contains(participantKey))
+                {
+                    continue;
+                }
+
+                transientPositionLossStartedAt.Remove(participantKey);
+
                 VoiceDedicatedSessionReason reason = !userStillInScope
                     ? VoiceDedicatedSessionReason.RoomLeft
                     : !connectionStillInScope
@@ -645,6 +734,37 @@ namespace Network_A.Voice.Dedicated
             }
         }
 
+        // Legacy method name retained for source compatibility. The caller has
+        // already verified exact registry identity, room and voice eligibility.
+        // Do not use elapsed position age as a reason to remove that member.
+        private bool IsWithinTransientPositionGrace(string participantKey)
+        {
+            float startedAt;
+            if (!transientPositionLossStartedAt.TryGetValue(participantKey, out startedAt))
+            {
+                transientPositionLossStartedAt[participantKey] =
+                    Time.realtimeSinceStartup;
+                Debug.LogWarning("VOICE_G5_POSITION_UNCERTAIN_SESSION_PRESERVED=PASS" +
+                                 " | participantKey=" + CompactForLog(participantKey) +
+                                 " | reason=authoritative_position_unavailable" +
+                                 " | until=registry_or_eligibility_change" +
+                                 " | syntheticPosition=False" +
+                                 " | legacyGraceSecondsIgnored=" +
+                                 transientPositionLossGraceSeconds.ToString("F2"));
+            }
+
+            transientPositionGraceKeys.Add(participantKey);
+            return true;
+        }
+
+        private bool IsPairTemporarilyMissingPosition(VoiceDedicatedParticipantPair pair)
+        {
+            return transientPositionGraceKeys.Contains(BuildScopeParticipantKey(
+                       pair.ServerId, pair.RoomId, pair.FirstUserId, pair.FirstConnectionId)) ||
+                   transientPositionGraceKeys.Contains(BuildScopeParticipantKey(
+                       pair.ServerId, pair.RoomId, pair.SecondUserId, pair.SecondConnectionId));
+        }
+
         //* این تابع SessionId واقعی هر Pair را پس از Join، Leave، Merge یا Burn به Tracker منعکس می‌کند.
         private void SynchronizePairTrackerAssignments()
         {
@@ -654,9 +774,12 @@ namespace Network_A.Voice.Dedicated
             }
         }
 
-        //* این تابع نگاشت یک Tracker را بدون تغییر وضعیت داخلی Distance Evaluator تازه می‌کند.
+        //* این تابع نگاشت یک زوج را بدون تغییر وضعیت داخلی ارزیاب فاصله تازه می‌کند.
         private void SynchronizePairTrackerAssignment(PairTracker tracker)
         {
+            bool previousActive = tracker.SessionActive;
+            string previousSessionId = tracker.SessionId ?? string.Empty;
+
             string sessionId;
             tracker.SessionActive = groupTopologyRuntime.TryGetSessionIdForPair(
                 tracker.Pair,
@@ -664,6 +787,243 @@ namespace Network_A.Voice.Dedicated
             tracker.SessionId = tracker.SessionActive
                 ? sessionId
                 : string.Empty;
+
+            bool assignmentChanged =
+                previousActive != tracker.SessionActive ||
+                !string.Equals(
+                    previousSessionId,
+                    tracker.SessionId,
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!tracker.SessionActive)
+            {
+                tracker.NextSessionGuardAtRealtime = 0.0f;
+                tracker.SessionGuardHeartbeatCount = 0;
+                return;
+            }
+
+            tracker.MissingSessionSinceClockMs = -1L;
+            tracker.NextMissingSessionAttemptClockMs = 0L;
+
+            if (assignmentChanged)
+            {
+                tracker.NextSessionGuardAtRealtime =
+                    Time.realtimeSinceStartup +
+                    SessionGuardHeartbeatIntervalSeconds;
+                tracker.SessionGuardHeartbeatCount = 0;
+            }
+        }
+
+        // Verify an orphaned, stable pair against the complete topology before
+        // replaying the normal session-create transition. Never split a group.
+        private void ReconcileMissingPairSessions(
+            long stabilityClockMs,
+            long effectiveAtMs)
+        {
+            if (groupTopologyRuntime == null ||
+                deltaSender == null ||
+                !deltaSender.IsConfigured ||
+                !deltaSender.IsTransportEnabled ||
+                deltaSender.IsQueueFaulted ||
+                Time.realtimeSinceStartup < nextMissingSessionAuditAtRealtime)
+            {
+                return;
+            }
+
+            nextMissingSessionAuditAtRealtime =
+                Time.realtimeSinceStartup + MissingSessionAuditIntervalSeconds;
+
+            IReadOnlyList<VoiceDedicatedGroupSessionSnapshot> sessions =
+                groupTopologyRuntime.CreateSessionSnapshot();
+            HashSet<string> assignedMembers =
+                new HashSet<string>(StringComparer.Ordinal);
+
+            for (int sessionIndex = 0; sessionIndex < sessions.Count; sessionIndex += 1)
+            {
+                VoiceDedicatedGroupSessionSnapshot session = sessions[sessionIndex];
+                for (int memberIndex = 0; memberIndex < session.Members.Count; memberIndex += 1)
+                {
+                    assignedMembers.Add(session.Members[memberIndex].IdentityKey);
+                }
+            }
+
+            long requiredStabilityMs = Math.Max(
+                stabilityDelayMs,
+                (long)(MissingSessionAuditIntervalSeconds * 1000f));
+
+            for (int index = 0; index < pairObservations.Count; index += 1)
+            {
+                VoiceDedicatedTopologyPairObservation observation = pairObservations[index];
+                PairTracker tracker;
+                if (!trackersByPairKey.TryGetValue(observation.Pair.PairKey, out tracker))
+                {
+                    continue;
+                }
+
+                if (tracker.SessionActive ||
+                    observation.State != VoiceDedicatedProximityState.Active ||
+                    observation.DistanceMeters >= VoiceDedicatedProximityEvaluator.EnterDistanceMeters ||
+                    tracker.Evaluator.ActiveSessionCount == 0 ||
+                    !observedPairKeys.Contains(observation.Pair.PairKey))
+                {
+                    tracker.MissingSessionSinceClockMs = -1L;
+                    tracker.NextMissingSessionAttemptClockMs = 0L;
+                    continue;
+                }
+
+                VoiceDedicatedParticipantPair pair = observation.Pair;
+                VoiceDedicatedGroupParticipant first = new VoiceDedicatedGroupParticipant(
+                    pair.ServerId, pair.RoomId, pair.FirstUserId, pair.FirstConnectionId);
+                VoiceDedicatedGroupParticipant second = new VoiceDedicatedGroupParticipant(
+                    pair.ServerId, pair.RoomId, pair.SecondUserId, pair.SecondConnectionId);
+
+                if (assignedMembers.Contains(first.IdentityKey) ||
+                    assignedMembers.Contains(second.IdentityKey))
+                {
+                    // Group topology is authoritative for an already assigned member.
+                    tracker.MissingSessionSinceClockMs = -1L;
+                    tracker.NextMissingSessionAttemptClockMs = 0L;
+                    continue;
+                }
+
+                if (tracker.MissingSessionSinceClockMs < 0L)
+                {
+                    tracker.MissingSessionSinceClockMs = stabilityClockMs;
+                    continue;
+                }
+
+                if (stabilityClockMs - tracker.MissingSessionSinceClockMs < requiredStabilityMs ||
+                    stabilityClockMs < tracker.NextMissingSessionAttemptClockMs)
+                {
+                    continue;
+                }
+
+                tracker.NextMissingSessionAttemptClockMs =
+                    stabilityClockMs + requiredStabilityMs;
+
+                VoiceDedicatedTopologyPairObservation reenter =
+                    new VoiceDedicatedTopologyPairObservation(
+                        pair,
+                        VoiceDedicatedProximityState.Active,
+                        VoiceDedicatedProximityDecisionType.SessionCreated,
+                        Guid.NewGuid().ToString("D"),
+                        observation.DistanceMeters,
+                        effectiveAtMs);
+
+                IReadOnlyList<VoiceDedicatedSessionDelta> deltas =
+                    groupTopologyRuntime.ApplyPairObservations(
+                        new[] { reenter },
+                        authorityEpochId,
+                        NextSourceSequence);
+
+                EnqueueAllOrFail(deltas);
+                if (authorityFaulted) return;
+
+                SynchronizePairTrackerAssignments();
+
+                Debug.Log(
+                    "VOICE_W4_MISSING_SESSION_RECONCILIATION" +
+                    " | pairKey=" + CompactForLog(pair.PairKey) +
+                    " | distanceMeters=" + observation.DistanceMeters.ToString("F3") +
+                    " | deltaCount=" + deltas.Count +
+                    " | assigned=" + tracker.SessionActive);
+
+                // Allow the next audit to see the updated group membership.
+                return;
+            }
+        }
+
+        //* این تابع برای نشست زوجی فعال یک اعلان ایجاد تکرارپذیر می‌فرستد تا اگر وضعیت نشست در بک‌اند از بین رفته باشد بدون انتظار برای حرکت دوباره ساخته شود.
+        private void GuardActivePairSessions(long effectiveAtMs)
+        {
+            if (groupTopologyRuntime == null ||
+                deltaSender == null ||
+                !deltaSender.IsConfigured ||
+                !deltaSender.IsTransportEnabled ||
+                deltaSender.IsQueueFaulted)
+            {
+                return;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            IReadOnlyList<VoiceDedicatedGroupSessionSnapshot> sessions =
+                groupTopologyRuntime.CreateSessionSnapshot();
+
+            for (int index = 0; index < sessions.Count; index += 1)
+            {
+                VoiceDedicatedGroupSessionSnapshot session = sessions[index];
+                if (session == null ||
+                    session.Members == null ||
+                    session.Members.Count != 2)
+                {
+                    continue;
+                }
+
+                VoiceDedicatedGroupParticipant first = session.Members[0];
+                VoiceDedicatedGroupParticipant second = session.Members[1];
+
+                VoiceDedicatedParticipantPair pair =
+                    new VoiceDedicatedParticipantPair(
+                        session.ServerId,
+                        session.RoomId,
+                        first.UserId,
+                        first.ConnectionId,
+                        second.UserId,
+                        second.ConnectionId);
+
+                PairTracker tracker;
+                if (!trackersByPairKey.TryGetValue(pair.PairKey, out tracker) ||
+                    !tracker.SessionActive ||
+                    !observedPairKeys.Contains(pair.PairKey) ||
+                    !string.Equals(
+                        tracker.SessionId,
+                        session.SessionId,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    tracker.LastDistanceMeters >=
+                        VoiceDedicatedProximityEvaluator.ExitDistanceMeters ||
+                    now < tracker.NextSessionGuardAtRealtime)
+                {
+                    continue;
+                }
+
+                VoiceDedicatedProximityDecision heartbeatDecision =
+                    new VoiceDedicatedProximityDecision(
+                        VoiceDedicatedProximityDecisionType.SessionCreated,
+                        VoiceDedicatedProximityState.Active,
+                        VoiceDedicatedProximityReason.ProximityEnter,
+                        tracker.Pair,
+                        session.SessionId,
+                        tracker.LastDistanceMeters,
+                        effectiveAtMs);
+
+                VoiceDedicatedSessionDelta heartbeat =
+                    VoiceDedicatedSessionDelta.FromProximityDecision(
+                        heartbeatDecision,
+                        authorityEpochId,
+                        NextSourceSequence());
+
+                EnqueueOrFail(heartbeat);
+                if (authorityFaulted) return;
+
+                tracker.NextSessionGuardAtRealtime =
+                    now + SessionGuardHeartbeatIntervalSeconds;
+                tracker.SessionGuardHeartbeatCount += 1;
+
+                if (tracker.SessionGuardHeartbeatCount == 1 ||
+                    tracker.SessionGuardHeartbeatCount % 10 == 0)
+                {
+                    Debug.Log(
+                        "VOICE_DEDICATED_SESSION_GUARD_HEARTBEAT=PASS" +
+                        " | sessionId=" + session.SessionId +
+                        " | pairKey=" + CompactForLog(pair.PairKey) +
+                        " | distanceMeters=" +
+                            tracker.LastDistanceMeters.ToString("F3") +
+                        " | heartbeatCount=" +
+                            tracker.SessionGuardHeartbeatCount +
+                        " | intervalSeconds=" +
+                            SessionGuardHeartbeatIntervalSeconds.ToString("F1"));
+                }
+            }
         }
 
         //* این تابع حذف قطعی بازیکن از رجیستری را فقط برای سشن‌های شامل همان userId اعمال می‌کند.
@@ -686,9 +1046,19 @@ namespace Network_A.Voice.Dedicated
                 return;
             }
 
+            string removedParticipantKey = BuildScopeParticipantKey(
+                serverId, roomId, userId, connectionId);
+            transientPositionLossStartedAt.Remove(removedParticipantKey);
+            transientPositionGraceKeys.Remove(removedParticipantKey);
+
             long effectiveAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             VoiceDedicatedSessionReason reason =
                 VoiceDedicatedSessionDelta.MapPlayerRemovalReason(removalReason);
+            Debug.LogWarning("VOICE_G5_REGISTRY_PLAYER_REMOVED=OBSERVED" +
+                             " | userId=" + CompactForLog(userId) +
+                             " | connectionId=" + CompactForLog(connectionId) +
+                             " | removalReason=" + CompactForLog(removalReason) +
+                             " | mappedReason=" + (int)reason);
 
             VoiceDedicatedGroupParticipant participant =
                 new VoiceDedicatedGroupParticipant(
@@ -764,6 +1134,8 @@ namespace Network_A.Voice.Dedicated
             currentScopeUserKeys.Clear();
             currentScopeParticipantKeys.Clear();
             currentResolvedParticipantKeys.Clear();
+            transientPositionLossStartedAt.Clear();
+            transientPositionGraceKeys.Clear();
             eligibleParticipantKeys.Clear();
             pairObservations.Clear();
             eligibilitySnapshotReady = false;
@@ -811,6 +1183,8 @@ namespace Network_A.Voice.Dedicated
 
             trackersByPairKey.Clear();
             pendingTrackerRemovals.Clear();
+            transientPositionLossStartedAt.Clear();
+            transientPositionGraceKeys.Clear();
             pairObservations.Clear();
         }
 
@@ -860,6 +1234,7 @@ namespace Network_A.Voice.Dedicated
                 " | secondUserId=" + CompactForLog(delta.secondUserId) +
                 " | memberUserId=" + CompactForLog(delta.memberUserId) +
                 " | reason=" + delta.reason +
+                " | distanceMeters=" + delta.distanceMeters.ToString("F3") +
                 " | sourceSequence=" + delta.sourceSequence);
         }
 
@@ -1091,6 +1466,8 @@ namespace Network_A.Voice.Dedicated
             currentScopeUserKeys.Clear();
             currentScopeParticipantKeys.Clear();
             currentResolvedParticipantKeys.Clear();
+            transientPositionLossStartedAt.Clear();
+            transientPositionGraceKeys.Clear();
             eligibleParticipantKeys.Clear();
             pairObservations.Clear();
             eligibilitySnapshotReady = false;
@@ -1217,6 +1594,10 @@ namespace Network_A.Voice.Dedicated
             public bool SessionActive;
             public string SessionId;
             public float LastDistanceMeters;
+            public float NextSessionGuardAtRealtime;
+            public int SessionGuardHeartbeatCount;
+            public long MissingSessionSinceClockMs;
+            public long NextMissingSessionAttemptClockMs;
 
             //* این سازنده وضعیت مستقل یک زوج غیرانتقالی را آماده می‌کند.
             public PairTracker(
@@ -1228,6 +1609,10 @@ namespace Network_A.Voice.Dedicated
                 SessionActive = false;
                 SessionId = string.Empty;
                 LastDistanceMeters = 0.0f;
+                NextSessionGuardAtRealtime = 0.0f;
+                SessionGuardHeartbeatCount = 0;
+                MissingSessionSinceClockMs = -1L;
+                NextMissingSessionAttemptClockMs = 0L;
             }
         }
     }

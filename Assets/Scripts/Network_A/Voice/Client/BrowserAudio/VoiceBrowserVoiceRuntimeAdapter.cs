@@ -224,6 +224,24 @@ namespace Network_A.Voice.Client.BrowserAudio
 
             if (publishing) return;
 
+            // W2 local SFU only: old PublishStart targets legacy TCP Media Bind.
+            // The SFU uses its own Producer; do not send a misleading legacy Start.
+            if (IsWebRtcSfuStageSelected())
+            {
+                if (mediaSession == null ||
+                    !mediaSession.SetOutboundEnabled(true))
+                {
+                    Fail("webrtc_sfu_publish_enable_rejected");
+                    return;
+                }
+                publishing = true;
+                microphoneActivationPending = false;
+                SetRuntimeMicrophoneMirror(false);
+                runtime.SetRecordingConsentForAll(true);
+                Debug.Log("VME2_WEBRTC_STAGE_PUBLISH=REQUESTED | media=WebRTC_Opus_RTP");
+                return;
+            }
+
             if (publishCommand == null)
             {
                 BeginPublishCommand();
@@ -443,6 +461,67 @@ namespace Network_A.Voice.Client.BrowserAudio
                 Fail("browser_voice_audio_start_rejected");
         }
 
+        // This method is called only from the user-initiated recovery button.
+        // Recreating the browser pipeline re-acquires a stopped/unavailable track;
+        // resetting the media transport alone cannot restore that prerequisite.
+        internal bool RecreateAudioPipelineForUserRecovery()
+        {
+            if (runtime == null || !runtime.IsAuthenticated ||
+                !microphoneRequested || !MetaverseNetworkClient.isReady)
+            {
+                Debug.LogWarning(
+                    "VOICE_W4_CAPTURE_RECOVERY=SKIPPED" +
+                    " | authenticated=" + (runtime != null && runtime.IsAuthenticated) +
+                    " | microphoneSelected=" + microphoneRequested +
+                    " | playerReady=" + MetaverseNetworkClient.isReady);
+                return false;
+            }
+
+            ResetMediaSession("user_safe_capture_recovery");
+            DisposeAudioPipeline();
+            microphoneActivationPending = true;
+            failureReason = string.Empty;
+            consecutiveMediaFailures = 0;
+            retryAt = 0f;
+
+            audioPipeline = new VoiceBrowserAudioPipeline();
+            audioPipeline.Ready += HandleAudioReady;
+            audioPipeline.StatsUpdated += HandleAudioStats;
+            audioPipeline.Failed += HandleAudioFailure;
+
+            string assetRoot = Application.streamingAssetsPath.TrimEnd('/') +
+                "/VoiceBrowserAudio";
+            bool started;
+            try
+            {
+                started = audioPipeline.BeginStart(assetRoot);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError("VOICE_W4_CAPTURE_RECOVERY=ERROR | detail=" +
+                    Safe(exception.Message));
+                DisposeAudioPipeline();
+                microphoneActivationPending = false;
+                return false;
+            }
+
+            if (!started)
+            {
+                Debug.LogWarning(
+                    "VOICE_W4_CAPTURE_RECOVERY=REJECTED | stage=audio_start");
+                DisposeAudioPipeline();
+                microphoneActivationPending = false;
+                return false;
+            }
+
+            Debug.Log(
+                "VOICE_W4_CAPTURE_RECOVERY=STARTED" +
+                " | trigger=user_click" +
+                " | roomExit=False" +
+                " | microphoneIntentPreserved=True");
+            return true;
+        }
+
         private void HandleAudioReady()
         {
             audioReady = true;
@@ -606,6 +685,13 @@ namespace Network_A.Voice.Client.BrowserAudio
 
             if (!mediaConnectStarted)
             {
+                Debug.LogWarning(
+                    "VOICE_W4_MEDIA_CONNECT_PRECHECK=REJECTED" +
+                    " | audioReady=" + audioReady +
+                    " | audioPipelineStarted=" +
+                        (audioPipeline != null && audioPipeline.IsStarted) +
+                    " | microphoneRequested=" + microphoneRequested +
+                    " | attempt=" + mediaConnectionAttempts);
                 ResetMediaSession("media_connect_start_rejected");
                 consecutiveMediaFailures += 1;
                 retryAt = Time.realtimeSinceStartup +
@@ -775,6 +861,11 @@ namespace Network_A.Voice.Client.BrowserAudio
                 (ControlCommandTimeoutMs / 1000d);
         }
 
+        private static bool IsWebRtcSfuStageSelected()
+        {
+            return true;
+        }
+
         private void DisablePublishingFromUserAction()
         {
             microphoneRequested = false;
@@ -786,7 +877,8 @@ namespace Network_A.Voice.Client.BrowserAudio
             SetRuntimeMicrophoneMirror(true);
             runtime?.SetRecordingConsentForAll(false);
 
-            if (runtime != null && runtime.IsAuthenticated &&
+            if (!IsWebRtcSfuStageSelected() &&
+                runtime != null && runtime.IsAuthenticated &&
                 controlAdapter != null)
             {
                 _ = controlAdapter.SendPublishStopAsync(1);
@@ -950,7 +1042,7 @@ namespace Network_A.Voice.Client.BrowserAudio
         private void OnDestroy()
         {
             UnhookMicrophoneButton(true);
-            if (publishing && controlAdapter != null)
+            if (publishing && controlAdapter != null && !IsWebRtcSfuStageSelected())
                 _ = controlAdapter.SendPublishStopAsync(1);
             controlAdapter?.Dispose();
             controlAdapter = null;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,6 +50,9 @@ namespace Network_A.GameServer
         private string renewedServiceToken = string.Empty;
         private float lastServiceTokenRenewAttemptAt = -9999f;
         private bool isRenewingServiceToken;
+        private Task<bool> serviceTokenRenewalTask;
+        private float lastSuccessfulServiceTokenRenewAtRealtime = -1f;
+        private int lastSuccessfulServiceTokenTtlSeconds;
 
         //* این تابع رفرنس ران تایم ددیکیتد سرور را در شروع آبجکت پیدا می کند.
         private void Awake()
@@ -114,6 +117,9 @@ namespace Network_A.GameServer
             LastServiceTokenRenewReason = string.Empty;
             lastServiceTokenRenewAttemptAt = -9999f;
             isRenewingServiceToken = false;
+            serviceTokenRenewalTask = null;
+            lastSuccessfulServiceTokenRenewAtRealtime = -1f;
+            lastSuccessfulServiceTokenTtlSeconds = 0;
 
             if (!autoRegisterOnRuntimeStarted) return;
 
@@ -274,13 +280,28 @@ namespace Network_A.GameServer
         //* این تابع قبل از استفاده حساس، در صورت نیاز سرویس توکن را تازه می کند و مقدار فعال را برمی گرداند.
         public async Task<string> GetFreshServiceTokenAsync(CancellationToken cancellationToken = default, bool forceRenew = false)
         {
-            if (forceRenew)
+            bool renewalSucceeded = forceRenew
+                ? await RenewServiceTokenAsync(cancellationToken)
+                : await RenewServiceTokenIfNeededAsync(cancellationToken);
+            if (!renewalSucceeded) return string.Empty;
+
+            bool hasMonotonicLease = lastSuccessfulServiceTokenRenewAtRealtime >= 0f &&
+                                      lastSuccessfulServiceTokenTtlSeconds > 0;
+            if (hasMonotonicLease &&
+                Time.realtimeSinceStartup - lastSuccessfulServiceTokenRenewAtRealtime >=
+                    lastSuccessfulServiceTokenTtlSeconds)
             {
-                await RenewServiceTokenAsync(cancellationToken);
+                Debug.LogWarning("VOICE_G5_DEDICATED_SERVICE_TOKEN_EXPIRED_LOCAL=PASS" +
+                                 " | timeSource=monotonic_ttl");
+                return string.Empty;
             }
-            else
+
+            if (!hasMonotonicLease && LastServiceTokenExpiresAtMs > 0 &&
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= LastServiceTokenExpiresAtMs)
             {
-                await RenewServiceTokenIfNeededAsync(cancellationToken);
+                Debug.LogWarning("VOICE_G5_DEDICATED_SERVICE_TOKEN_EXPIRED_LOCAL=PASS" +
+                                 " | timeSource=utc_fallback");
+                return string.Empty;
             }
 
             return GetActiveServiceToken();
@@ -290,15 +311,23 @@ namespace Network_A.GameServer
         public bool ShouldRenewServiceToken()
         {
             if (!serviceTokenRenewalEnabled) return false;
-            if (isRenewingServiceToken) return false;
-
             DedicatedServerConfigData config = GetSafeConfig();
             if (config == null) return false;
             if (string.IsNullOrWhiteSpace(ResolveServiceToken(config))) return false;
 
+            if (lastSuccessfulServiceTokenRenewAtRealtime >= 0f &&
+                lastSuccessfulServiceTokenTtlSeconds > 0)
+            {
+                float renewAfterSeconds = Mathf.Max(
+                    1f,
+                    lastSuccessfulServiceTokenTtlSeconds -
+                    Mathf.Max(5, serviceTokenRenewalSafetyMarginSeconds));
+                return Time.realtimeSinceStartup - lastSuccessfulServiceTokenRenewAtRealtime >=
+                       renewAfterSeconds;
+            }
+
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             long safetyMs = Mathf.Max(5, serviceTokenRenewalSafetyMarginSeconds) * 1000L;
-
             if (LastServiceTokenExpiresAtMs <= 0) return true;
             return nowMs >= LastServiceTokenExpiresAtMs - safetyMs;
         }
@@ -309,9 +338,17 @@ namespace Network_A.GameServer
             if (!ShouldRenewServiceToken()) return true;
 
             float now = Time.realtimeSinceStartup;
-            if (now - lastServiceTokenRenewAttemptAt < Mathf.Max(1, serviceTokenRenewalRetryCooldownSeconds))
+            if (now - lastServiceTokenRenewAttemptAt < Mathf.Max(1, serviceTokenRenewalRetryCooldownSeconds) &&
+                (serviceTokenRenewalTask == null || serviceTokenRenewalTask.IsCompleted))
             {
-                return true;
+                if (serviceTokenRenewalTask != null)
+                {
+                    return serviceTokenRenewalTask.Status == TaskStatus.RanToCompletion &&
+                           serviceTokenRenewalTask.Result;
+                }
+
+                return LastServiceTokenExpiresAtMs <= 0 ||
+                       DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < LastServiceTokenExpiresAtMs;
             }
 
             return await RenewServiceTokenAsync(cancellationToken);
@@ -325,10 +362,21 @@ namespace Network_A.GameServer
         }
 
         //* این تابع سرویس توکن ددیکیتد سرور را به شکل مستقیم تمدید می کند.
-        public async Task<bool> RenewServiceTokenAsync(CancellationToken cancellationToken = default)
+        public Task<bool> RenewServiceTokenAsync(CancellationToken cancellationToken = default)
         {
-            if (!serviceTokenRenewalEnabled) return true;
-            if (isRenewingServiceToken) return true;
+            if (!serviceTokenRenewalEnabled) return Task.FromResult(true);
+            if (serviceTokenRenewalTask != null && !serviceTokenRenewalTask.IsCompleted)
+            {
+                return serviceTokenRenewalTask;
+            }
+
+            serviceTokenRenewalTask = RenewServiceTokenCoreAsync(cancellationToken);
+            return serviceTokenRenewalTask;
+        }
+
+        private async Task<bool> RenewServiceTokenCoreAsync(CancellationToken cancellationToken)
+        {
+            if (isRenewingServiceToken) return false;
 
             DedicatedServerConfigData config = GetSafeConfig();
 
@@ -396,6 +444,8 @@ namespace Network_A.GameServer
 
                 renewedServiceToken = response.data.serviceToken;
                 LastServiceTokenExpiresAtMs = response.data.expiresAt;
+                lastSuccessfulServiceTokenRenewAtRealtime = Time.realtimeSinceStartup;
+                lastSuccessfulServiceTokenTtlSeconds = Mathf.Max(0, response.data.ttlSeconds);
                 LastServiceTokenRenewReason = response.reason;
                 LastError = string.Empty;
 

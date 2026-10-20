@@ -28,6 +28,8 @@ namespace Network_A.Voice.Client.Participants
 
         private DedicatedRemotePlayerStateReceiver remotePlayerStateReceiver;
         private float nextRefreshAt;
+        private float nextNameRefreshAt;
+        private const float NameRefreshIntervalSeconds = 1f;
 
         private void Update()
         {
@@ -39,6 +41,8 @@ namespace Network_A.Voice.Client.Participants
         private void OnDisable()
         {
             ClearItems();
+            nextNameRefreshAt = 0f;
+            nextRefreshAt = 0f;
         }
 
         private void RefreshParticipantList()
@@ -47,8 +51,29 @@ namespace Network_A.Voice.Client.Participants
             if (!TryResolveRemotePlayerStateReceiver()) return;
             if (!runtimeAdapter.TryCreateParticipantUserIdSnapshot(out IReadOnlyList<string> participants)) return;
 
+            bool membershipChanged = HasParticipantMembershipChanged(participants);
+            float now = Time.unscaledTime;
+            if (!membershipChanged && now < nextNameRefreshAt) return;
+
             RebuildUserNameLookup();
+            nextNameRefreshAt = now + NameRefreshIntervalSeconds;
             SyncParticipantItems(participants);
+        }
+
+        private bool HasParticipantMembershipChanged(IReadOnlyList<string> participants)
+        {
+            string localUserId = ResolveLocalUserId();
+            int count = 0;
+            for (int i = 0; i < participants.Count; i++)
+            {
+                string userId = Normalize(participants[i]);
+                if (userId.Length == 0 || string.Equals(userId, localUserId, StringComparison.Ordinal))
+                    continue;
+
+                if (!activeParticipantUserIds.Contains(userId)) return true;
+                count++;
+            }
+            return count != activeParticipantUserIds.Count;
         }
 
         private bool TryResolveRemotePlayerStateReceiver()

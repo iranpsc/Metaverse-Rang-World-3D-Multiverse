@@ -3,6 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Network_A.Auth;
 using Network_A.Core;
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+using Network_A.DedicatedGameServer.Client;
+#endif
 using Network_A.UI;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -114,6 +117,18 @@ namespace Network_A.Bootstrap
 
         #region بررسی ارتباط
 
+        //* A fresh successful same-origin WebGL Health response is sufficient to wake network recovery.
+        //* This confirms reachability only; Realtime/Dedicated auth and room join remain mandatory.
+        public void ConfirmWebGLServerReachableFromHealth()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (Instance != this || lifecycleCts == null || lifecycleCts.IsCancellationRequested)
+                return;
+
+            SetNetworkState(NetworkState.Online, "webgl_dedicated_fresh_health_reachable");
+#endif
+        }
+
         //* ارتباط برنامه با سرور را بررسی می‌کند و نتیجه را در وضعیت سراسری همین صحنه ثبت می‌کند.
         private async Task<bool> CheckNowAsync()
         {
@@ -201,7 +216,11 @@ namespace Network_A.Bootstrap
 
                 if (firstPrimary.IsSuccess) return ConnectivityCheckResult.Success(BuildSuccessDetails(reportedReachability, firstPrimary, 1));
 
-                if (showCheckingMessage && (CurrentState == NetworkState.Online || CurrentState == NetworkState.Checking))
+                float currentDedicatedInboundAgeSeconds;
+                string currentDedicatedInboundRoute;
+                bool dedicatedTrafficIsRecent = TryGetWindowsDedicatedInboundEvidence(out currentDedicatedInboundAgeSeconds, out currentDedicatedInboundRoute);
+
+                if (showCheckingMessage && !dedicatedTrafficIsRecent && (CurrentState == NetworkState.Online || CurrentState == NetworkState.Checking))
                 {
                     GlobalMessageManager.ShowNetworkChecking(NetworkCheckingMessageId, "بررسی ارتباط", "ارتباط با سرور دچار مشکل شده است. در حال بررسی مجدد هستیم...", firstPrimary.Details ?? string.Empty);
                 }
@@ -232,9 +251,39 @@ namespace Network_A.Bootstrap
 
             string details = "ارتباط مسیر اصلی سرور پس از درخواست های تأییدی برقرار نشد | وضعیت نهایی=" + failureState + " | مهلت کل=" + safeTotalTimeoutMs + " | گزارش دسترسی دستگاه=" + reportedReachability + " | تلاش نخست=" + FormatProbeResult(firstPrimary) + " | تلاش پشتیبان=" + FormatProbeResult(fallback) + " | تلاش نهایی=" + FormatProbeResult(finalPrimary);
 
+            float dedicatedInboundAgeSeconds;
+            string dedicatedInboundRoute;
+
+            if (showCheckingMessage && TryGetWindowsDedicatedInboundEvidence(out dedicatedInboundAgeSeconds, out dedicatedInboundRoute))
+            {
+                string preservedDetails = "درخواست‌های سلامت ناموفق بودند، اما سرور اختصاصی همچنان پاسخ می‌دهد | سن آخرین پیام=" + dedicatedInboundAgeSeconds.ToString("F2") + " ثانیه | مسیر آخرین پیام=" + dedicatedInboundRoute + " | جزئیات بررسی سلامت=" + details;
+                NetworkFileLogger.Warning("GLOBAL_NETWORK_HEALTH_DEGRADED_DEDICATED_ACTIVE", preservedDetails);
+                return ConnectivityCheckResult.Success(preservedDetails);
+            }
+
             NetworkFileLogger.Warning("GLOBAL_NETWORK_CONFIRMED_UNAVAILABLE", details);
 
             return ConnectivityCheckResult.Failure(details, failureState);
+        }
+
+        //* در ویندوز فقط دریافت پیام تازه از سوکت احرازشده را شاهد زنده‌بودن ارتباط می‌داند.
+        private bool TryGetWindowsDedicatedInboundEvidence(out float inboundAgeSeconds, out string inboundRoute)
+        {
+            inboundAgeSeconds = float.PositiveInfinity;
+            inboundRoute = string.Empty;
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            if (CurrentState != NetworkState.Online) return false;
+
+            DedicatedGameServerWsClient dedicatedClient = DedicatedGameServerWsClient.Instance;
+            if (dedicatedClient == null || !dedicatedClient.IsReady || !dedicatedClient.HasRecentInboundMessage(6f)) return false;
+
+            inboundAgeSeconds = Mathf.Max(0f, Time.realtimeSinceStartup - dedicatedClient.LastInboundRealtimeSeconds);
+            inboundRoute = dedicatedClient.LastInboundRoute ?? string.Empty;
+            return true;
+#else
+            return false;
+#endif
         }
 
         //* پیش از تلاش بعدی، فاصله کوتاه تعیین‌شده را اعمال می‌کند.

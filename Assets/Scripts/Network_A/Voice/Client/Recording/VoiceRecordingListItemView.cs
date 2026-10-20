@@ -9,6 +9,7 @@ using Network_A.Voice.Client.Runtime;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 namespace Network_A.Voice.Client.Recording
@@ -17,16 +18,23 @@ namespace Network_A.Voice.Client.Recording
     {
         private const string RuntimeRootName = "Voice_Client_Runtime_Root";
 
+        // Poll a single authorized session's inexpensive status endpoint.
+        // Never scan every historical recording on each retry.
         private static readonly float[] FinalizeRefreshRetryDelaysSeconds =
         {
             1f,
             2f,
-            4f,
-            8f,
-            15f,
-            30f,
-            60f
+            3f,
+            5f
         };
+
+        private const float PassiveListRefreshIntervalSeconds = 60f;
+
+        // Only a small initial window is rendered. Older entries are appended
+        // when the user scrolls to the bottom, instead of instantiating hundreds.
+        private const int InitialRenderedRowCount = 24;
+        private const int AdditionalRenderedRowCount = 24;
+        private const int MaxNewRowsPerFrame = 4;
 
         [Serializable]
         private sealed class VoiceRecordingListResponse
@@ -35,6 +43,14 @@ namespace Network_A.Voice.Client.Recording
             public int count;
             public VoiceRecordingListEntry[] recordings;
             public string reason;
+        }
+
+        [Serializable]
+        private sealed class VoiceRecordingStatusResponse
+        {
+            public bool success;
+            public bool ready;
+            public VoiceRecordingListEntry recording;
         }
 
         [Serializable]
@@ -70,7 +86,33 @@ namespace Network_A.Voice.Client.Recording
             public float NextAttemptAtRealtime;
         }
 
+        private sealed class RecordingUiItem
+        {
+            public GameObject Root;
+            public Button Button;
+            public TextMeshProUGUI Text;
+            public UnityAction ClickHandler;
+            public string DisplayText;
+        }
+
         private readonly List<GameObject> recordingItems = new List<GameObject>();
+        private readonly Dictionary<string, RecordingUiItem> uiItemsBySessionId =
+            new Dictionary<string, RecordingUiItem>(StringComparer.OrdinalIgnoreCase);
+        private readonly Stack<RecordingUiItem> pooledUiItems =
+            new Stack<RecordingUiItem>();
+        private readonly List<string> visibleSessionOrder = new List<string>();
+        private readonly List<VoiceRecordingListEntry> serverRecordingRows =
+            new List<VoiceRecordingListEntry>();
+        private readonly List<string> renderingSessionIds = new List<string>();
+        private readonly HashSet<string> renderingSessionSet =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> sessionsToRecycle = new List<string>();
+        private ScrollRect recordingScrollRect;
+        private bool scrollListenerRegistered;
+        private bool bottomLoadArmed = true;
+        private int renderedRowLimit = InitialRenderedRowCount;
+        private bool uiSyncRunning;
+        private Coroutine appendRowsRoutine;
         private readonly HashSet<string> loadedRecordingSessionIds =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> recordingExpectedSessionIds =
@@ -82,6 +124,7 @@ namespace Network_A.Voice.Client.Recording
         private int lastObservedActiveSessionCount = -1;
         private Coroutine refreshRoutine;
         private Coroutine finalizeRefreshRoutine;
+        private Coroutine passiveRefreshRoutine;
 
         private void Awake()
         {
@@ -91,8 +134,19 @@ namespace Network_A.Voice.Client.Recording
         private void OnEnable()
         {
             TryResolveVoiceRuntimeSubscription();
+            TryRegisterScrollListener();
 
             if (loadOnEnable) RefreshRecordingList();
+
+            if (loadOnEnable && passiveRefreshRoutine == null)
+            {
+                passiveRefreshRoutine = StartCoroutine(PassiveRefreshRecordingListRoutine());
+            }
+
+            if (recordingExpectedSessionIds.Count > 0)
+            {
+                QueuePendingFinalizeRefreshForExpectedRecordings("recording_list_reenabled");
+            }
         }
 
         private void Update()
@@ -108,7 +162,15 @@ namespace Network_A.Voice.Client.Recording
         private void OnDisable()
         {
             UnsubscribeVoiceRuntime();
+            UnregisterScrollListener();
 
+            if (appendRowsRoutine != null)
+            {
+                StopCoroutine(appendRowsRoutine);
+                appendRowsRoutine = null;
+            }
+
+            uiSyncRunning = false;
             if (refreshRoutine != null)
             {
                 StopCoroutine(refreshRoutine);
@@ -121,16 +183,23 @@ namespace Network_A.Voice.Client.Recording
                 finalizeRefreshRoutine = null;
             }
 
+            if (passiveRefreshRoutine != null)
+            {
+                StopCoroutine(passiveRefreshRoutine);
+                passiveRefreshRoutine = null;
+            }
+
             pendingFinalizedSessions.Clear();
-            recordingExpectedSessionIds.Clear();
             lastObservedActiveSessionCount = -1;
         }
 
         private void OnDestroy()
         {
             UnsubscribeVoiceRuntime();
-            recordingItems.Clear();
+            UnregisterScrollListener();
+            ClearRecordingItems();
             loadedRecordingSessionIds.Clear();
+            serverRecordingRows.Clear();
             pendingFinalizedSessions.Clear();
             recordingExpectedSessionIds.Clear();
             lastObservedActiveSessionCount = -1;
@@ -140,6 +209,13 @@ namespace Network_A.Voice.Client.Recording
         {
             if (!isActiveAndEnabled) return;
 
+            if (appendRowsRoutine != null)
+            {
+                StopCoroutine(appendRowsRoutine);
+                appendRowsRoutine = null;
+            }
+
+            uiSyncRunning = false;
             if (refreshRoutine != null)
             {
                 StopCoroutine(refreshRoutine);
@@ -151,16 +227,23 @@ namespace Network_A.Voice.Client.Recording
 
         public void ClearRecordingItems()
         {
-            for (int i = 0; i < recordingItems.Count; i++)
+            // Explicit clear still destroys all UI, including inactive pooled rows.
+            foreach (RecordingUiItem ui in uiItemsBySessionId.Values)
             {
-                GameObject item = recordingItems[i];
-                if (item == null) continue;
-
-                item.SetActive(false);
-                Destroy(item);
+                ReleaseRecordingUiItem(ui, true);
             }
 
+            while (pooledUiItems.Count > 0)
+            {
+                ReleaseRecordingUiItem(pooledUiItems.Pop(), true);
+            }
+
+            uiItemsBySessionId.Clear();
             recordingItems.Clear();
+            visibleSessionOrder.Clear();
+            renderingSessionIds.Clear();
+            renderingSessionSet.Clear();
+            sessionsToRecycle.Clear();
         }
 
         public bool AddRecordingItem(string sessionId, string displayText)
@@ -177,46 +260,80 @@ namespace Network_A.Voice.Client.Recording
                 return false;
             }
 
-            GameObject item = Instantiate(recordingItemPrefab, recordingListContent);
-
-            if (item == null)
+            if (uiItemsBySessionId.TryGetValue(normalizedSessionId, out RecordingUiItem existing))
             {
-                Debug.LogError(
-                    "VOICE_RECORDING_LIST_ITEM_INSTANTIATE_FAILED | sessionId=" +
-                    normalizedSessionId
-                );
-                return false;
+                UpdateRecordingUiText(existing, displayText);
+                return true;
             }
 
-            Button button = item.GetComponentInChildren<Button>(true);
-            TextMeshProUGUI text = item.GetComponentInChildren<TextMeshProUGUI>(true);
-
-            if (button == null || text == null)
+            RecordingUiItem ui;
+            if (pooledUiItems.Count > 0)
             {
-                Debug.LogError(
-                    "VOICE_RECORDING_LIST_ITEM_UI_MISSING | sessionId=" +
-                    normalizedSessionId +
-                    " | button=" + (button != null) +
-                    " | text=" + (text != null)
-                );
+                ui = pooledUiItems.Pop();
+            }
+            else
+            {
+                GameObject item = Instantiate(recordingItemPrefab, recordingListContent);
+                if (item == null)
+                {
+                    Debug.LogError("VOICE_RECORDING_LIST_ITEM_INSTANTIATE_FAILED | sessionId=" + normalizedSessionId);
+                    return false;
+                }
 
-                item.SetActive(false);
-                Destroy(item);
-                return false;
+                Button button = item.GetComponentInChildren<Button>(true);
+                TextMeshProUGUI text = item.GetComponentInChildren<TextMeshProUGUI>(true);
+                if (button == null || text == null)
+                {
+                    Debug.LogError("VOICE_RECORDING_LIST_ITEM_UI_MISSING | sessionId=" + normalizedSessionId +
+                                   " | button=" + (button != null) + " | text=" + (text != null));
+                    item.SetActive(false);
+                    Destroy(item);
+                    return false;
+                }
+
+                ui = new RecordingUiItem { Root = item, Button = button, Text = text };
             }
 
-            text.text = displayText ?? string.Empty;
-            button.interactable = true;
-
+            // Rebind the recycled row without touching persistent prefab listeners.
             string capturedSessionId = normalizedSessionId;
-            button.onClick.AddListener(
-                () => HandleRecordingItemClicked(capturedSessionId)
-            );
+            ui.ClickHandler = () => HandleRecordingItemClicked(capturedSessionId);
+            ui.Button.onClick.AddListener(ui.ClickHandler);
+            ui.Button.interactable = true;
+            UpdateRecordingUiText(ui, displayText);
+            ui.Root.SetActive(true);
 
-            item.SetActive(true);
-            recordingItems.Add(item);
-
+            uiItemsBySessionId.Add(normalizedSessionId, ui);
+            recordingItems.Add(ui.Root);
             return true;
+        }
+
+        private static void UpdateRecordingUiText(RecordingUiItem ui, string displayText)
+        {
+            string value = displayText ?? string.Empty;
+            if (ui.DisplayText == value) return;
+            ui.DisplayText = value;
+            ui.Text.text = value;
+        }
+
+        private static void ReleaseRecordingUiItem(RecordingUiItem ui, bool destroy)
+        {
+            if (ui == null || ui.Root == null) return;
+            if (ui.ClickHandler != null)
+            {
+                ui.Button.onClick.RemoveListener(ui.ClickHandler);
+                ui.ClickHandler = null;
+            }
+            ui.Root.SetActive(false);
+            if (destroy) Destroy(ui.Root);
+        }
+
+        private void RecycleRecordingUiItem(string sessionId)
+        {
+            if (!uiItemsBySessionId.TryGetValue(sessionId, out RecordingUiItem ui)) return;
+            uiItemsBySessionId.Remove(sessionId);
+            recordingItems.Remove(ui.Root);
+            ReleaseRecordingUiItem(ui, false);
+            pooledUiItems.Push(ui);
         }
 
         public void SetRecordingItemsInteractable(bool value)
@@ -229,6 +346,26 @@ namespace Network_A.Voice.Client.Recording
                 Button button = item.GetComponentInChildren<Button>(true);
                 if (button != null) button.interactable = value;
             }
+        }
+
+        private IEnumerator PassiveRefreshRecordingListRoutine()
+        {
+            while (isActiveAndEnabled)
+            {
+                yield return new WaitForSecondsRealtime(PassiveListRefreshIntervalSeconds);
+
+                if (!isActiveAndEnabled)
+                {
+                    break;
+                }
+
+                if (refreshRoutine == null && finalizeRefreshRoutine == null)
+                {
+                    RefreshRecordingList();
+                }
+            }
+
+            passiveRefreshRoutine = null;
         }
 
         private IEnumerator RefreshRecordingListRoutine()
@@ -335,12 +472,14 @@ namespace Network_A.Voice.Client.Recording
             }
 
             RenderRecordingList(response.recordings);
+            yield return SynchronizeVisibleRecordingRowsRoutine();
+            RemoveVisiblePendingFinalizedSessions();
 
             Debug.Log(
                 "VOICE_RECORDING_LIST_LOAD=PASS | serverCount=" +
                 response.count +
-                " | renderedCount=" +
-                recordingItems.Count
+                " | availableCount=" + serverRecordingRows.Count +
+                " | renderedCount=" + recordingItems.Count
             );
 
             refreshRoutine = null;
@@ -348,41 +487,155 @@ namespace Network_A.Voice.Client.Recording
 
         private void RenderRecordingList(VoiceRecordingListEntry[] recordings)
         {
-            ClearRecordingItems();
+            // Keep every authorized session ID for finalize detection, but avoid
+            // allocating Unity objects for all historical recordings.
             loadedRecordingSessionIds.Clear();
+            serverRecordingRows.Clear();
 
             if (recordings == null || recordings.Length == 0)
             {
-                Debug.Log(
-                    "VOICE_RECORDING_LIST_EMPTY"
-                );
+                Debug.Log("VOICE_RECORDING_LIST_EMPTY");
                 return;
             }
 
             for (int i = 0; i < recordings.Length; i++)
             {
                 VoiceRecordingListEntry recording = recordings[i];
+                if (recording == null || string.IsNullOrWhiteSpace(recording.sessionId)) continue;
 
-                if (
-                    recording == null ||
-                    string.IsNullOrWhiteSpace(recording.sessionId)
-                )
+                string normalizedSessionId = recording.sessionId.Trim();
+                if (!loadedRecordingSessionIds.Add(normalizedSessionId)) continue;
+                serverRecordingRows.Add(recording);
+            }
+        }
+
+        private IEnumerator SynchronizeVisibleRecordingRowsRoutine()
+        {
+            uiSyncRunning = true;
+            renderingSessionIds.Clear();
+            renderingSessionSet.Clear();
+            sessionsToRecycle.Clear();
+
+            int targetCount = Math.Min(serverRecordingRows.Count, renderedRowLimit);
+            for (int i = 0; i < targetCount; i++)
+            {
+                string sessionId = serverRecordingRows[i].sessionId.Trim();
+                renderingSessionIds.Add(sessionId);
+                renderingSessionSet.Add(sessionId);
+            }
+
+            bool orderChanged = visibleSessionOrder.Count != renderingSessionIds.Count;
+            if (!orderChanged)
+            {
+                for (int i = 0; i < renderingSessionIds.Count; i++)
                 {
+                    if (!string.Equals(visibleSessionOrder[i], renderingSessionIds[i],
+                                       StringComparison.OrdinalIgnoreCase))
+                    {
+                        orderChanged = true;
+                        break;
+                    }
+                }
+            }
+
+            foreach (string sessionId in uiItemsBySessionId.Keys)
+            {
+                if (!renderingSessionSet.Contains(sessionId)) sessionsToRecycle.Add(sessionId);
+            }
+
+            for (int i = 0; i < sessionsToRecycle.Count; i++)
+            {
+                RecycleRecordingUiItem(sessionsToRecycle[i]);
+            }
+
+            int newRowsThisFrame = 0;
+            for (int i = 0; i < targetCount; i++)
+            {
+                VoiceRecordingListEntry recording = serverRecordingRows[i];
+                string sessionId = renderingSessionIds[i];
+                string label = BuildRecordingDisplayText(recording);
+
+                if (uiItemsBySessionId.TryGetValue(sessionId, out RecordingUiItem existing))
+                {
+                    UpdateRecordingUiText(existing, label);
                     continue;
                 }
 
-                string normalizedSessionId = recording.sessionId.Trim();
-
-                if (
-                    AddRecordingItem(
-                        normalizedSessionId,
-                        BuildRecordingDisplayText(recording)
-                    )
-                )
+                if (!AddRecordingItem(sessionId, label)) continue;
+                newRowsThisFrame++;
+                if (newRowsThisFrame >= MaxNewRowsPerFrame)
                 {
-                    loadedRecordingSessionIds.Add(normalizedSessionId);
+                    newRowsThisFrame = 0;
+                    yield return null;
                 }
             }
+
+            if (orderChanged)
+            {
+                // Only reorder when the server order actually changed.
+                // This preserves the existing prefab, Canvas layout and click actions.
+                for (int i = 0; i < renderingSessionIds.Count; i++)
+                {
+                    if (uiItemsBySessionId.TryGetValue(renderingSessionIds[i], out RecordingUiItem ui))
+                    {
+                        ui.Root.transform.SetAsLastSibling();
+                    }
+                }
+            }
+
+            visibleSessionOrder.Clear();
+            visibleSessionOrder.AddRange(renderingSessionIds);
+            uiSyncRunning = false;
+        }
+
+        private void TryRegisterScrollListener()
+        {
+            if (scrollListenerRegistered) return;
+            if (recordingListContent == null) return;
+
+            recordingScrollRect = recordingListContent.GetComponentInParent<ScrollRect>(true);
+            if (recordingScrollRect == null)
+            {
+                // Preserve the full legacy list when there is no ScrollRect.
+                renderedRowLimit = int.MaxValue;
+                return;
+            }
+
+            recordingScrollRect.onValueChanged.AddListener(HandleRecordingScrollChanged);
+            scrollListenerRegistered = true;
+        }
+
+        private void UnregisterScrollListener()
+        {
+            if (!scrollListenerRegistered || recordingScrollRect == null) return;
+            recordingScrollRect.onValueChanged.RemoveListener(HandleRecordingScrollChanged);
+            scrollListenerRegistered = false;
+        }
+
+        private void HandleRecordingScrollChanged(Vector2 normalizedPosition)
+        {
+            if (!isActiveAndEnabled || recordingScrollRect == null) return;
+            if (normalizedPosition.y > 0.16f) bottomLoadArmed = true;
+            if (normalizedPosition.y > 0.04f || !bottomLoadArmed) return;
+            if (refreshRoutine != null || appendRowsRoutine != null || uiSyncRunning) return;
+            if (serverRecordingRows.Count <= renderedRowLimit) return;
+
+            // The scroll must really be scrollable, to avoid fetching all rows
+            // automatically when the panel/layout first initializes.
+            if (recordingScrollRect.viewport != null && recordingScrollRect.content != null &&
+                recordingScrollRect.content.rect.height <= recordingScrollRect.viewport.rect.height + 1f)
+                return;
+
+            bottomLoadArmed = false;
+            renderedRowLimit = Math.Min(serverRecordingRows.Count,
+                                        renderedRowLimit + AdditionalRenderedRowCount);
+            appendRowsRoutine = StartCoroutine(AppendVisibleRecordingRowsRoutine());
+        }
+
+        private IEnumerator AppendVisibleRecordingRowsRoutine()
+        {
+            yield return SynchronizeVisibleRecordingRowsRoutine();
+            appendRowsRoutine = null;
         }
 
         private void TryResolveVoiceRuntimeSubscription()
@@ -706,14 +959,84 @@ namespace Network_A.Voice.Client.Recording
                     continue;
                 }
 
-                RefreshRecordingList();
-
-                while (refreshRoutine != null)
+                // Only check the session(s) actually awaiting finalization.
+                // The server verifies userId and session metadata, so an
+                // unauthorized or incomplete file is never shown as ready.
+                bool anyReady = false;
+                Task<string> tokenTask = EnsureFreshAccessTokenBeforeListAsync();
+                while (!tokenTask.IsCompleted)
                 {
                     yield return null;
                 }
 
-                RemoveVisiblePendingFinalizedSessions();
+                string accessToken = string.Empty;
+                if (!tokenTask.IsFaulted && !tokenTask.IsCanceled)
+                {
+                    accessToken = tokenTask.Result;
+                }
+
+                if (!string.IsNullOrWhiteSpace(accessToken))
+                {
+                    for (int i = 0; i < dueSessionIds.Count; i++)
+                    {
+                        string sessionId = dueSessionIds[i];
+                        if (!pendingFinalizedSessions.ContainsKey(sessionId)) continue;
+
+                        string url = baseHttpUrl.TrimEnd('/') +
+                            "/voice/recordings/" +
+                            UnityWebRequest.EscapeURL(sessionId) + "/status";
+
+                        using (UnityWebRequest request = UnityWebRequest.Get(url))
+                        {
+                            request.SetRequestHeader("Authorization", "Bearer " + accessToken);
+                            request.SetRequestHeader("Accept", "application/json");
+                            request.timeout = 10;
+                            yield return request.SendWebRequest();
+
+                            if (request.result == UnityWebRequest.Result.Success &&
+                                request.responseCode == 200)
+                            {
+                                try
+                                {
+                                    VoiceRecordingStatusResponse status =
+                                        JsonUtility.FromJson<VoiceRecordingStatusResponse>(
+                                            request.downloadHandler.text);
+                                    if (status != null && status.success && status.ready &&
+                                        status.recording != null &&
+                                        string.Equals(status.recording.sessionId, sessionId,
+                                            StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        anyReady = true;
+                                        Debug.Log("VOICE_RECORDING_STATUS_READY=PASS" +
+                                            " | sessionId=" + sessionId);
+                                    }
+                                }
+                                catch (Exception exception)
+                                {
+                                    Debug.LogWarning("VOICE_RECORDING_STATUS_PARSE_FAILED | " +
+                                        exception.Message);
+                                }
+                            }
+                            else
+                            {
+                                Debug.LogWarning("VOICE_RECORDING_STATUS_HTTP_FAILED" +
+                                    " | sessionId=" + sessionId +
+                                    " | code=" + request.responseCode +
+                                    " | error=" + request.error);
+                            }
+                        }
+                    }
+                }
+
+                if (anyReady)
+                {
+                    RefreshRecordingList();
+                    while (refreshRoutine != null)
+                    {
+                        yield return null;
+                    }
+                    RemoveVisiblePendingFinalizedSessions();
+                }
 
                 now = Time.realtimeSinceStartup;
                 for (int i = 0; i < dueSessionIds.Count; i++)
@@ -725,24 +1048,17 @@ namespace Network_A.Voice.Client.Recording
                         continue;
                     }
 
+                    // Never abandon an early leaver: continue low-cost single-session
+                    // status checks at a capped five-second interval.
                     int nextAttemptIndex = pending.AttemptIndex + 1;
-                    if (nextAttemptIndex >= FinalizeRefreshRetryDelaysSeconds.Length)
-                    {
-                        pendingFinalizedSessions.Remove(sessionId);
-                        recordingExpectedSessionIds.Remove(sessionId);
-
-                        Debug.LogWarning(
-                            "VOICE_RECORDING_LIST_FINALIZE_WAIT_TIMEOUT" +
-                            " | sessionId=" + sessionId +
-                            " | attempts=" + FinalizeRefreshRetryDelaysSeconds.Length +
-                            " | pendingAfterRemove=" + pendingFinalizedSessions.Count
-                        );
-                        continue;
-                    }
+                    int retryDelayIndex = Math.Min(
+                        nextAttemptIndex,
+                        FinalizeRefreshRetryDelaysSeconds.Length - 1
+                    );
 
                     pending.AttemptIndex = nextAttemptIndex;
                     pending.NextAttemptAtRealtime =
-                        now + FinalizeRefreshRetryDelaysSeconds[nextAttemptIndex];
+                        now + FinalizeRefreshRetryDelaysSeconds[retryDelayIndex];
 
                     Debug.Log(
                         "VOICE_RECORDING_LIST_FINALIZE_WAIT_RETRY" +

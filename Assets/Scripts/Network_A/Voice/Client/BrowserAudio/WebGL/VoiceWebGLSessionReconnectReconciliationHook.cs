@@ -68,7 +68,12 @@ namespace Network_A.Voice.Client.BrowserAudio
         private const float NormalRecoverySettleSeconds = 2.0f;
         private const int FreshVoiceDisconnectTimeoutMs = 1500;
         private const float SessionRebuildDeadlineSeconds = 15.0f;
-        private const float HealthySessionAbsenceForgetSeconds = 5.0f;
+        private const float HealthySessionAbsenceForgetSeconds = 30.0f;
+        private const float ActiveSessionMediaBindGuardSeconds = 10.0f;
+        private const float ActiveSessionMediaPongGuardSeconds = 18.0f;
+        private const float ActiveSessionPublishGuardIntervalSeconds = 10.0f;
+        private const float MediaGuardResetCooldownSeconds = 3.0f;
+        private const int PublishGuardBitrateKbps = 32;
         private const float RetryDelaySeconds = 2.0f;
         private const float InitialMicrophoneRetrySeconds = 1.0f;
         private const float ReceiveOnlyMediaRetrySeconds = 2.0f;
@@ -86,6 +91,11 @@ namespace Network_A.Voice.Client.BrowserAudio
         private FieldInfo browserMediaConnectStartedField;
         private FieldInfo browserMediaBoundField;
         private FieldInfo browserActiveControlConnectionIdField;
+        private FieldInfo browserPublishingField;
+        private FieldInfo browserMediaStatsField;
+        private FieldInfo browserControlAdapterField;
+        private FieldInfo browserRetryAtField;
+        private FieldInfo browserConsecutiveMediaFailuresField;
         private MethodInfo browserStartMediaConnectionMethod;
         private MethodInfo browserResetMediaSessionMethod;
         private MethodInfo consentPanelUpdateUiMethod;
@@ -113,6 +123,12 @@ namespace Network_A.Voice.Client.BrowserAudio
         private string receiveOnlyMediaBoundForConnectionId = string.Empty;
         private bool voiceResumeWakePending;
         private bool previousVoiceConnectPrerequisitesReady;
+        private float activeSessionMediaUnboundSince = -1f;
+        private float lastMediaPongProgressAt = -1f;
+        private long lastObservedMediaPongCount = -1L;
+        private float mediaGuardResetCooldownUntil;
+        private Task<bool> publishGuardTask;
+        private float nextPublishGuardAt;
 
         private void Awake()
         {
@@ -138,6 +154,9 @@ namespace Network_A.Voice.Client.BrowserAudio
             previousVoiceConnectPrerequisitesReady = false;
             lastStableMicrophoneMuted = false;
             lastStableSpeakerOff = false;
+            ResetMediaGuardObservation();
+            publishGuardTask = null;
+            nextPublishGuardAt = 0f;
         }
 
         //* این تابع فقط افت واقعی اتصال پس از یک نشست فعال را ثبت و بازیابی نشست مرورگر را آغاز می‌کند.
@@ -173,6 +192,11 @@ namespace Network_A.Voice.Client.BrowserAudio
                 WebGLWebSocketRealtimeTransport.IsBrowserOnline;
             bool playerReady = MetaverseNetworkClient.isReady;
             bool voiceAuthenticated = runtime.IsAuthenticated;
+
+            EnsureVoiceHealthGuard(
+                browserOnline,
+                playerReady,
+                voiceAuthenticated);
 
             if (!browserOnline &&
                 runtime.ActiveSessionCount > 0 &&
@@ -323,6 +347,9 @@ namespace Network_A.Voice.Client.BrowserAudio
             voiceAutoConnectorAttemptedField = null;
             voiceResumeWakePending = true;
             previousVoiceConnectPrerequisitesReady = false;
+            ResetMediaGuardObservation();
+            publishGuardTask = null;
+            nextPublishGuardAt = 0f;
 
             if (runtime == null) return;
 
@@ -567,45 +594,18 @@ namespace Network_A.Voice.Client.BrowserAudio
 
                 reconciliationAttempts += 1;
 
+                // Preserve an already-authenticated Voice control connection.
+                // This hook must never tear it down just because the Dedicated
+                // authority has not yet delivered a replacement session.
+                // VoiceClientAutoConnector already handles control transport
+                // disconnections; another forced disconnect here races against
+                // Dedicated delta reconciliation and prevents session creation.
                 Debug.Log(
-                    "VOICE_WEBGL_SESSION_RECONNECT_RECONCILIATION=START" +
+                    "VOICE_WEBGL_SESSION_RECONNECT_RECONCILIATION=WAIT_AUTHORITY" +
                     " | attempt=" + reconciliationAttempts +
-                    " | mode=fresh_voice_connection" +
-                    " | microphoneMuted=" + lastStableMicrophoneMuted +
-                    " | speakerOff=" + lastStableSpeakerOff +
-                    " | activeSessionCount=" + runtime.ActiveSessionCount);
-
-                bool disconnected =
-                    await runtime.DisconnectForPlayerUnavailableAsync(
-                        "webgl_session_reconnect_reconciliation_" +
-                            reconciliationAttempts,
-                        FreshVoiceDisconnectTimeoutMs,
-                        cancellationToken);
-
-                if (!disconnected ||
-                    !IsCurrentRecovery(generation) ||
-                    runtime == null ||
-                    !MetaverseNetworkClient.isReady)
-                {
-                    RestoreSelectedControls();
-                    ScheduleRetryOrFail(
-                        generation,
-                        disconnected
-                            ? "player_not_ready_after_fresh_disconnect"
-                            : "fresh_voice_disconnect_failed");
-                    return;
-                }
-
-                RestoreSelectedControls();
-
-                Debug.Log(
-                    "VOICE_WEBGL_SESSION_RECONNECT_FRESH_CONNECTION=READY" +
-                    " | attempt=" + reconciliationAttempts +
-                    " | microphoneMutedRestored=" +
-                        lastStableMicrophoneMuted +
-                    " | speakerOffRestored=" + lastStableSpeakerOff +
-                    " | userSelectionPreserved=True" +
-                    " | autoConnectorResume=True");
+                    " | authenticated=True" +
+                    " | activeSessionCount=" + runtime.ActiveSessionCount +
+                    " | preserveControl=True");
 
                 bool rebuilt = await WaitForSessionAsync(
                     generation,
@@ -614,13 +614,14 @@ namespace Network_A.Voice.Client.BrowserAudio
 
                 if (rebuilt)
                 {
-                    CompleteRecovery("freshVoiceConnection");
+                    RestoreSelectedControls();
+                    CompleteRecovery("authoritativeSessionRecreated");
                     return;
                 }
 
                 ScheduleRetryOrFail(
                     generation,
-                    "session_rebuild_deadline_exceeded");
+                    "authoritative_session_not_yet_received");
             }
             catch (OperationCanceledException)
             {
@@ -707,6 +708,8 @@ namespace Network_A.Voice.Client.BrowserAudio
                     "SetRuntimeMicrophoneMirror",
                     BindingFlags.Instance | BindingFlags.NonPublic);
             }
+
+            ResolveBrowserMediaGuardMembers(adapterType);
 
             return browserMicrophoneRequestedField != null &&
                    browserMicrophoneClickMethod != null &&
@@ -819,8 +822,353 @@ namespace Network_A.Voice.Client.BrowserAudio
             }
         }
 
-        //* این تابع اتصال Media دریافت WebGL را از انتشار میکروفن جدا می‌کند.
-        //* وقتی Mic خاموش ولی Speaker روشن است، Session باید بدون Publish نیز Downlink فعال داشته باشد.
+        //* این تابع اعضای خصوصی آداپتر مرورگر را فقط برای نگهبانی سلامت همان مسیر پیدا می‌کند.
+        private void ResolveBrowserMediaGuardMembers(Type adapterType)
+        {
+            if (adapterType == null) return;
+
+            if (browserAudioReadyField == null)
+            {
+                browserAudioReadyField = adapterType.GetField(
+                    "audioReady",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserMediaConnectStartedField == null)
+            {
+                browserMediaConnectStartedField = adapterType.GetField(
+                    "mediaConnectStarted",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserMediaBoundField == null)
+            {
+                browserMediaBoundField = adapterType.GetField(
+                    "mediaBound",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserActiveControlConnectionIdField == null)
+            {
+                browserActiveControlConnectionIdField = adapterType.GetField(
+                    "activeControlConnectionId",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserPublishingField == null)
+            {
+                browserPublishingField = adapterType.GetField(
+                    "publishing",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserMediaStatsField == null)
+            {
+                browserMediaStatsField = adapterType.GetField(
+                    "mediaStats",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserControlAdapterField == null)
+            {
+                browserControlAdapterField = adapterType.GetField(
+                    "controlAdapter",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserRetryAtField == null)
+            {
+                browserRetryAtField = adapterType.GetField(
+                    "retryAt",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserConsecutiveMediaFailuresField == null)
+            {
+                browserConsecutiveMediaFailuresField = adapterType.GetField(
+                    "consecutiveMediaFailures",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserStartMediaConnectionMethod == null)
+            {
+                browserStartMediaConnectionMethod = adapterType.GetMethod(
+                    "StartMediaConnection",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+
+            if (browserResetMediaSessionMethod == null)
+            {
+                browserResetMediaSessionMethod = adapterType.GetMethod(
+                    "ResetMediaSession",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            }
+        }
+
+        //* این تابع هنگام فعال بودن قابلیت صوت، اتصال رسانه و ثبت انتشار را پیوسته نگهبانی می‌کند تا حتی پیش از ساخته‌شدن نشست نیز مسیر آماده بماند.
+        private void EnsureVoiceHealthGuard(
+            bool browserOnline,
+            bool playerReady,
+            bool voiceAuthenticated)
+        {
+            if (runtime == null ||
+                !browserOnline ||
+                !playerReady ||
+                !voiceAuthenticated ||
+                (lastStableMicrophoneMuted && lastStableSpeakerOff))
+            {
+                ResetMediaGuardObservation();
+                return;
+            }
+
+            if (!TryResolveBrowserVoiceAdapter())
+            {
+                ResetMediaGuardObservation();
+                return;
+            }
+
+            ResolveBrowserMediaGuardMembers(
+                typeof(VoiceBrowserVoiceRuntimeAdapter));
+
+            if (browserMediaBoundField == null ||
+                browserMediaConnectStartedField == null ||
+                browserActiveControlConnectionIdField == null ||
+                browserResetMediaSessionMethod == null)
+            {
+                return;
+            }
+
+            // W4 WebGL media uses SFU Producer/Consumer lifecycle, not legacy
+            // Media Pong or PublishStart ACK. Leave control/session recovery active.
+            bool webRtcOnlyMedia = Application.platform == RuntimePlatform.WebGLPlayer;
+            if (webRtcOnlyMedia)
+            {
+                ResetMediaGuardObservation();
+                return;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            string expectedControlConnectionId =
+                Safe(runtime.VoiceConnectionId).ToLowerInvariant();
+            string boundControlConnectionId =
+                Safe(
+                    browserActiveControlConnectionIdField.GetValue(
+                        browserVoiceAdapter) as string)
+                .ToLowerInvariant();
+
+            if (boundControlConnectionId.Length > 0 &&
+                expectedControlConnectionId.Length > 0 &&
+                !string.Equals(
+                    boundControlConnectionId,
+                    expectedControlConnectionId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ResetBrowserMediaSessionFromGuard(
+                    "active_session_control_connection_mismatch");
+                return;
+            }
+
+            bool audioReady = ReadBrowserBool(browserAudioReadyField);
+            bool mediaConnectStarted =
+                ReadBrowserBool(browserMediaConnectStartedField);
+            bool mediaBound = ReadBrowserBool(browserMediaBoundField);
+
+            if (!audioReady || !mediaConnectStarted || !mediaBound)
+            {
+                lastObservedMediaPongCount = -1L;
+                lastMediaPongProgressAt = -1f;
+
+                if (activeSessionMediaUnboundSince < 0f)
+                {
+                    activeSessionMediaUnboundSince = now;
+                    return;
+                }
+
+                if (now - activeSessionMediaUnboundSince >=
+                    ActiveSessionMediaBindGuardSeconds)
+                {
+                    ResetBrowserMediaSessionFromGuard(
+                        "active_session_media_not_bound");
+                }
+
+                return;
+            }
+
+            activeSessionMediaUnboundSince = -1f;
+
+            if (TryReadBrowserMediaStats(out VoiceBrowserMediaStats stats))
+            {
+                if (lastObservedMediaPongCount < 0 ||
+                    stats.PongCount > lastObservedMediaPongCount)
+                {
+                    lastObservedMediaPongCount = stats.PongCount;
+                    lastMediaPongProgressAt = now;
+                }
+                else if (lastMediaPongProgressAt < 0f)
+                {
+                    lastMediaPongProgressAt = now;
+                }
+                else if (now - lastMediaPongProgressAt >=
+                         ActiveSessionMediaPongGuardSeconds)
+                {
+                    ResetBrowserMediaSessionFromGuard(
+                        "active_session_media_pong_stalled");
+                    return;
+                }
+            }
+
+            EnsurePublishGuard(now, mediaBound);
+        }
+
+        //* این تابع فرمان شروع انتشار تکرارپذیر را دوره‌ای تازه می‌کند تا وضعیت انتشار سرور در نشست سالم بدون قطع صدا گم نشود.
+        private void EnsurePublishGuard(float now, bool mediaBound)
+        {
+            if (publishGuardTask != null)
+            {
+                if (!publishGuardTask.IsCompleted) return;
+
+                bool accepted =
+                    publishGuardTask.Status == TaskStatus.RanToCompletion &&
+                    publishGuardTask.Result;
+
+                publishGuardTask = null;
+
+                if (accepted)
+                {
+                    nextPublishGuardAt =
+                        now + ActiveSessionPublishGuardIntervalSeconds;
+
+                    Debug.Log(
+                        "VOICE_WEBGL_PUBLISH_GUARD=PASS" +
+                        " | activeSessionCount=" + runtime.ActiveSessionCount +
+                        " | mediaBound=True" +
+                        " | intervalSeconds=" +
+                            ActiveSessionPublishGuardIntervalSeconds.ToString("F1") +
+                        " | windowsPathChanged=False");
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        "VOICE_WEBGL_PUBLISH_GUARD=REPAIR" +
+                        " | reason=publish_start_reassert_rejected" +
+                        " | activeSessionCount=" + runtime.ActiveSessionCount);
+
+                    ResetBrowserMediaSessionFromGuard(
+                        "publish_start_reassert_rejected");
+                }
+
+                return;
+            }
+
+            if (lastStableMicrophoneMuted ||
+                !mediaBound ||
+                !ReadBrowserBool(browserPublishingField) ||
+                now < nextPublishGuardAt ||
+                browserControlAdapterField == null)
+            {
+                return;
+            }
+
+            VoiceBrowserControlPublishAdapter controlAdapter =
+                browserControlAdapterField.GetValue(browserVoiceAdapter) as
+                    VoiceBrowserControlPublishAdapter;
+
+            if (controlAdapter == null) return;
+
+            publishGuardTask =
+                controlAdapter.SendPublishStartAsync(
+                    PublishGuardBitrateKbps);
+        }
+
+        //* این تابع آمار جاری رسانه مرورگر را بدون تغییر مالک آن می‌خواند.
+        private bool TryReadBrowserMediaStats(
+            out VoiceBrowserMediaStats stats)
+        {
+            stats = default;
+            if (browserMediaStatsField == null ||
+                browserVoiceAdapter == null)
+            {
+                return false;
+            }
+
+            object value = browserMediaStatsField.GetValue(
+                browserVoiceAdapter);
+
+            if (!(value is VoiceBrowserMediaStats))
+                return false;
+
+            stats = (VoiceBrowserMediaStats)value;
+            return true;
+        }
+
+        //* این تابع فقط مسیر رسانه مرورگر را تازه می‌سازد و انتخاب میکروفن و وضعیت نشست را دست‌نخورده نگه می‌دارد.
+        private void ResetBrowserMediaSessionFromGuard(string reason)
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now < mediaGuardResetCooldownUntil ||
+                browserVoiceAdapter == null ||
+                browserResetMediaSessionMethod == null)
+            {
+                return;
+            }
+
+            mediaGuardResetCooldownUntil =
+                now + MediaGuardResetCooldownSeconds;
+            publishGuardTask = null;
+            nextPublishGuardAt =
+                now + MediaGuardResetCooldownSeconds;
+
+            try
+            {
+                browserResetMediaSessionMethod.Invoke(
+                    browserVoiceAdapter,
+                    new object[] { "voice_guard_" + Safe(reason) });
+
+                if (browserRetryAtField != null)
+                {
+                    browserRetryAtField.SetValue(
+                        browserVoiceAdapter,
+                        0f);
+                }
+
+                if (browserConsecutiveMediaFailuresField != null)
+                {
+                    browserConsecutiveMediaFailuresField.SetValue(
+                        browserVoiceAdapter,
+                        0);
+                }
+
+                ResetMediaGuardObservation();
+
+                Debug.LogWarning(
+                    "VOICE_WEBGL_MEDIA_GUARD=REPAIR" +
+                    " | reason=" + Safe(reason) +
+                    " | activeSessionCount=" +
+                        (runtime == null ? 0 : runtime.ActiveSessionCount) +
+                    " | reconnectNextFrame=True" +
+                    " | microphoneSelectionPreserved=True" +
+                    " | windowsPathChanged=False" +
+                    " | questPathChanged=False");
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    "VOICE_WEBGL_MEDIA_GUARD=FAIL" +
+                    " | reason=" + Safe(reason) +
+                    " | error=" + Safe(exception.Message));
+            }
+        }
+
+        //* این تابع مشاهده نگهبان رسانه را برای نشست بعدی از نو آماده می‌کند.
+        private void ResetMediaGuardObservation()
+        {
+            activeSessionMediaUnboundSince = -1f;
+            lastMediaPongProgressAt = -1f;
+            lastObservedMediaPongCount = -1L;
+        }
+
+        //* این تابع اتصال رسانه دریافت مرورگر را از انتشار میکروفن جدا می‌کند.
+        //* وقتی میکروفن خاموش ولی بلندگو روشن است، نشست باید بدون انتشار نیز مسیر دریافت فعال داشته باشد.
         private void EnsureReceiveOnlyMediaConnection()
         {
             // چرخه اتصال رسانه در این هوک اجرا نمی‌شود.
@@ -968,8 +1316,14 @@ namespace Network_A.Voice.Client.BrowserAudio
             browserMediaConnectStartedField = null;
             browserMediaBoundField = null;
             browserActiveControlConnectionIdField = null;
+            browserPublishingField = null;
+            browserMediaStatsField = null;
+            browserControlAdapterField = null;
+            browserRetryAtField = null;
+            browserConsecutiveMediaFailuresField = null;
             browserStartMediaConnectionMethod = null;
             browserResetMediaSessionMethod = null;
+            publishGuardTask = null;
             consentPanelUpdateUiMethod = null;
             voiceAutoConnector = null;
             voiceAutoConnectorNextAttemptAtField = null;

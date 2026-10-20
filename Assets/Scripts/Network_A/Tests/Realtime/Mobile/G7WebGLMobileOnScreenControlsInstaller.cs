@@ -38,7 +38,7 @@ public sealed class G7WebGLMobileOnScreenControlsInstaller : MonoBehaviour
     private const float JumpButtonSize = 150f;
     private const float EdgeMargin = 52f;
     private const float JumpAboveVoiceButtonsOffset = 180f;
-    private const float JumpTowardCenterOffset = 260f;
+    private const float JumpTowardCenterOffset = 340f;
     private const float MobileMoveSpeedMultiplier = 0.5f;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]

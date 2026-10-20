@@ -109,6 +109,7 @@ namespace Network_A.DedicatedGameServer.Client
         private bool remoteCleanupAppliedForCurrentExit;
         private float nextRemoteTimeoutStaleLogTime;
         private float nextRemoteRecoveryPreserveLogTime;
+        private float nextRemoteStateSilenceLogTime;
 
         public event Action<string, string> DedicatedRemotePlayerJoinedForUi;
         public event Action<string, string> DedicatedRemotePlayerLeftForUi;
@@ -1007,7 +1008,7 @@ namespace Network_A.DedicatedGameServer.Client
             Log("WebGL visibility resumed. Immediate local player_state requested.");
         }
 
-        //* این تابع بعد از سکوت امن وضعیت، نمایش ریموت را موقتاً غیرفعال می‌کند ولی شیء را تا پایان مهلت بازیابی نگه می‌دارد.
+        //* هنگام وقفه موقت مختصات، حضور ریموت را حفظ می کند؛ خروج قطعی در مسیرهای مجزای سرور اعمال می شود.
         private void DeactivateStateSilentRemotePlayers()
         {
             if (!deactivateRemotePlayerWhenStateSilent) return;
@@ -1026,33 +1027,29 @@ namespace Network_A.DedicatedGameServer.Client
                 return;
             }
 
-            // همان رفتار آزموده‌شده قبلی حفظ می‌شود: سکوت وضعیت پس از آستانه امن،
-            // فقط نمایش ریموت را موقتاً غیرفعال می‌کند و شیء تا پایان مهلت ۲۱۰ ثانیه‌ای نگه داشته می‌شود.
-
+            // Silence is not an authoritative player-left event. Keep the last
+            // accepted visual pose and wait for a fresh Dedicated state update.
+            // Genuine leave, room exit, and confirmed registry cleanup remain unchanged.
             float silenceSeconds = ResolveRemotePlayerDeactivateSilenceSeconds();
             float now = Time.unscaledTime;
+            int stateSilentPlayerCount = 0;
 
             foreach (KeyValuePair<string, float> pair in dict_remoteLastDedicatedStateTimeByPlayerId)
             {
                 if (set_remoteBrowserHiddenPlayerIds.Contains(pair.Key)) continue;
                 if (now - pair.Value <= silenceSeconds) continue;
+                stateSilentPlayerCount++;
+            }
 
-                bool changed =
-                    threeDModeController.SetRemotePlayerActive(
-                        pair.Key,
-                        false
-                    );
-
-                if (!changed) continue;
-
-                Log(
-                    "Remote player temporarily deactivated after dedicated state silence | playerId=" +
-                    SafeForLog(pair.Key) +
-                    " | silenceSeconds=" +
-                    (now - pair.Value).ToString("F2") +
-                    " | thresholdSeconds=" +
-                    silenceSeconds.ToString("F2")
-                );
+            // Log at most once per diagnostic interval, never hide a known player.
+            if (stateSilentPlayerCount > 0 && verboseLogs &&
+                now >= nextRemoteStateSilenceLogTime)
+            {
+                nextRemoteRecoveryPreserveLogTime =
+                    now + Mathf.Max(10f, remoteTimeoutStaleLogIntervalSeconds);
+                Log("DEDICATED_REMOTE_STATE_STALE_AVATAR_PRESERVED=PASS | count=" +
+                    stateSilentPlayerCount + " | thresholdSeconds=" +
+                    silenceSeconds.ToString("F2"));
             }
         }
 

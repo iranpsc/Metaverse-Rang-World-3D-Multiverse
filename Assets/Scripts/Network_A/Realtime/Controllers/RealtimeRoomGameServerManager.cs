@@ -189,6 +189,7 @@ namespace Network_A.Realtime.Controllers
         #endregion
         private bool shouldRejoinRoomAfterReconnect;
         private bool unifiedRecoveryRunning;
+        private bool webGLVerifiedHealthRecoveryWakeRunning;
         private bool recoveryRequiresDedicatedGameServer;
         private bool permanentRecoveryFailureWaitingForLobby;
         private float unifiedRecoveryStartedAt = -1f;
@@ -525,6 +526,87 @@ namespace Network_A.Realtime.Controllers
         }
 
         #endregion
+
+        //* On Voice auth code 6/7, reassert server-side Realtime Auth and room membership on the SAME socket.
+        //* This does not disconnect the Dedicated Game Server or leave the Realtime room.
+        public async Task<bool> RevalidateRealtimeMembershipForVoiceAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (Instance != this || !IsRealtimeReady || !isJoinedRoom || isRoomExitInProgress ||
+                unifiedRecoveryRunning || permanentRecoveryFailureWaitingForLobby ||
+                string.IsNullOrWhiteSpace(currentRoomId) || realtimeAuthClient == null ||
+                gameServerClient == null || !hasReachedRealtimeReady)
+            {
+                NetworkFileLogger.Warning("VOICE_REALTIME_REPAIR", "SKIPPED | reason=not_stably_ready");
+                return false;
+            }
+
+            bool gateEntered = false;
+            string expectedRoomId = currentRoomId;
+            using (CancellationTokenSource repairDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(25)))
+            using (CancellationTokenSource combined = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, repairDeadline.Token))
+            {
+                try
+                {
+                    await connectionGate.WaitAsync(combined.Token);
+                    gateEntered = true;
+
+                    if (!IsRealtimeReady || !isJoinedRoom || isRoomExitInProgress ||
+                        unifiedRecoveryRunning || gameServerClient == null ||
+                        !string.Equals(currentRoomId, expectedRoomId, StringComparison.Ordinal))
+                    {
+                        NetworkFileLogger.Warning("VOICE_REALTIME_REPAIR", "SKIPPED | reason=state_changed_before_lock");
+                        return false;
+                    }
+
+                    string accessToken = await EnsureFreshAccessTokenAsync(true, combined.Token);
+                    if (string.IsNullOrWhiteSpace(accessToken))
+                    {
+                        NetworkFileLogger.Warning("VOICE_REALTIME_REPAIR", "FAILED | stage=token_unavailable");
+                        return false;
+                    }
+
+                    bool authenticated = await AuthenticateAndWaitAsync(accessToken, combined.Token);
+                    if (!authenticated || !IsRealtimeReady)
+                    {
+                        NetworkFileLogger.Warning("VOICE_REALTIME_REPAIR", "FAILED | stage=realtime_auth");
+                        return false;
+                    }
+
+                    if (isRoomExitInProgress || !isJoinedRoom ||
+                        !string.Equals(currentRoomId, expectedRoomId, StringComparison.Ordinal))
+                    {
+                        NetworkFileLogger.Warning("VOICE_REALTIME_REPAIR", "SKIPPED | reason=room_changed_during_auth");
+                        return false;
+                    }
+
+                    RealtimeReliableSendResult rejoin = await gameServerClient.JoinRoomReliableAsync(
+                        expectedRoomId, CreateReliableOptions(), combined.Token);
+                    if (rejoin == null || !rejoin.isSuccess)
+                    {
+                        NetworkFileLogger.Warning("VOICE_REALTIME_REPAIR", "FAILED | stage=room_rejoin_ack");
+                        return false;
+                    }
+
+                    SetState(FlowState.RoomJoined, "voice_realtime_membership_revalidated");
+                    NetworkFileLogger.Info("VOICE_REALTIME_REPAIR", "PASS | realtime_auth=ok | room_join=ack | dedicated_disconnect=False | room_exit=False");
+                    return true;
+                }
+                catch (OperationCanceledException)
+                {
+                    NetworkFileLogger.Warning("VOICE_REALTIME_REPAIR", "FAILED | stage=deadline_or_cancellation");
+                    return false;
+                }
+                catch (Exception error)
+                {
+                    NetworkFileLogger.Exception("VOICE_REALTIME_REPAIR", error);
+                    return false;
+                }
+                finally
+                {
+                    if (gateEntered) connectionGate.Release();
+                }
+            }
+        }
 
         //* این تابع اتصال و احراز هویت ریل‌تایم را در صورت نیاز آماده می‌کند و اتصال آماده قبلی را دوباره نمی‌سازد.
         public async Task<bool> EnsureRealtimeReadyAsync(bool reconnecting, CancellationToken cancellationToken = default(CancellationToken))
@@ -1528,6 +1610,58 @@ namespace Network_A.Realtime.Controllers
             reconnect.ReconnectAttemptStarted += HandleReconnectAttemptStarted;
             reconnect.ReconnectSucceeded += HandleReconnectSucceeded;
             reconnect.ReconnectFailed += HandleReconnectFailed;
+        }
+
+        //* Wake the existing Realtime recovery without a second network preflight after fresh WebGL Health.
+        //* Does not join a new room or bypass authentication; the normal connection gate is preserved.
+        public void WakeRealtimeRecoveryAfterVerifiedWebGLHealth()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (Instance != this || !enableAutomaticReconnect || !hasLobbyEntryRequested ||
+                !hasReachedRealtimeReady || isRoomExitInProgress || applicationIsQuitting ||
+                suppressDisconnectHandling || permanentRecoveryFailureWaitingForLobby ||
+                !unifiedRecoveryRunning || !HasUnifiedRecoveryTimeRemaining() ||
+                IsRealtimeReady || webGLVerifiedHealthRecoveryWakeRunning ||
+                reconnect == null || reconnect.IsRunning || !IsGlobalAuthenticationReady())
+                return;
+
+            webGLVerifiedHealthRecoveryWakeRunning = true;
+            _ = RunVerifiedWebGLHealthRealtimeRecoveryAsync();
+#endif
+        }
+
+        private async Task RunVerifiedWebGLHealthRealtimeRecoveryAsync()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try
+            {
+                NetworkFileLogger.Info("WEBGL_HEALTH_REALTIME_WAKE", "START | realtimeReady=False | recoveryRunning=True");
+                bool ready = await EnsureRealtimeReadyAsync(true);
+                if (ready)
+                {
+                    NetworkFileLogger.Info("WEBGL_HEALTH_REALTIME_WAKE", "PASS | realtime_authenticated_and_room_rejoin_attempted");
+                    return;
+                }
+
+                if (Instance == this && unifiedRecoveryRunning && HasUnifiedRecoveryTimeRemaining() &&
+                    !permanentRecoveryFailureWaitingForLobby && reconnect != null &&
+                    !reconnect.IsRunning && IsGlobalAuthenticationReady())
+                {
+                    reconnect.totalTimeoutMs = GetUnifiedRecoveryRemainingMilliseconds();
+                    reconnect.maxAttempts = 0;
+                    reconnect.Start(TryReconnectOnceAsync);
+                    NetworkFileLogger.Info("WEBGL_HEALTH_REALTIME_WAKE", "RETRY_LOOP_STARTED");
+                }
+            }
+            catch (Exception ex)
+            {
+                NetworkFileLogger.Exception("WEBGL_HEALTH_REALTIME_WAKE", ex);
+            }
+            finally
+            {
+                webGLVerifiedHealthRecoveryWakeRunning = false;
+            }
+#endif
         }
 
         //* این تابع پس از قطع غیرعمدی، ابتدا سلامت شبکه را بررسی و سپس حلقه بازاتصال را آغاز می‌کند.
