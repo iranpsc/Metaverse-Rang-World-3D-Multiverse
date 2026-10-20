@@ -28,9 +28,12 @@ jobs:
         run: npm install -g @google/gemini-cli
 
       - name: Run AI Agent
+      
         env:
+         GEMINI_CLI_TRUST_WORKSPACE: 'true'
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             gemini /review
