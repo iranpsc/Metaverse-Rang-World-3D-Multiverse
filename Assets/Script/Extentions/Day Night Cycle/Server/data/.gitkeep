@@ -1,0 +1,5 @@
+Runtime data root for the environment JSON store.
+
+The server creates `data/environments/<environmentId>/...` on demand.
+Everything inside `data/environments/` is runtime content and is git-ignored;
+this `.gitkeep` only keeps the folder in version control.

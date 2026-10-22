@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Runtime data (created on demand by the server; never committed)
+data/environments/
+data/*.log
+
+# Logs / editor noise
+*.log
+npm-debug.log*
+.DS_Store
