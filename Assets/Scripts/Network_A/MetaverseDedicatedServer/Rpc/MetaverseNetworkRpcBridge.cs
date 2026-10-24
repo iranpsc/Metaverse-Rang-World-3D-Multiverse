@@ -589,8 +589,15 @@ public class MetaverseNetworkRpcBridge : MonoBehaviour
             behaviourName = string.Empty,
             methodName = SafeTrim(methodName),
             payloadJson = SafeJson(payloadJson),
-            roomId = string.Empty
+            roomId = ResolveRoomIdForNetId(netId)
         };
+    }
+
+    private string ResolveRoomIdForNetId(int netId)
+    {
+        if (spawnManager == null) spawnManager = MetaverseSpawnManager.Instance;
+        if (spawnManager == null || netId <= 0) return string.Empty;
+        return spawnManager.TryGetSpawnedObject(netId, out MetaverseNetworkIdentity identity) && identity != null ? identity.RoomId : string.Empty;
     }
 
     private bool CanClientSendNow()
