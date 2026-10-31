@@ -1,0 +1,32 @@
+{
+    "name": "Meta.Runtime",
+    "rootNamespace": "Meta",
+    "references": [
+        "Mirror",
+        "Mirror.Components",
+        "Mirror.Exports",
+        "Mirror.Transports",
+        "SimpleWebTransport",
+        "Telepathy",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.Addressables",
+        "Unity.ResourceManager",
+        "Unity.Cinemachine",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Unity.InputSystem",
+        "Unity.XR.Interaction.Toolkit",
+        "Unity.XR.Management",
+        "RTLTMPro"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
