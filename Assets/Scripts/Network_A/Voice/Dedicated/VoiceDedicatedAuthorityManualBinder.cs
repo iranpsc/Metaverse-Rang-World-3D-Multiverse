@@ -24,7 +24,6 @@ namespace Network_A.Voice.Dedicated
 
         [Header("Voice Settings")]
         [SerializeField] private bool deltaTransportEnabled = true;
-        [SerializeField, Min(1)] private int maximumAcceptedStateAgeMs = 15000;
         [SerializeField, Min(0)] private int stabilityDelayMs;
 
         private bool configured;
@@ -67,12 +66,6 @@ namespace Network_A.Voice.Dedicated
                 return;
             }
 
-            if (maximumAcceptedStateAgeMs <= 0)
-            {
-                Fail("Maximum accepted state age must be greater than zero.");
-                return;
-            }
-
             if (stabilityDelayMs <= 0)
             {
                 Fail(
@@ -83,9 +76,7 @@ namespace Network_A.Voice.Dedicated
 
             try
             {
-                positionProvider.Configure(
-                    playerStateStore,
-                    maximumAcceptedStateAgeMs);
+                positionProvider.Configure(playerStateStore);
 
                 deltaSender.Configure(
                     dedicatedRuntime,
@@ -113,7 +104,6 @@ namespace Network_A.Voice.Dedicated
                     " | deltaSender=" + deltaSender.name +
                     " | authorityMonitor=" + authorityMonitor.name +
                     " | deltaTransportEnabled=" + deltaTransportEnabled +
-                    " | maximumAcceptedStateAgeMs=" + maximumAcceptedStateAgeMs +
                     " | stabilityDelayMs=" + stabilityDelayMs);
             }
             catch (Exception exception)

@@ -114,6 +114,18 @@ namespace Network_A.Voice.Client.Runtime
                     VoiceLobbyRouteSelection.VoiceGameplaySceneName,
                     StringComparison.Ordinal);
 
+#if UNITY_WEBGL || UNITY_EDITOR
+            // The WebGL scene selector is separate from the Grpc/Windows selector.
+            // Keep the existing Windows route exactly as-is in standalone builds.
+            bool webGlVoiceSceneSelected =
+                Network_A.Voice.Client.Routing.WebGL.VoiceWebGLLobbyRouteSelection.IsVoiceModeSelected &&
+                string.Equals(
+                    scene.name,
+                    Network_A.Voice.Client.Routing.WebGL.VoiceWebGLLobbyRouteSelection.VoiceGameplaySceneName,
+                    StringComparison.Ordinal);
+            selectedVoiceScene = selectedVoiceScene || webGlVoiceSceneSelected;
+#endif
+
             GameObject root = GameObject.Find(RootName);
 
             Debug.Log(
@@ -276,6 +288,25 @@ namespace Network_A.Voice.Client.Runtime
         private string lastWaitReason;
         private bool playerWasReady;
         private CancellationTokenSource activeConnectCts;
+#if UNITY_WEBGL || UNITY_EDITOR
+        private bool rearmAfterWebGlVoiceDisable;
+
+        // Only re-arm the connector when its own lifecycle disabled it in the
+        // WebGL voice scene; never reset an in-progress connection on Initialize.
+        private void OnEnable()
+        {
+            if (!rearmAfterWebGlVoiceDisable) return;
+            rearmAfterWebGlVoiceDisable = false;
+            if (SceneManager.GetActiveScene().name !=
+                Network_A.Voice.Client.Routing.WebGL.VoiceWebGLLobbyRouteSelection.VoiceGameplaySceneName) return;
+            if (!initialized || runtime == null || activeConnectCts != null) return;
+
+            attempted = false;
+            nextAttemptAt = 0f;
+            lastWaitReason = null;
+            Debug.Log("VOICE_WEBGL_CONTROL_CONNECTOR_REARM=PASS | reason=reenabled_after_disable | windowsUntouched=true");
+        }
+#endif
 
         //* این تابع نمونه کلاینت صوت را برای شروع خودکار اتصال دریافت می‌کند.
         public void Initialize(VoiceClientRuntime value)
@@ -450,6 +481,11 @@ namespace Network_A.Voice.Client.Runtime
             activeConnectCts?.Dispose();
             activeConnectCts = null;
             attempted = true;
+#if UNITY_WEBGL || UNITY_EDITOR
+            rearmAfterWebGlVoiceDisable = initialized && runtime != null &&
+                SceneManager.GetActiveScene().name ==
+                Network_A.Voice.Client.Routing.WebGL.VoiceWebGLLobbyRouteSelection.VoiceGameplaySceneName;
+#endif
             LogWaitReason("connector_disabled");
         }
 

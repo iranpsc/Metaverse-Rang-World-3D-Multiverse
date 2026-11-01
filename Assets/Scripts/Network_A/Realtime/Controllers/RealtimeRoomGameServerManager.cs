@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -190,6 +190,17 @@ namespace Network_A.Realtime.Controllers
         private bool shouldRejoinRoomAfterReconnect;
         private bool unifiedRecoveryRunning;
         private bool webGLVerifiedHealthRecoveryWakeRunning;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // Single WebGL reconnect executor. Browser, Health, transport and Voice only signal it.
+        private bool webGLHealthFirstRecoveryRunning;
+        private bool webGLHealthFirstRecoveryRequested;
+        private bool webGLHealthFirstForceFreshRealtime;
+        private bool webGLHealthFirstSawUnreachable;
+        private int webGLHealthFirstConsecutiveFailedProbes;
+        private int webGLHealthFirstRequestGeneration;
+        private float webGLLastVerifiedHttp200At = -1f;
+        private string webGLHealthFirstReason = string.Empty;
+#endif
         private bool recoveryRequiresDedicatedGameServer;
         private bool permanentRecoveryFailureWaitingForLobby;
         private float unifiedRecoveryStartedAt = -1f;
@@ -201,6 +212,16 @@ namespace Network_A.Realtime.Controllers
         private string selectedBuildingLength = string.Empty;
         private string selectedBuildingDensity = string.Empty;
         private string currentRoomId = string.Empty;
+        private string lastConfirmedRoomId = string.Empty;
+        private string lastConfirmedRoomName = string.Empty;
+        private string lastConfirmedRoomWidth = string.Empty;
+        private string lastConfirmedRoomLength = string.Empty;
+        private string lastConfirmedRoomDensity = string.Empty;
+        private bool manualRoomReentryRunning;
+        public bool IsManualRoomRestartRunning => manualRoomReentryRunning;
+        public bool CanManuallyReenterLastRoom =>
+            !string.IsNullOrWhiteSpace(currentRoomId) ||
+            !string.IsNullOrWhiteSpace(lastConfirmedRoomId);
         private string currentRoomName = string.Empty;
         private string lastRoomFlowError = string.Empty;
 
@@ -471,6 +492,12 @@ namespace Network_A.Realtime.Controllers
         //* این تابع پیام پیشرفت ورود به لابی عمومی را جدا از پیام روم ساختمان نمایش می دهد.
         private void PublishPublicLobbyProgress(string message, string technicalDetails)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // Routine public-lobby entry is silent in WebGL. Keep actual
+            // authentication/recovery errors and existing status text intact.
+            GlobalMessageManager.Clear(PublicLobbyProgressMessageId);
+            return;
+#else
             if (!CanShowRealtimeOrRequestMessage()) return;
 
             GlobalMessageManager.Publish(
@@ -485,6 +512,7 @@ namespace Network_A.Realtime.Controllers
                 true,
                 false
             );
+#endif
         }
 
         //* این تابع خطای ورود یا خروج لابی عمومی را با شناسه مستقل نمایش می دهد.
@@ -526,6 +554,46 @@ namespace Network_A.Realtime.Controllers
         }
 
         #endregion
+
+        // Voice Auth 6 is a server-side indication that the current Realtime identity
+        // is not registered as authenticated. Re-sending Auth on the stale socket does
+        // not guarantee a fresh entry in the server's Realtime connection registry.
+        // Replace ONLY the Realtime transport, preserve the active Dedicated socket,
+        // then wait for authenticated Realtime + acknowledged same-room Join.
+        public async Task<bool> RebuildRealtimeMembershipForVoiceAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (Instance != this || isRoomExitInProgress || manualRoomReentryRunning ||
+                string.IsNullOrWhiteSpace(currentRoomId) || !hasReachedRealtimeReady)
+                return false;
+
+            string expectedRoom = currentRoomId;
+            string previousConnectionId = RealtimeConnectionId;
+            NetworkFileLogger.Info("VOICE_REALTIME_FRESH_REPAIR",
+                "START | owner=webgl_health_first | roomId=" + expectedRoom);
+            RequestWebGLHealthFirstReconnect("voice_auth_6_server_rejected_realtime", true);
+            float deadline = Time.realtimeSinceStartup + 30f;
+            while (Instance == this && !applicationIsQuitting &&
+                   Time.realtimeSinceStartup < deadline && !cancellationToken.IsCancellationRequested)
+            {
+                if (IsRealtimeReady && isJoinedRoom && HasAuthenticatedDedicatedForRecoveryRoom() &&
+                    string.Equals(currentRoomId, expectedRoom, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(RealtimeConnectionId) &&
+                    !string.Equals(previousConnectionId, RealtimeConnectionId, StringComparison.Ordinal))
+                {
+                    NetworkFileLogger.Info("VOICE_REALTIME_FRESH_REPAIR", "PASS | owner=webgl_health_first");
+                    return true;
+                }
+                await Task.Yield();
+            }
+            NetworkFileLogger.Warning("VOICE_REALTIME_FRESH_REPAIR",
+                "PENDING | owner_continues_in_background | realtimeReady=" + IsRealtimeReady +
+                " | roomJoined=" + isJoinedRoom);
+            return false;
+#else
+            return false;
+#endif
+        }
 
         //* On Voice auth code 6/7, reassert server-side Realtime Auth and room membership on the SAME socket.
         //* This does not disconnect the Dedicated Game Server or leave the Realtime room.
@@ -608,12 +676,207 @@ namespace Network_A.Realtime.Controllers
             }
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // This is the ONLY automatic WebGL Realtime reconnect entry point.
+        // A browser offline flag, a heartbeat timeout, a server-side Voice 6 refusal,
+        // and a Realtime transport event are hints; none is an internet verdict.
+        // The first network decision in every execution cycle is shared GET /health == HTTP 200.
+        public void RequestWebGLHealthFirstReconnect(string reason, bool forceFreshRealtime = false)
+        {
+            if (Instance != this || applicationIsQuitting || isRoomExitInProgress ||
+                permanentRecoveryFailureWaitingForLobby || !enableAutomaticReconnect ||
+                !hasLobbyEntryRequested || !hasReachedRealtimeReady ||
+                string.IsNullOrWhiteSpace(currentRoomId))
+                return;
+
+            webGLHealthFirstRecoveryRequested = true;
+            webGLHealthFirstForceFreshRealtime |= forceFreshRealtime;
+            webGLHealthFirstReason = string.IsNullOrWhiteSpace(reason) ? "realtime_recovery" : reason.Trim();
+            webGLHealthFirstRequestGeneration++;
+            NetworkFileLogger.Info("WEBGL_RECONNECT_OWNER",
+                "SIGNAL | reason=" + webGLHealthFirstReason +
+                " | requestGeneration=" + webGLHealthFirstRequestGeneration +
+                " | alreadyRunning=" + webGLHealthFirstRecoveryRunning +
+                " | forceFresh=" + webGLHealthFirstForceFreshRealtime);
+
+            if (webGLHealthFirstRecoveryRunning) return;
+            webGLHealthFirstRecoveryRunning = true;
+            _ = RunWebGLHealthFirstReconnectAsync();
+        }
+
+        private async Task RunWebGLHealthFirstReconnectAsync()
+        {
+            string expectedRoomId = currentRoomId;
+            try
+            {
+                while (webGLHealthFirstRecoveryRequested && Instance == this &&
+                       !applicationIsQuitting && !isRoomExitInProgress &&
+                       !permanentRecoveryFailureWaitingForLobby &&
+                       string.Equals(currentRoomId, expectedRoomId, StringComparison.Ordinal))
+                {
+                    // STEP 1: No GlobalAuth, browserOnline or Realtime gate before HTTP 200.
+                    WebGLSingleHealthAuthority.Result health =
+                        await WebGLSingleHealthAuthority.ProbeAsync();
+                    if (Instance != this || applicationIsQuitting) break;
+                    if (!health.Reachable || health.StatusCode != 200)
+                    {
+                        webGLHealthFirstConsecutiveFailedProbes++;
+                        if (webGLHealthFirstConsecutiveFailedProbes >= 2)
+                            webGLHealthFirstSawUnreachable = true;
+                        NetworkFileLogger.Warning("WEBGL_RECONNECT_OWNER",
+                            "HEALTH_WAIT | status=" + health.StatusCode +
+                            " | reason=" + webGLHealthFirstReason);
+                        await WaitWebGLRecoveryRetryAsync();
+                        continue;
+                    }
+
+                    webGLHealthFirstConsecutiveFailedProbes = 0;
+                    webGLLastVerifiedHttp200At = Time.realtimeSinceStartup;
+                    StartupNetworkSceneRouter.Instance?.ConfirmWebGLServerReachableFromHealth();
+                    // Only AFTER verified HTTP 200, stop competing legacy retries.
+                    reconnect?.Stop();
+                    int handledGeneration = webGLHealthFirstRequestGeneration;
+
+                    // STEP 2: HTTP 200 is ONLY backend reachability. These are
+                    // separate service readiness facts and have independent logs.
+                    bool realtimeAuthenticated = IsRealtimeReady;
+                    bool sameRoomJoined = isJoinedRoom &&
+                        string.Equals(currentRoomId, expectedRoomId, StringComparison.Ordinal);
+                    bool mustCreateFresh = webGLHealthFirstForceFreshRealtime ||
+                        webGLHealthFirstSawUnreachable || !realtimeAuthenticated || !sameRoomJoined;
+                    NetworkFileLogger.Info("WEBGL_RECONNECT_OWNER",
+                        "HEALTH_200_SERVICE_CHECK | roomId=" + expectedRoomId +
+                        " | realtimeAuthenticated=" + realtimeAuthenticated +
+                        " | joinedSameRoom=" + sameRoomJoined +
+                        " | globalAuthReady=" + IsGlobalAuthenticationReady() +
+                        " | forceFresh=" + mustCreateFresh +
+                        " | dedicatedAuthenticated=" + HasAuthenticatedDedicatedForRecoveryRoom());
+
+                    if (!mustCreateFresh)
+                    {
+                        // A false navigator.onLine event must not destroy a healthy socket.
+                        if (handledGeneration == webGLHealthFirstRequestGeneration)
+                        {
+                            webGLHealthFirstRecoveryRequested = false;
+                            webGLHealthFirstSawUnreachable = false;
+                        }
+                        TryCompleteUnifiedRecoveryIfReady("webgl_health_200_existing_services_ready");
+                        NetworkFileLogger.Info("WEBGL_RECONNECT_OWNER", "BYPASS | reason=services_already_ready");
+                        continue;
+                    }
+
+                    if (manualRoomReentryRunning || !IsGlobalAuthenticationReady())
+                    {
+                        NetworkFileLogger.Warning("WEBGL_RECONNECT_OWNER",
+                            "WAIT_SERVICE | manualRoomReentry=" + manualRoomReentryRunning +
+                            " | globalAuthReady=" + IsGlobalAuthenticationReady());
+                        await WaitWebGLRecoveryRetryAsync();
+                        continue;
+                    }
+
+                    // STEP 3: ONLY this manager may now rebuild Realtime. Do not
+                    // disconnect an authenticated Dedicated or leave its room.
+                    bool gateEntered = false;
+                    bool connectedAndJoined = false;
+                    using (CancellationTokenSource attemptDeadline =
+                        CancellationTokenSource.CreateLinkedTokenSource(lifecycleCts.Token))
+                    {
+                        attemptDeadline.CancelAfter(TimeSpan.FromSeconds(30));
+                        try
+                        {
+                            NetworkFileLogger.Info("WEBGL_RECONNECT_OWNER", "GATE_WAIT | roomId=" + expectedRoomId);
+                            await connectionGate.WaitAsync(attemptDeadline.Token);
+                            gateEntered = true;
+                            NetworkFileLogger.Info("WEBGL_RECONNECT_OWNER", "GATE_ENTERED | roomId=" + expectedRoomId);
+                            if (manualRoomReentryRunning || isRoomExitInProgress ||
+                                !string.Equals(currentRoomId, expectedRoomId, StringComparison.Ordinal))
+                                break;
+
+                            BeginUnifiedRecovery("webgl_health_200:" + webGLHealthFirstReason);
+                            RememberRoomForReconnect();
+                            shouldRejoinRoomAfterReconnect = true;
+                            await DisconnectTransportForTemporaryFailureAsync(
+                                "webgl_single_owner_fresh_realtime_only");
+                            attemptDeadline.Token.ThrowIfCancellationRequested();
+                            connectedAndJoined = await ConnectAndAuthenticateInternalAsync(
+                                true, attemptDeadline.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            NetworkFileLogger.Warning("WEBGL_RECONNECT_OWNER",
+                                "ATTEMPT_CANCELED_OR_TIMEOUT | gateEntered=" + gateEntered);
+                        }
+                        catch (Exception exception)
+                        {
+                            NetworkFileLogger.Exception("WEBGL_RECONNECT_OWNER", exception);
+                        }
+                        finally
+                        {
+                            if (gateEntered) connectionGate.Release();
+                        }
+                    }
+
+                    bool success = connectedAndJoined && IsRealtimeReady && isJoinedRoom &&
+                        string.Equals(currentRoomId, expectedRoomId, StringComparison.Ordinal);
+                    NetworkFileLogger.Info("WEBGL_RECONNECT_OWNER",
+                        (success ? "PASS" : "RETRY") + " | roomId=" + expectedRoomId +
+                        " | realtimeAuthenticated=" + IsRealtimeReady +
+                        " | roomJoined=" + isJoinedRoom +
+                        " | currentRealtimeConnectionId=" + RealtimeConnectionId);
+                    if (success)
+                    {
+                        webGLHealthFirstForceFreshRealtime = false;
+                        webGLHealthFirstSawUnreachable = false;
+                        if (handledGeneration == webGLHealthFirstRequestGeneration)
+                            webGLHealthFirstRecoveryRequested = false;
+                        TryCompleteUnifiedRecoveryIfReady("webgl_single_owner_authenticated_room_joined");
+                    }
+                    else
+                    {
+                        await WaitWebGLRecoveryRetryAsync();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                NetworkFileLogger.Warning("WEBGL_RECONNECT_OWNER", "STOPPED | reason=lifecycle_canceled");
+            }
+            catch (Exception exception)
+            {
+                NetworkFileLogger.Exception("WEBGL_RECONNECT_OWNER", exception);
+                await WaitWebGLRecoveryRetryAsync();
+            }
+            finally
+            {
+                webGLHealthFirstRecoveryRunning = false;
+                if (Instance == this && webGLHealthFirstRecoveryRequested &&
+                    !applicationIsQuitting && !isRoomExitInProgress &&
+                    !permanentRecoveryFailureWaitingForLobby &&
+                    !string.IsNullOrWhiteSpace(currentRoomId))
+                {
+                    // An unexpected task fault must not permanently orphan the request.
+                    webGLHealthFirstRecoveryRunning = true;
+                    _ = RunWebGLHealthFirstReconnectAsync();
+                }
+            }
+        }
+
+        private async Task WaitWebGLRecoveryRetryAsync()
+        {
+            float until = Time.realtimeSinceStartup + 1f;
+            while (Instance == this && !applicationIsQuitting &&
+                   Time.realtimeSinceStartup < until)
+                await Task.Yield();
+        }
+#endif
+
         //* این تابع اتصال و احراز هویت ریل‌تایم را در صورت نیاز آماده می‌کند و اتصال آماده قبلی را دوباره نمی‌سازد.
         public async Task<bool> EnsureRealtimeReadyAsync(bool reconnecting, CancellationToken cancellationToken = default(CancellationToken))
         {
-            if (IsRealtimeReady)
+            if (IsRealtimeReady && !NeedsRealtimeRoomRejoinAfterReconnect(reconnecting))
             {
                 SetState(ResolveReadyState(), "existing_realtime_connection_reused");
+                TryCompleteUnifiedRecoveryIfReady("existing_realtime_connection_reused");
                 return true;
             }
 
@@ -626,13 +889,39 @@ namespace Network_A.Realtime.Controllers
             using (CancellationTokenSource linkedCts = CreateLinkedLifecycleToken(cancellationToken, reconnecting))
             {
                 bool gateEntered = false;
-
+#if UNITY_WEBGL && !UNITY_EDITOR
+                if (reconnecting && unifiedRecoveryRunning && !manualRoomReentryRunning)
+                {
+                    // Prevent a third (or later) automatic recovery attempt from waiting
+                    // silently for the entire recovery budget on a stale gate.
+                    linkedCts.CancelAfter(30000);
+                    NetworkFileLogger.Info("REALTIME_WEBGL_RECOVERY_GATE", "WAIT | roomId=" + currentRoomId + " | realtimeReady=" + IsRealtimeReady + " | recoveryRunning=" + unifiedRecoveryRunning);
+                }
+#endif
                 try
                 {
                     await connectionGate.WaitAsync(linkedCts.Token);
                     gateEntered = true;
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    if (reconnecting && unifiedRecoveryRunning && !manualRoomReentryRunning)
+                        NetworkFileLogger.Info("REALTIME_WEBGL_RECOVERY_GATE", "ENTERED | roomId=" + currentRoomId);
+#endif
 
-                    if (IsRealtimeReady) return true;
+                    if (IsRealtimeReady)
+                    {
+                        if (!NeedsRealtimeRoomRejoinAfterReconnect(reconnecting))
+                        {
+                            TryCompleteUnifiedRecoveryIfReady("realtime_already_authenticated");
+                            return true;
+                        }
+                        bool roomRejoined = await RejoinCurrentRoomAfterReconnectAsync(linkedCts.Token);
+                        if (roomRejoined)
+                        {
+                            NotifyRealtimeReady();
+                            TryCompleteUnifiedRecoveryIfReady("realtime_room_rejoined");
+                        }
+                        return roomRejoined;
+                    }
                     if (!CanStartRealtimeFlow(out string blockedReason))
                     {
                         NetworkFileLogger.Warning("REALTIME_FLOW_BLOCKED", blockedReason);
@@ -643,6 +932,10 @@ namespace Network_A.Realtime.Controllers
                 }
                 catch (OperationCanceledException)
                 {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    if (reconnecting && !manualRoomReentryRunning)
+                        NetworkFileLogger.Warning("REALTIME_WEBGL_RECOVERY_GATE", "CANCELED_OR_TIMED_OUT | gateEntered=" + gateEntered + " | roomId=" + currentRoomId + " | recoveryRunning=" + unifiedRecoveryRunning);
+#endif
                     if (reconnecting && unifiedRecoveryRunning && !HasUnifiedRecoveryTimeRemaining()) FailUnifiedRecovery("recovery_deadline_reached_during_realtime_flow");
                     else NetworkFileLogger.Warning("REALTIME_RECOVERY", "جریان اتصال ریل‌تایم لغو شد.");
                     return false;
@@ -652,6 +945,402 @@ namespace Network_A.Realtime.Controllers
                     if (gateEntered) connectionGate.Release();
                 }
             }
+        }
+
+        // User-initiated restart of the existing Realtime connection and *same* room membership.
+        // Normal automatic reconnect code is deliberately unchanged. No room-leave request is sent.
+        // Only use this after a verified network health response; the Dedicated binder handles ticket/auth.
+        public async Task<bool> ManuallyReenterSameRoomAsync(Func<Task> beforeReconnect = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (manualRoomReentryRunning || Instance != this || applicationIsQuitting || isRoomExitInProgress)
+                return false;
+
+            string requestedRoomId = string.IsNullOrWhiteSpace(currentRoomId) ? lastConfirmedRoomId : currentRoomId;
+            string requestedRoomName = string.IsNullOrWhiteSpace(currentRoomId) ? lastConfirmedRoomName : currentRoomName;
+            if (string.IsNullOrWhiteSpace(requestedRoomId) || !IsGlobalAuthenticationReady())
+            {
+                Debug.LogWarning("MANUAL_SAME_ROOM_REENTRY=BLOCKED | reason=room_or_auth_missing");
+                return false;
+            }
+
+            manualRoomReentryRunning = true;
+            try
+            {
+                if (StartupNetworkSceneRouter.Instance == null ||
+                    !await StartupNetworkSceneRouter.Instance.CheckNetFastSilentAsync(cancellationToken))
+                {
+                    Debug.LogWarning("MANUAL_SAME_ROOM_REENTRY=BLOCKED | reason=health_not_verified");
+                    return false;
+                }
+                StartupNetworkSceneRouter.Instance.ConfirmWebGLServerReachableFromHealth();
+                Debug.Log("MANUAL_SAME_ROOM_REENTRY=HEALTH_OK | roomId=" + requestedRoomId);
+
+                // An old reconnect loop may own the connectionGate. Cancel it before waiting.
+                reconnect?.Stop();
+
+                using (CancellationTokenSource gateTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                {
+                    gateTimeout.CancelAfter(TimeSpan.FromSeconds(12));
+                    bool enteredGate = false;
+                    try
+                    {
+                        await connectionGate.WaitAsync(gateTimeout.Token);
+                        enteredGate = true;
+
+                        if (isRoomExitInProgress || applicationIsQuitting) return false;
+
+                        // After the Health success and connection gate, cancel the terminal
+                        // fallback so it cannot load Lobby over the manual same-room restart.
+                        DedicatedGameServerRealtimeRoomBinderWebGL manualBinder =
+                            DedicatedGameServerRealtimeRoomBinderWebGL.Instance;
+                        if (manualBinder != null &&
+                            !manualBinder.TryReserveTerminalRecoveryForManualRoomReentry())
+                        {
+                            Debug.LogWarning("MANUAL_SAME_ROOM_REENTRY=BLOCKED | reason=lobby_return_running");
+                            return false;
+                        }
+
+                        CancelUnifiedRecovery("manual_same_room_reentry", false);
+                        permanentRecoveryFailureWaitingForLobby = false;
+                        currentRoomId = requestedRoomId;
+                        currentRoomName = requestedRoomName;
+                        selectedBuildingWidth = lastConfirmedRoomWidth;
+                        selectedBuildingLength = lastConfirmedRoomLength;
+                        selectedBuildingDensity = lastConfirmedRoomDensity;
+                        hasLobbyEntryRequested = true;
+                        shouldRejoinRoomAfterReconnect = true;
+                        isJoinedRoom = false;
+                        StopHeartbeat();
+
+                        // Suppress the normal disconnect callback's automatic retry.
+                        // Keep the previous room ID so the existing authenticated room-join protocol is reused.
+                        await DisconnectTransportForTemporaryFailureAsync("manual_same_room_reentry");
+                        BeginUnifiedRecovery("manual_same_room_reentry");
+                        recoveryRequiresDedicatedGameServer = true;
+                        Debug.Log("MANUAL_SAME_ROOM_REENTRY=REALTIME_RESET | roomId=" + requestedRoomId);
+                    }
+                    finally
+                    {
+                        if (enteredGate) connectionGate.Release();
+                    }
+                }
+
+                // Reload the Unity gameplay scene *before* reauthentication, so that
+                // the existing room-joined and Dedicated-auth events rebuild its views.
+                if (beforeReconnect != null)
+                {
+                    await beforeReconnect();
+                    Debug.Log("MANUAL_SAME_ROOM_REENTRY=SCENE_RELOADED | roomId=" + requestedRoomId);
+                }
+
+                bool joined = await EnsureRealtimeReadyAsync(true, cancellationToken);
+                bool sameRoom = joined && IsRealtimeReady && isJoinedRoom &&
+                    string.Equals(currentRoomId, requestedRoomId, StringComparison.Ordinal);
+                Debug.Log("MANUAL_SAME_ROOM_REENTRY=" + (sameRoom ? "ROOM_JOINED" : "REALTIME_PENDING") +
+                          " | roomId=" + requestedRoomId);
+                if (!sameRoom && unifiedRecoveryRunning && HasUnifiedRecoveryTimeRemaining())
+                {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    // Manual scene reload is an explicit user action; automatic
+                    // follow-up remains controlled by the single WebGL owner.
+                    RequestWebGLHealthFirstReconnect("manual_room_reentry_retry");
+#else
+                    if (reconnect != null && !reconnect.IsRunning)
+                    {
+                        reconnect.totalTimeoutMs = GetUnifiedRecoveryRemainingMilliseconds();
+                        reconnect.maxAttempts = 0;
+                        reconnect.Start(TryReconnectOnceAsync);
+                    }
+#endif
+                    Debug.Log("MANUAL_SAME_ROOM_REENTRY=RETRY_LOOP_STARTED | roomId=" + requestedRoomId);
+                }
+                return sameRoom;
+            }
+            catch (OperationCanceledException)
+            {
+                Debug.LogWarning("MANUAL_SAME_ROOM_REENTRY=BLOCKED | reason=timeout_or_cancelled");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError("MANUAL_SAME_ROOM_REENTRY=ERROR | " + ex);
+                return false;
+            }
+            finally
+            {
+                // A failed manual attempt must not leave the pre-existing automatic
+                // recovery stopped. Resume the canonical retry loop if room auth still needs work.
+                // Clear the manual-operation guard *before* deciding whether to
+                // resume automatic retry. The old order made the condition
+                // !manualRoomReentryRunning impossible inside this finally block.
+                manualRoomReentryRunning = false;
+                if (Instance == this && unifiedRecoveryRunning && HasUnifiedRecoveryTimeRemaining() &&
+                    !permanentRecoveryFailureWaitingForLobby &&
+                    (!IsRealtimeReady || NeedsRealtimeRoomRejoinAfterReconnect(true)))
+                {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    RequestWebGLHealthFirstReconnect("manual_room_reentry_followup");
+#else
+                    if (reconnect != null && !reconnect.IsRunning && IsGlobalAuthenticationReady())
+                    {
+                        reconnect.totalTimeoutMs = GetUnifiedRecoveryRemainingMilliseconds();
+                        reconnect.maxAttempts = 0;
+                        reconnect.Start(TryReconnectOnceAsync);
+                    }
+#endif
+                    Debug.Log("MANUAL_SAME_ROOM_REENTRY=AUTO_RECOVERY_RESTORED");
+                }
+            }
+        }
+
+        // Explicit user action only. This is a confirmed server-side LEAVE followed by a
+        // fresh JOIN of the same room, not a transport-only reconnect or Voice reload.
+        // Do not touch the automatic recovery paths or launch a second Dedicated session.
+        public async Task<bool> ManuallyRestartRoomFromBeginningAsync(
+            Func<Task> reloadGameplayScene = null,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (manualRoomReentryRunning || Instance != this || applicationIsQuitting || isRoomExitInProgress)
+            {
+                NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "BLOCKED | reason=another_room_operation");
+                return false;
+            }
+
+            string targetRoomId = string.IsNullOrWhiteSpace(currentRoomId) ? lastConfirmedRoomId : currentRoomId;
+            string targetRoomName = string.IsNullOrWhiteSpace(currentRoomName) ? lastConfirmedRoomName : currentRoomName;
+            string targetWidth = string.IsNullOrWhiteSpace(selectedBuildingWidth) ? lastConfirmedRoomWidth : selectedBuildingWidth;
+            string targetLength = string.IsNullOrWhiteSpace(selectedBuildingLength) ? lastConfirmedRoomLength : selectedBuildingLength;
+            string targetDensity = string.IsNullOrWhiteSpace(selectedBuildingDensity) ? lastConfirmedRoomDensity : selectedBuildingDensity;
+            if (string.IsNullOrWhiteSpace(targetRoomId) ||
+                string.Equals(targetRoomId, PublicLobbyRoomIdValue, StringComparison.Ordinal) ||
+                IsInsidePublicLobbyRoom)
+            {
+                NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "BLOCKED | reason=no_gameplay_room");
+                return false;
+            }
+
+            manualRoomReentryRunning = true;
+            bool serverLeaveConfirmed = false;
+            bool serverJoinConfirmed = false;
+            try
+            {
+                NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "HEALTH_CHECK | roomId=" + targetRoomId);
+                // One authority for HTTP reachability. A healthy /health is NOT proof of room membership.
+                if (!await IsServerReachableSilentlyAsync())
+                {
+                    NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "BLOCKED | reason=health_not_200");
+                    return false;
+                }
+                NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "HEALTH_200 | roomId=" + targetRoomId);
+#if UNITY_WEBGL && !UNITY_EDITOR
+                webGLLastVerifiedHttp200At = Time.realtimeSinceStartup;
+                StartupNetworkSceneRouter.Instance?.ConfirmWebGLServerReachableFromHealth();
+#endif
+                if (!IsGlobalAuthenticationReady())
+                {
+                    NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "BLOCKED | reason=global_auth_not_ready");
+                    return false;
+                }
+
+                DedicatedGameServerRealtimeRoomBinderWebGL binder =
+                    DedicatedGameServerRealtimeRoomBinderWebGL.Instance;
+                if (binder == null || !binder.TryReserveTerminalRecoveryForManualRoomReentry())
+                {
+                    NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "BLOCKED | reason=binder_or_lobby_return");
+                    return false;
+                }
+
+                reconnect?.Stop();
+                permanentRecoveryFailureWaitingForLobby = false;
+                CancelUnifiedRecovery("manual_room_restart", false);
+
+                // A formal LEAVE requires an authenticated Realtime room connection.
+                // Restore the previous room membership first if the socket went stale.
+                if (!IsRealtimeReady || !isJoinedRoom ||
+                    !string.Equals(currentRoomId, targetRoomId, StringComparison.Ordinal))
+                {
+                    currentRoomId = targetRoomId;
+                    currentRoomName = targetRoomName;
+                    selectedBuildingWidth = targetWidth;
+                    selectedBuildingLength = targetLength;
+                    selectedBuildingDensity = targetDensity;
+                    hasLobbyEntryRequested = true;
+                    shouldRejoinRoomAfterReconnect = true;
+                    isJoinedRoom = false;
+
+                    using (CancellationTokenSource reconnectDeadline =
+                        CreateLinkedLifecycleToken(cancellationToken))
+                    {
+                        reconnectDeadline.CancelAfter(TimeSpan.FromSeconds(25));
+                        bool restored = await EnsureRealtimeReadyAsync(true, reconnectDeadline.Token);
+                        if (!restored || !IsRealtimeReady || !isJoinedRoom ||
+                            !string.Equals(currentRoomId, targetRoomId, StringComparison.Ordinal))
+                        {
+                            NetworkFileLogger.Warning("MANUAL_ROOM_RESTART",
+                                "BLOCKED | stage=restore_membership_before_leave | realtimeReady=" +
+                                IsRealtimeReady + " | joined=" + isJoinedRoom);
+                            return false;
+                        }
+                    }
+                }
+
+                // Binder explicitly closes Dedicated with server acknowledgement, then sends
+                // LeaveRoomReliableAsync and waits for a successful server reply. The special
+                // reason uses its existing no-Lobby-return contract.
+                NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "DEDICATED_CLOSE_AND_LEAVE_START | roomId=" + targetRoomId);
+                serverLeaveConfirmed = await binder.DisconnectGameServerAndLeaveRoomAsync(
+                    "manual_room_restart_before_realtime_disconnect", false);
+                if (!serverLeaveConfirmed || isJoinedRoom || binder.HasUnclosedDedicatedSession)
+                {
+                    NetworkFileLogger.Warning("MANUAL_ROOM_RESTART",
+                        "BLOCKED | stage=server_leave_not_confirmed | leaveResult=" +
+                        serverLeaveConfirmed + " | joined=" + isJoinedRoom +
+                        " | unclosedDedicated=" + binder.HasUnclosedDedicatedSession);
+                    return false;
+                }
+                NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "SERVER_LEAVE_ACK | roomId=" + targetRoomId);
+
+                // Rebuild the scene only after the old Game Server session is closed.
+                if (reloadGameplayScene != null)
+                {
+                    await reloadGameplayScene();
+                    NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "GAMEPLAY_SCENE_RELOADED | roomId=" + targetRoomId);
+                }
+
+                if (!IsRealtimeReady)
+                {
+                    using (CancellationTokenSource transportDeadline =
+                        CreateLinkedLifecycleToken(cancellationToken))
+                    {
+                        transportDeadline.CancelAfter(TimeSpan.FromSeconds(25));
+                        if (!await EnsureRealtimeReadyAsync(false, transportDeadline.Token))
+                        {
+                            NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "BLOCKED | stage=realtime_auth_after_leave");
+                            return false;
+                        }
+                    }
+                }
+
+                using (CancellationTokenSource joinDeadline =
+                    CreateLinkedLifecycleToken(cancellationToken))
+                {
+                    joinDeadline.CancelAfter(TimeSpan.FromSeconds(25));
+                    bool roomGateEntered = false;
+                    try
+                    {
+                        await roomGate.WaitAsync(joinDeadline.Token);
+                        roomGateEntered = true;
+                        if (isJoinedRoom || !IsRealtimeReady || gameServerClient == null ||
+                            binder.HasUnclosedDedicatedSession || binder.IsDisconnectFlowRunning)
+                        {
+                            NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "BLOCKED | stage=join_preconditions");
+                            return false;
+                        }
+
+                        currentRoomId = targetRoomId;
+                        currentRoomName = targetRoomName;
+                        selectedBuildingWidth = targetWidth;
+                        selectedBuildingLength = targetLength;
+                        selectedBuildingDensity = targetDensity;
+                        lastRoomFlowError = string.Empty;
+                        SetState(FlowState.JoiningRoom, "manual_room_restart_join_started");
+                        NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "SERVER_JOIN_REQUEST | roomId=" + targetRoomId);
+                        RealtimeReliableSendResult result = await gameServerClient.JoinRoomReliableAsync(
+                            targetRoomId, CreateReliableOptions(), joinDeadline.Token);
+                        serverJoinConfirmed = result != null && result.isSuccess;
+                        if (!serverJoinConfirmed)
+                        {
+                            lastRoomFlowError = result != null ? result.errorMessage : "result_null";
+                            currentRoomId = string.Empty;
+                            currentRoomName = string.Empty;
+                            shouldRejoinRoomAfterReconnect = false;
+                            SetState(ResolveReadyState(), "manual_room_restart_join_failed");
+                            NetworkFileLogger.Warning("MANUAL_ROOM_RESTART",
+                                "JOIN_FAILED | roomId=" + targetRoomId + " | error=" + lastRoomFlowError);
+                            return false;
+                        }
+
+                        isJoinedRoom = true;
+                        shouldRejoinRoomAfterReconnect = true;
+                        SetState(FlowState.RoomJoined, "manual_room_restart_join_acknowledged");
+                        GlobalMessageManager.Clear(RoomProgressMessageId);
+                        GlobalMessageManager.Clear(RoomErrorMessageId);
+                        NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "SERVER_JOIN_ACK | roomId=" + targetRoomId);
+                        NotifyRoomJoined(targetRoomId);
+                    }
+                    finally
+                    {
+                        if (roomGateEntered) roomGate.Release();
+                    }
+                }
+
+                // The room-joined event normally starts the Binder's original ticket/auth
+                // flow. Fall back to the same existing method only if no connect is running.
+                await Task.Yield();
+                if (!binder.HasActiveDedicatedConnection && !binder.IsConnectFlowRunning)
+                    await binder.ConnectGameServerAsync();
+
+                float dedicatedDeadline = Time.realtimeSinceStartup + 30f;
+                while (Instance == this && !applicationIsQuitting &&
+                       Time.realtimeSinceStartup < dedicatedDeadline &&
+                       !cancellationToken.IsCancellationRequested)
+                {
+                    DedicatedGameServerWsClient ws = DedicatedGameServerWsClient.Instance;
+                    if (binder.HasActiveDedicatedConnection && ws != null && ws.IsReady &&
+                        string.Equals(ws.RoomId, targetRoomId, StringComparison.Ordinal))
+                    {
+                        NetworkFileLogger.Info("MANUAL_ROOM_RESTART", "PASS | roomId=" + targetRoomId);
+                        return true;
+                    }
+                    await Task.Yield();
+                }
+                NetworkFileLogger.Warning("MANUAL_ROOM_RESTART",
+                    "DEDICATED_PENDING | roomJoined=" + isJoinedRoom +
+                    " | dedicatedReady=" + binder.HasActiveDedicatedConnection);
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                NetworkFileLogger.Warning("MANUAL_ROOM_RESTART", "CANCELED_OR_TIMED_OUT | roomId=" + targetRoomId);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                NetworkFileLogger.Exception("MANUAL_ROOM_RESTART", ex);
+                return false;
+            }
+            finally
+            {
+                // The target survives a confirmed LEAVE solely for an explicit retry.
+                // Never mark it joined without receiving the fresh JOIN acknowledgement.
+                if (serverLeaveConfirmed && !serverJoinConfirmed)
+                {
+                    lastConfirmedRoomId = targetRoomId;
+                    lastConfirmedRoomName = targetRoomName;
+                    lastConfirmedRoomWidth = targetWidth;
+                    lastConfirmedRoomLength = targetLength;
+                    lastConfirmedRoomDensity = targetDensity;
+                }
+                manualRoomReentryRunning = false;
+#if UNITY_WEBGL && !UNITY_EDITOR
+                if ((!IsRealtimeReady || NeedsRealtimeRoomRejoinAfterReconnect(true)) &&
+                    !string.IsNullOrWhiteSpace(currentRoomId) &&
+                    hasLobbyEntryRequested && !applicationIsQuitting)
+                    RequestWebGLHealthFirstReconnect("manual_room_restart_followup");
+#endif
+            }
+        }
+
+        // Realtime authentication alone is insufficient when the previous room must be rejoined.
+        private bool NeedsRealtimeRoomRejoinAfterReconnect(bool reconnecting)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return reconnecting && shouldRejoinRoomAfterReconnect &&
+                   autoRejoinRoomAfterRealtimeReconnect && !isJoinedRoom &&
+                   !string.IsNullOrWhiteSpace(currentRoomId);
+#else
+            return false;
+#endif
         }
 
         //* این تابع همه درخواست‌های هم‌زمان دریافت ساختمان‌ها را روی یک تسک مشترک قرار می‌دهد تا درخواست و رندر تکراری ساخته نشود.
@@ -1114,8 +1803,20 @@ namespace Network_A.Realtime.Controllers
         //* این تابع پیام پیشرفت ورود به روم را بدون امکان بستن نمایش می‌دهد.
         private void PublishRoomProgress(string message, string technicalDetails)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // Progress of joining a room belongs to scene Text, not a modal.
+            GlobalMessageManager.Clear(RoomProgressMessageId);
+            return;
+#else
+            if (unifiedRecoveryRunning && HasVerifiedLiveDedicatedForRealtimeRecovery())
+            {
+                GlobalMessageManager.Clear(RoomProgressMessageId);
+                return;
+            }
+
             if (!CanShowRealtimeOrRequestMessage()) return;
             GlobalMessageManager.Publish(RoomProgressMessageId, GlobalMessageManager.MessageSource.Realtime, GlobalMessageManager.MessageType.Information, GlobalMessageManager.Priorities.Reconnecting, "ورود به روم", message, technicalDetails ?? string.Empty, 0f, true, false);
+#endif
         }
 
         //* این تابع خطای ورود به روم را با امکان تلاش دوباره برای ساختمان انتخاب‌شده نمایش می‌دهد.
@@ -1190,6 +1891,14 @@ namespace Network_A.Realtime.Controllers
         //* این تابع رویداد ورود موفق روم را برای Binder گیم سرور و مصرف‌کننده‌های سه‌بعدی اجرا می‌کند.
         private void NotifyRoomJoined(string roomId)
         {
+            if (!string.IsNullOrWhiteSpace(roomId))
+            {
+                lastConfirmedRoomId = roomId;
+                lastConfirmedRoomName = currentRoomName;
+                lastConfirmedRoomWidth = selectedBuildingWidth;
+                lastConfirmedRoomLength = selectedBuildingLength;
+                lastConfirmedRoomDensity = selectedBuildingDensity;
+            }
             Action<string> handler = OnRoomJoinedFor3D;
             if (handler == null) return;
 
@@ -1206,6 +1915,15 @@ namespace Network_A.Realtime.Controllers
         //* این تابع رویداد خروج روم را برای Binder گیم سرور و مصرف‌کننده‌های سه‌بعدی اجرا می‌کند.
         private void NotifyRoomLeft(string roomId)
         {
+            // Explicit room exit must invalidate the manual re-entry target.
+            if (string.Equals(lastConfirmedRoomId, roomId, StringComparison.Ordinal))
+            {
+                lastConfirmedRoomId = string.Empty;
+                lastConfirmedRoomName = string.Empty;
+                lastConfirmedRoomWidth = string.Empty;
+                lastConfirmedRoomLength = string.Empty;
+                lastConfirmedRoomDensity = string.Empty;
+            }
             Action<string> handler = OnRoomLeftFor3D;
             if (handler == null) return;
 
@@ -1345,8 +2063,7 @@ namespace Network_A.Realtime.Controllers
             }
 
             NotifyRealtimeReady();
-
-            if (unifiedRecoveryRunning && !recoveryRequiresDedicatedGameServer) CompleteUnifiedRecovery("realtime_recovered_without_dedicated_session");
+            TryCompleteUnifiedRecoveryIfReady("realtime_authenticated_and_room_checked");
 
             NetworkFileLogger.Info("REALTIME_READY", "connectionId=" + RealtimeConnectionId + " | userId=" + RealtimeUserId + " | transport=" + ResolveTransportKind() + " | roomJoined=" + isJoinedRoom + " | roomId=" + currentRoomId + " | recoveryRunning=" + unifiedRecoveryRunning + " | recoveryRemainingSeconds=" + RecoveryRemainingSeconds.ToString("F1"));
             return true;
@@ -1445,6 +2162,70 @@ namespace Network_A.Realtime.Controllers
             }
         }
 
+        // A recent, authenticated inbound Dedicated packet is first-party evidence that
+        // this player's current game session is still alive. A stale global network flag
+        // must never prevent re-authenticating the independent Realtime websocket.
+        private bool HasVerifiedLiveDedicatedForRealtimeRecovery()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (!hasLobbyEntryRequested || isRoomExitInProgress || applicationIsQuitting ||
+                string.IsNullOrWhiteSpace(currentRoomId)) return false;
+
+            DedicatedGameServerWsClient dedicated = DedicatedGameServerWsClient.Instance;
+            return dedicated != null && dedicated.IsReady &&
+                   dedicated.HasRecentInboundMessage(8f) &&
+                   string.Equals(dedicated.RoomId, currentRoomId, StringComparison.Ordinal);
+#else
+            return false;
+#endif
+        }
+
+        // Dedicated readiness is not the same as receiving another Dedicated auth event.
+        // This check is used only for completing a recovered WebGL room, not for
+        // claiming that the independent Realtime websocket is connected.
+        private bool HasAuthenticatedDedicatedForRecoveryRoom()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (!hasLobbyEntryRequested || isRoomExitInProgress || applicationIsQuitting ||
+                string.IsNullOrWhiteSpace(currentRoomId)) return false;
+
+            DedicatedGameServerWsClient dedicated = DedicatedGameServerWsClient.Instance;
+            return dedicated != null && dedicated.IsReady &&
+                   string.Equals(dedicated.RoomId, currentRoomId, StringComparison.Ordinal);
+#else
+            return false;
+#endif
+        }
+
+        // Completion is based on CURRENT state: authenticated Realtime, confirmed
+        // room membership, and a ready Dedicated socket where required. It never
+        // waits for a SECOND Dedicated authentication event when Dedicated stayed up.
+        private bool TryCompleteUnifiedRecoveryIfReady(string reason, bool dedicatedAuthenticatedEvent = false)
+        {
+            if (!unifiedRecoveryRunning || !IsRealtimeReady || isRoomExitInProgress ||
+                permanentRecoveryFailureWaitingForLobby) return false;
+            if (!string.IsNullOrWhiteSpace(currentRoomId) && !isJoinedRoom) return false;
+
+            if (recoveryRequiresDedicatedGameServer)
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                if (!HasAuthenticatedDedicatedForRecoveryRoom()) return false;
+#else
+                // Preserve the previous Windows/Editor confirmation contract.
+                if (!dedicatedAuthenticatedEvent) return false;
+#endif
+            }
+
+            NetworkFileLogger.Info("REALTIME_RECOVERY_DECISION",
+                "COMPLETE | reason=" + (reason ?? string.Empty) +
+                " | realtimeReady=" + IsRealtimeReady +
+                " | roomJoined=" + isJoinedRoom +
+                " | roomId=" + currentRoomId +
+                " | dedicatedRequired=" + recoveryRequiresDedicatedGameServer);
+            CompleteUnifiedRecovery(reason);
+            return true;
+        }
+
         //* این تابع از وضعیت مدیر شبکه و مدیر ورود اطمینان می‌گیرد و علت مسدودشدن جریان را برمی‌گرداند.
         private bool CanStartRealtimeFlow(out string blockedReason)
         {
@@ -1455,7 +2236,13 @@ namespace Network_A.Realtime.Controllers
                 return false;
             }
 
-            if (StartupNetworkSceneRouter.Instance == null || !StartupNetworkSceneRouter.IsOnline)
+            bool verifiedHttp200ForThisAttempt = false;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            verifiedHttp200ForThisAttempt = webGLLastVerifiedHttp200At >= 0f &&
+                Time.realtimeSinceStartup - webGLLastVerifiedHttp200At <= 5f;
+#endif
+            if (!verifiedHttp200ForThisAttempt && !HasVerifiedLiveDedicatedForRealtimeRecovery() &&
+                (StartupNetworkSceneRouter.Instance == null || !StartupNetworkSceneRouter.IsOnline))
             {
                 SetState(FlowState.WaitingForNetwork, "network_not_ready");
                 blockedReason = "Network is not online.";
@@ -1617,57 +2404,31 @@ namespace Network_A.Realtime.Controllers
         public void WakeRealtimeRecoveryAfterVerifiedWebGLHealth()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            if (Instance != this || !enableAutomaticReconnect || !hasLobbyEntryRequested ||
-                !hasReachedRealtimeReady || isRoomExitInProgress || applicationIsQuitting ||
-                suppressDisconnectHandling || permanentRecoveryFailureWaitingForLobby ||
-                !unifiedRecoveryRunning || !HasUnifiedRecoveryTimeRemaining() ||
-                IsRealtimeReady || webGLVerifiedHealthRecoveryWakeRunning ||
-                reconnect == null || reconnect.IsRunning || !IsGlobalAuthenticationReady())
-                return;
-
-            webGLVerifiedHealthRecoveryWakeRunning = true;
-            _ = RunVerifiedWebGLHealthRealtimeRecoveryAsync();
+            if (unifiedRecoveryRunning && hasReachedRealtimeReady)
+                RequestWebGLHealthFirstReconnect("binder_health_200_recovery_wake");
 #endif
         }
 
         private async Task RunVerifiedWebGLHealthRealtimeRecoveryAsync()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            try
-            {
-                NetworkFileLogger.Info("WEBGL_HEALTH_REALTIME_WAKE", "START | realtimeReady=False | recoveryRunning=True");
-                bool ready = await EnsureRealtimeReadyAsync(true);
-                if (ready)
-                {
-                    NetworkFileLogger.Info("WEBGL_HEALTH_REALTIME_WAKE", "PASS | realtime_authenticated_and_room_rejoin_attempted");
-                    return;
-                }
-
-                if (Instance == this && unifiedRecoveryRunning && HasUnifiedRecoveryTimeRemaining() &&
-                    !permanentRecoveryFailureWaitingForLobby && reconnect != null &&
-                    !reconnect.IsRunning && IsGlobalAuthenticationReady())
-                {
-                    reconnect.totalTimeoutMs = GetUnifiedRecoveryRemainingMilliseconds();
-                    reconnect.maxAttempts = 0;
-                    reconnect.Start(TryReconnectOnceAsync);
-                    NetworkFileLogger.Info("WEBGL_HEALTH_REALTIME_WAKE", "RETRY_LOOP_STARTED");
-                }
-            }
-            catch (Exception ex)
-            {
-                NetworkFileLogger.Exception("WEBGL_HEALTH_REALTIME_WAKE", ex);
-            }
-            finally
-            {
-                webGLVerifiedHealthRecoveryWakeRunning = false;
-            }
+            // Retained API, no independent recovery or retry loop.
+            RequestWebGLHealthFirstReconnect("legacy_health_wake");
+            await Task.CompletedTask;
+#else
+            await Task.CompletedTask;
 #endif
         }
 
         //* این تابع پس از قطع غیرعمدی، ابتدا سلامت شبکه را بررسی و سپس حلقه بازاتصال را آغاز می‌کند.
         private async Task BeginReconnectAfterUnexpectedDisconnectAsync(string reason)
         {
-            if (!enableAutomaticReconnect || !hasLobbyEntryRequested || !hasReachedRealtimeReady || applicationIsQuitting || suppressDisconnectHandling) return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            RequestWebGLHealthFirstReconnect("realtime_disconnected:" + reason);
+            await Task.CompletedTask;
+            return;
+#else
+            if (manualRoomReentryRunning || !enableAutomaticReconnect || !hasLobbyEntryRequested || !hasReachedRealtimeReady || applicationIsQuitting || suppressDisconnectHandling) return;
 
             BeginUnifiedRecovery(reason);
             if (!HasUnifiedRecoveryTimeRemaining())
@@ -1696,6 +2457,7 @@ namespace Network_A.Realtime.Controllers
             reconnect.totalTimeoutMs = GetUnifiedRecoveryRemainingMilliseconds();
             reconnect.maxAttempts = 0;
             reconnect.Start(TryReconnectOnceAsync);
+#endif
         }
 
         //* این تابع یک تلاش کامل بازاتصال شامل اتصال و احراز هویت را اجرا می‌کند.
@@ -1707,8 +2469,18 @@ namespace Network_A.Realtime.Controllers
         //* این تابع با بررسی بی‌صدای مدیر شبکه مشخص می‌کند شکست مربوط به اینترنت است یا خود ریل‌تایم.
         private async Task<bool> IsServerReachableSilentlyAsync()
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            WebGLSingleHealthAuthority.Result health =
+                await WebGLSingleHealthAuthority.ProbeAsync();
+            if (health.Reachable)
+                StartupNetworkSceneRouter.Instance?.ConfirmWebGLServerReachableFromHealth();
+            return health.Reachable;
+#else
+            // Preserve Windows and Editor network/recovery semantics.
+            if (HasVerifiedLiveDedicatedForRealtimeRecovery()) return true;
             if (StartupNetworkSceneRouter.Instance == null || !StartupNetworkSceneRouter.IsOnline) return false;
             return await StartupNetworkSceneRouter.Instance.CheckNetFastSilentAsync();
+#endif
         }
 
         //* این تابع آغاز هر تلاش بازاتصال را در وضعیت و گزارش سراسری ثبت می‌کند.
@@ -1741,6 +2513,11 @@ namespace Network_A.Realtime.Controllers
         //* این تابع شکست نهایی بازاتصال را فقط بعد از پایان مهلت مشترک بازیابی نهایی می‌کند.
         private async void HandleReconnectFailed(string reason)
         {
+            if (manualRoomReentryRunning) return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            RequestWebGLHealthFirstReconnect("legacy_retry_exhausted:" + reason);
+            return;
+#else
             if (unifiedRecoveryRunning && HasUnifiedRecoveryTimeRemaining())
             {
                 bool serverReachableDuringWindow = await IsServerReachableSilentlyAsync();
@@ -1765,6 +2542,7 @@ namespace Network_A.Realtime.Controllers
             }
 
             FailUnifiedRecovery(string.IsNullOrWhiteSpace(reason) ? "reconnect_failed" : reason);
+#endif
         }
 
         #endregion
@@ -1814,6 +2592,11 @@ namespace Network_A.Realtime.Controllers
             if (wasRealtimeReady)
             {
                 BeginUnifiedRecovery(reason ?? "realtime_disconnected");
+                if (HasVerifiedLiveDedicatedForRealtimeRecovery())
+                {
+                    GlobalMessageManager.Clear(RealtimeProgressMessageId);
+                    GlobalMessageManager.Clear(RoomProgressMessageId);
+                }
                 OnRealtimeDisconnected?.Invoke(reason ?? string.Empty);
             }
 
@@ -1848,7 +2631,11 @@ namespace Network_A.Realtime.Controllers
         {
             NetworkFileLogger.Warning("REALTIME_HEARTBEAT", "پاسخ پونگ در مهلت تعیین‌شده دریافت نشد.");
             if (realtimeClient == null || !realtimeClient.IsConnected) return;
-
+#if UNITY_WEBGL && !UNITY_EDITOR
+            RequestWebGLHealthFirstReconnect("realtime_heartbeat_service_timeout", true);
+            await Task.CompletedTask;
+            return;
+#endif
             try
             {
                 await realtimeClient.DisconnectAsync("heartbeat_timeout");
@@ -1882,8 +2669,11 @@ namespace Network_A.Realtime.Controllers
         //* این تابع هنگام قطع شبکه اتصال موقت را پاک و پس از برخط شدن همان مهلت مشترک بازیابی را ادامه می‌دهد.
         private async void HandleNetworkStateChanged(StartupNetworkSceneRouter.NetworkState state)
         {
-            if (Instance != this || !hasLobbyEntryRequested) return;
-
+            if (Instance != this || !hasLobbyEntryRequested || manualRoomReentryRunning) return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            RequestWebGLHealthFirstReconnect("router_state_signal:" + state);
+            await Task.CompletedTask;
+#else
             if (state != StartupNetworkSceneRouter.NetworkState.Online)
             {
                 if (hasReachedRealtimeReady) BeginUnifiedRecovery("network_state=" + state);
@@ -1918,6 +2708,7 @@ namespace Network_A.Realtime.Controllers
                 else await EnsureRealtimeReadyAsync(hasReachedRealtimeReady);
             }
             else SetState(FlowState.WaitingForAuthentication, "network_online_waiting_for_login_init");
+#endif
         }
 
         //* این تابع تغییر وضعیت ورود را دریافت می‌کند و فقط پس از ورود کامل اجازه اتصال ریل‌تایم می‌دهد.
@@ -1932,7 +2723,15 @@ namespace Network_A.Realtime.Controllers
         //* این تابع پس از ورود یا ورود مجدد موفق، اتصال ریل‌تایم را در همان مهلت مشترک بازیابی ادامه می‌دهد.
         private async void HandleLoginReady(AuthUserDto user)
         {
-            if (Instance != this || !hasLobbyEntryRequested) return;
+            if (Instance != this || !hasLobbyEntryRequested || manualRoomReentryRunning) return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (hasReachedRealtimeReady &&
+                (unifiedRecoveryRunning || webGLHealthFirstRecoveryRequested || !IsRealtimeReady))
+            {
+                RequestWebGLHealthFirstReconnect("global_login_ready_during_recovery");
+                return;
+            }
+#endif
             if (StartupNetworkSceneRouter.Instance == null || !StartupNetworkSceneRouter.IsOnline) return;
 
             try
@@ -1998,6 +2797,14 @@ namespace Network_A.Realtime.Controllers
             unifiedRecoveryTimeoutCoroutine = StartCoroutine(UnifiedRecoveryTimeoutRoutine());
 
             NetworkFileLogger.Info("UNIFIED_RECOVERY_STARTED", "reason=" + unifiedRecoveryReason + " | serverGraceSeconds=" + ServerSessionReconnectGraceSeconds.ToString("F1") + " | clientAttemptSeconds=" + ClientReconnectAttemptTimeoutSeconds.ToString("F1") + " | safetyMarginSeconds=" + Mathf.Max(0f, ServerSessionReconnectGraceSeconds - ClientReconnectAttemptTimeoutSeconds).ToString("F1") + " | requiresDedicated=" + recoveryRequiresDedicatedGameServer + " | roomId=" + currentRoomId);
+
+            // Immediately clear any stale blocking Realtime/room progress banner
+            // when the authenticated Dedicated socket is still receiving traffic.
+            if (HasVerifiedLiveDedicatedForRealtimeRecovery())
+            {
+                GlobalMessageManager.Clear(RealtimeProgressMessageId);
+                GlobalMessageManager.Clear(RoomProgressMessageId);
+            }
         }
 
         //* این تابع تا پایان مهلت ۱۸۰ ثانیه‌ای کلاینت صبر می‌کند و سپس شکست نهایی را اعلام می‌کند.
@@ -2017,11 +2824,28 @@ namespace Network_A.Realtime.Controllers
             recoveryRequiresDedicatedGameServer = true;
         }
 
+        // The WebGL offline-signal adapter owns a Realtime transport recovery,
+        // NOT a Dedicated disconnect. Preserve the current room and Dedicated socket.
+        public void BeginUnifiedRecoveryFromRealtimeDisconnect(string reason)
+        {
+            if (!hasReachedRealtimeReady || string.IsNullOrWhiteSpace(currentRoomId)) return;
+            BeginUnifiedRecovery(string.IsNullOrWhiteSpace(reason) ? "realtime_disconnected" : reason.Trim());
+        }
+
         //* این تابع پس از احراز موفق دوباره Game Server کل چرخه بازیابی مشترک را پایان می‌دهد.
         public void CompleteUnifiedRecoveryAfterGameServerAuthenticated(string reason)
         {
             if (!unifiedRecoveryRunning) return;
-            CompleteUnifiedRecovery(string.IsNullOrWhiteSpace(reason) ? "dedicated_authenticated" : reason.Trim());
+            string safeReason = string.IsNullOrWhiteSpace(reason) ? "dedicated_authenticated" : reason.Trim();
+            if (!TryCompleteUnifiedRecoveryIfReady(safeReason, true))
+            {
+                NetworkFileLogger.Info("REALTIME_RECOVERY_DECISION",
+                    "WAIT | source=" + safeReason +
+                    " | realtimeReady=" + IsRealtimeReady +
+                    " | roomJoined=" + isJoinedRoom +
+                    " | dedicatedRequired=" + recoveryRequiresDedicatedGameServer +
+                    " | roomId=" + currentRoomId);
+            }
         }
 
         //* این تابع بازیابی موفق را جمع می‌کند و پیام‌های موقت ریل‌تایم و روم را پاک می‌کند.
@@ -2042,8 +2866,52 @@ namespace Network_A.Realtime.Controllers
         private void FailUnifiedRecovery(string reason)
         {
             if (!unifiedRecoveryRunning && CurrentState == FlowState.Failed) return;
+            // The timeout may race with a successful room rejoin. Observe current
+            // sockets before repeating a recovery timer or reporting failure.
+            if (TryCompleteUnifiedRecoveryIfReady("ready_at_recovery_deadline")) return;
 
             string safeReason = string.IsNullOrWhiteSpace(reason) ? "unified_recovery_failed" : reason.Trim();
+
+            // Never turn an isolated Realtime retry timeout into a Game Server logout.
+            // The *same* authenticated Dedicated session is still sending fresh packets.
+            // Continue using the existing Realtime recovery and room rejoin pipeline;
+            // do not clear the room, emit a permanent-failure event, or restart Dedicated.
+            if (unifiedRecoveryRunning && HasVerifiedLiveDedicatedForRealtimeRecovery())
+            {
+                float elapsed = Mathf.Max(0f, Time.realtimeSinceStartup - unifiedRecoveryStartedAt);
+                unifiedRecoveryStartedAt = Time.realtimeSinceStartup;
+                unifiedRecoveryDeadlineAt = unifiedRecoveryStartedAt + GetPermanentReconnectFailureTimeoutSeconds();
+                if (unifiedRecoveryTimeoutCoroutine != null)
+                    StopCoroutine(unifiedRecoveryTimeoutCoroutine);
+                unifiedRecoveryTimeoutCoroutine = StartCoroutine(UnifiedRecoveryTimeoutRoutine());
+
+                reconnect?.Stop();
+#if UNITY_WEBGL && !UNITY_EDITOR
+                RequestWebGLHealthFirstReconnect("dedicated_alive_realtime_retry_timeout");
+#else
+                if (enableAutomaticReconnect && reconnect != null &&
+                    IsGlobalAuthenticationReady() &&
+                    (!IsRealtimeReady || NeedsRealtimeRoomRejoinAfterReconnect(true)))
+                {
+                    reconnect.totalTimeoutMs = GetUnifiedRecoveryRemainingMilliseconds();
+                    reconnect.maxAttempts = 0;
+                    reconnect.Start(TryReconnectOnceAsync);
+                }
+#endif
+
+                SetState(FlowState.Reconnecting, "dedicated_alive_realtime_resync");
+                // Dedicated is demonstrably exchanging traffic: Realtime must retry
+                // in the background instead of reopening a fullscreen blocking panel.
+                GlobalMessageManager.Clear(RealtimeProgressMessageId);
+                GlobalMessageManager.Clear(RealtimeErrorMessageId);
+                GlobalMessageManager.Clear(RoomProgressMessageId);
+                NetworkFileLogger.Warning("REALTIME_DEDICATED_ALIVE_RETRY",
+                    "Dedicated session preserved; Realtime retry is background-only | roomId=" +
+                    currentRoomId + " | previousReason=" + safeReason +
+                    " | elapsedSeconds=" + elapsed.ToString("F1"));
+                return;
+            }
+
             float elapsedSeconds = unifiedRecoveryStartedAt >= 0f ? Mathf.Max(0f, Time.realtimeSinceStartup - unifiedRecoveryStartedAt) : 0f;
             CancelUnifiedRecovery(safeReason, false);
             reconnect?.Stop();
@@ -2110,6 +2978,11 @@ namespace Network_A.Realtime.Controllers
         //* این تابع پیام پیشرفت ریل‌تایم را فقط زمانی منتشر می‌کند که مدیر شبکه مالک پیام مهم‌تری نباشد.
         private void PublishRealtimeProgress(string message, string technicalDetails)
         {
+            if (unifiedRecoveryRunning && HasVerifiedLiveDedicatedForRealtimeRecovery())
+            {
+                GlobalMessageManager.Clear(RealtimeProgressMessageId);
+                return;
+            }
             if (!CanShowRealtimeOrRequestMessage()) return;
 
             GlobalMessageManager.Publish(RealtimeProgressMessageId, GlobalMessageManager.MessageSource.Realtime, GlobalMessageManager.MessageType.Information, GlobalMessageManager.Priorities.Reconnecting, "اتصال به Realtime", message, technicalDetails ?? string.Empty, 0f, true, false);

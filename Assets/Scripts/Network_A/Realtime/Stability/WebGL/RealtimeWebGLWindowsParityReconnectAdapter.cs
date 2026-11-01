@@ -75,9 +75,7 @@ namespace Network_A.Realtime.Stability.WebGL
 
         private void Update()
         {
-            bool browserOnline =
-                WebGLWebSocketRealtimeTransport.IsBrowserOnline;
-
+            bool browserOnline = WebGLWebSocketRealtimeTransport.IsBrowserOnline;
             if (!browserStateObserved)
             {
                 browserStateObserved = true;
@@ -87,55 +85,13 @@ namespace Network_A.Realtime.Stability.WebGL
 
             if (browserWasOnline && !browserOnline)
             {
-                CaptureOfflineCandidate();
+                // Browser offline is advisory. Manager must first obtain /health 200.
+                // This adapter does not own cleanup, reconnect loops or auth state.
+                RealtimeRoomGameServerManager.Instance?.RequestWebGLHealthFirstReconnect(
+                    "browser_offline_advisory");
+                Debug.Log("REALTIME_WEBGL_WINDOWS_PARITY_RECONNECT=SIGNAL_ONLY | owner=manager | browserOnline=False");
             }
-
             browserWasOnline = browserOnline;
-
-            if (!offlineCandidatePending || recoveryRunning)
-                return;
-
-            if (Time.realtimeSinceStartup - browserOfflineObservedAt <
-                MissingOfflineSignalDelaySeconds)
-            {
-                return;
-            }
-
-            RealtimeRoomGameServerManager manager =
-                RealtimeRoomGameServerManager.Instance;
-
-            if (!IsExpectedRoomContext(manager))
-            {
-                CancelRecovery("room_context_changed_or_exit_started");
-                return;
-            }
-
-            string currentConnectionId =
-                Safe(manager.RealtimeConnectionId);
-
-            // اگر ConnectionId پاک یا عوض شده، مسیر استاندارد Manager همانند Windows
-            // قبلاً Cleanup/Recovery را مالک شده و Adapter نباید مسیر دوم بسازد.
-            if (currentConnectionId.Length == 0 ||
-                !string.Equals(
-                    currentConnectionId,
-                    staleRealtimeConnectionId,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                CompleteBypass(
-                    manager,
-                    "standard_manager_recovery_already_owned");
-                return;
-            }
-
-            recoveryRunning = true;
-            int generation = recoveryGeneration;
-            CancellationToken cancellationToken = cycleCts != null
-                ? cycleCts.Token
-                : lifetimeCts.Token;
-
-            _ = RunWindowsParityRecoveryAsync(
-                generation,
-                cancellationToken);
         }
 
         //* فقط Context خوانده می شود؛ 750ms به مسیر استاندارد Manager فرصت داده می شود.
@@ -211,6 +167,16 @@ namespace Network_A.Realtime.Stability.WebGL
                     return;
                 }
 
+                // navigator.onLine is advisory. A false browser offline event
+                // cannot tear down an already healthy Realtime room when the
+                // ONE authoritative HTTP probe says the server is reachable.
+                bool reachableBeforeCleanup = await IsServerReachableAsync(cancellationToken);
+                if (reachableBeforeCleanup && manager.IsRealtimeReady && manager.IsJoinedRoom)
+                {
+                    CompleteBypass(manager, "health_200_existing_realtime_room_ready");
+                    return;
+                }
+
                 ResolveManagerRecoveryMethods();
 
                 if (rememberRoomMethod == null ||
@@ -222,7 +188,9 @@ namespace Network_A.Realtime.Stability.WebGL
                     return;
                 }
 
-                manager.BeginUnifiedRecoveryFromDedicatedDisconnect(
+                // This is only a missing browser Offline signal for Realtime.
+                // Do not classify a still-authenticated Dedicated socket as lost.
+                manager.BeginUnifiedRecoveryFromRealtimeDisconnect(
                     "webgl_missing_offline_signal_windows_parity");
 
                 rememberRoomMethod.Invoke(manager, null);
@@ -267,14 +235,8 @@ namespace Network_A.Realtime.Stability.WebGL
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    if (!WebGLWebSocketRealtimeTransport.IsBrowserOnline)
-                    {
-                        await WaitForRetryAsync(
-                            generation,
-                            cancellationToken);
-                        continue;
-                    }
-
+                    // Browser online/offline is an advisory trigger, not the
+                    // permission to probe the single authoritative /health.
                     manager = RealtimeRoomGameServerManager.Instance;
 
                     if (!IsExpectedRoomContext(manager))
@@ -352,89 +314,22 @@ namespace Network_A.Realtime.Stability.WebGL
         private async Task<bool> IsServerReachableAsync(
             CancellationToken cancellationToken)
         {
-            if (!WebGLWebSocketRealtimeTransport.IsBrowserOnline)
-            {
-                return false;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            WebGLSingleHealthAuthority.Result health =
+                await WebGLSingleHealthAuthority.ProbeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
 
-            string url = BuildBrowserHealthProbeUrl();
-            float startedAt = Time.realtimeSinceStartup;
+            if (health.Reachable)
+                PublishVerifiedOnlineState(health.Url);
 
-            using (UnityWebRequest request = UnityWebRequest.Get(url))
-            {
-                request.timeout = Mathf.Clamp(
-                    Mathf.CeilToInt(BrowserHealthProbeTimeoutSeconds),
-                    1,
-                    5);
-
-                request.SetRequestHeader("Accept", "application/json");
-                request.SetRequestHeader(
-                    "Cache-Control",
-                    "no-cache, no-store, max-age=0");
-                request.SetRequestHeader("Pragma", "no-cache");
-
-                UnityWebRequestAsyncOperation operation =
-                    request.SendWebRequest();
-                float deadline =
-                    startedAt + BrowserHealthProbeTimeoutSeconds;
-
-                while (!operation.isDone &&
-                       Time.realtimeSinceStartup < deadline)
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        request.Abort();
-                        cancellationToken.ThrowIfCancellationRequested();
-                    }
-
-                    await Task.Yield();
-                }
-
-                bool deadlineExceeded = !operation.isDone;
-                if (deadlineExceeded) request.Abort();
-
-                cancellationToken.ThrowIfCancellationRequested();
-
-                bool transportFailed =
-                    request.result ==
-                        UnityWebRequest.Result.ConnectionError ||
-                    request.result ==
-                        UnityWebRequest.Result.DataProcessingError;
-                bool reachable =
-                    !deadlineExceeded &&
-                    request.responseCode > 0 &&
-                    !transportFailed &&
-                    WebGLWebSocketRealtimeTransport.IsBrowserOnline;
-
-                if (reachable)
-                {
-                    PublishVerifiedOnlineState(url);
-                }
-
-                bool ready =
-                    reachable &&
-                    StartupNetworkSceneRouter.IsOnline;
-                int elapsedMs = Mathf.Max(
-                    0,
-                    Mathf.RoundToInt(
-                        (Time.realtimeSinceStartup - startedAt) * 1000f));
-
-                Debug.Log(
-                    "REALTIME_WEBGL_WINDOWS_PARITY_RECONNECT=HEALTH_" +
-                    (ready ? "PASS" : "WAIT") +
-                    " | roomId=" + expectedRoomId +
-                    " | source=direct_browser_health" +
-                    " | url=" + Safe(url) +
-                    " | reachable=" + reachable +
-                    " | deadlineExceeded=" + deadlineExceeded +
-                    " | status=" + request.responseCode +
-                    " | result=" + request.result +
-                    " | elapsedMs=" + elapsedMs +
-                    " | globalNetworkState=" +
-                        StartupNetworkSceneRouter.CurrentState);
-
-                return ready;
-            }
+            Debug.Log(
+                "REALTIME_WEBGL_WINDOWS_PARITY_RECONNECT=HEALTH_" +
+                (health.Reachable ? "PASS" : "WAIT") +
+                " | roomId=" + expectedRoomId +
+                " | authority=webgl_single_health" +
+                " | status=" + health.StatusCode +
+                " | globalNetworkState=" + StartupNetworkSceneRouter.CurrentState);
+            return health.Reachable;
         }
 
         private void PublishVerifiedOnlineState(string healthUrl)

@@ -105,7 +105,12 @@ namespace Network_A.UI
             if (now >= nextStatusCheck)
             {
                 nextStatusCheck = now + StatusIntervalSeconds;
+                string networkNotice = binder != null
+                    ? binder.CurrentNetworkDiagnosticMessage
+                    : string.Empty;
                 desiredText = ResolveGameServerStatus() + "\n" + ResolveVoiceStatus(now);
+                if (!string.IsNullOrWhiteSpace(networkNotice))
+                    desiredText += "\n" + networkNotice;
             }
 
             // Override legacy direct writes, without editing their event handlers.

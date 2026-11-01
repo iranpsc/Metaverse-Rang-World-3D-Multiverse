@@ -175,6 +175,17 @@ namespace Network_A.Bootstrap
         {
             if (lifecycleCts == null || lifecycleCts.IsCancellationRequested) return ConnectivityCheckResult.Failure("مدیر بررسی شبکه در حال پایان است.");
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // A single HTTP-200 decision shared by the global monitor, Realtime,
+            // Dedicated and the WebGL parity adapter. No gRPC-Web fallback chain.
+            WebGLSingleHealthAuthority.Result health = await WebGLSingleHealthAuthority.ProbeAsync();
+            externalToken.ThrowIfCancellationRequested();
+            if (health.Reachable)
+                ConfirmWebGLServerReachableFromHealth();
+            return health.Reachable
+                ? ConnectivityCheckResult.Success(health.Details)
+                : ConnectivityCheckResult.Failure(health.Details);
+#else
             CancellationToken lifecycleToken = lifecycleCts.Token;
 
             using (CancellationTokenSource gateCts = CancellationTokenSource.CreateLinkedTokenSource(lifecycleToken, externalToken))
@@ -199,6 +210,7 @@ namespace Network_A.Bootstrap
                     healthCheckGate.Release();
                 }
             }
+#endif
         }
 
         //* ابتدا مسیر اصلی، سپس مسیر پشتیبان و در پایان مسیر اصلی را دوباره بررسی می‌کند.
@@ -222,7 +234,8 @@ namespace Network_A.Bootstrap
 
                 if (showCheckingMessage && !dedicatedTrafficIsRecent && (CurrentState == NetworkState.Online || CurrentState == NetworkState.Checking))
                 {
-                    GlobalMessageManager.ShowNetworkChecking(NetworkCheckingMessageId, "بررسی ارتباط", "ارتباط با سرور دچار مشکل شده است. در حال بررسی مجدد هستیم...", firstPrimary.Details ?? string.Empty);
+                    // A single failed primary probe is only a pending check; do not turn it into a server-error popup.
+                    NetworkFileLogger.Info("GLOBAL_NETWORK_PRIMARY_PENDING_CONFIRMATION", firstPrimary.Details ?? string.Empty);
                 }
 
                 await DelayBeforeNextAttemptAsync(cancellationToken);
@@ -487,6 +500,14 @@ namespace Network_A.Bootstrap
 
             NetworkFileLogger.Info("GLOBAL_NETWORK_STATE", "قبلی=" + previousState + " | فعلی=" + newState + " | روش ارتباط=" + ServerConfig.CurrentTransportKind + " | نشانی سرور=" + ServerConfig.CurrentEndpoint + " | جزئیات=" + (technicalDetails ?? string.Empty));
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WebGL reachability has ONE HTTP authority and ONE gameplay UI owner.
+            // Keep state/events for GlobalAuthManager, Realtime and Dedicated, but
+            // do not let the Router show its own competing network popup.
+            // The Dedicated binder may show the confirmed /health outage only.
+            GlobalMessageManager.Clear(NetworkCheckingMessageId);
+            GlobalMessageManager.Clear(NetworkStateMessageId);
+#else
             if (newState == NetworkState.Checking)
             {
                 GlobalMessageManager.ShowNetworkChecking(NetworkCheckingMessageId, "بررسی ارتباط", "ارتباط با سرور در حال بررسی است. لطفاً چند لحظه منتظر بمانید.", technicalDetails ?? string.Empty);
@@ -494,7 +515,23 @@ namespace Network_A.Bootstrap
             else if (newState == NetworkState.InternetUnavailable)
             {
                 GlobalMessageManager.Clear(NetworkCheckingMessageId);
-                GlobalMessageManager.ShowInternetUnavailable(NetworkStateMessageId, "اینترنت قطع شد", "ارتباط با سرور برقرار نیست. پس از بازگشت اینترنت بازیابی در همین صحنه انجام می‌شود.", technicalDetails ?? string.Empty, null);
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+                // HTTP status 0 is no HTTP response, NOT evidence that the user's Internet is off.
+                // This changes only the visible message; the state and recovery events remain intact.
+                bool noVerifiedHttpResponse = !string.IsNullOrEmpty(technicalDetails) &&
+                    technicalDetails.StartsWith("windows_get_health_only | httpStatus=0", StringComparison.Ordinal);
+                if (noVerifiedHttpResponse)
+                {
+                    GlobalMessageManager.ShowNetworkChecking(NetworkStateMessageId,
+                        "در حال بررسی ارتباط",
+                        "درخواست سلامت سرور هنوز پاسخ معتبر نگرفته است. قطع اینترنت تأیید نشده؛ برنامه خودکار دوباره بررسی می‌کند.",
+                        technicalDetails);
+                }
+                else
+#endif
+                {
+                    GlobalMessageManager.ShowInternetUnavailable(NetworkStateMessageId, "اینترنت قطع شد", "ارتباط با سرور برقرار نیست. پس از بازگشت اینترنت بازیابی در همین صحنه انجام می‌شود.", technicalDetails ?? string.Empty, null);
+                }
             }
             else if (newState == NetworkState.ServerUnavailable)
             {
@@ -511,6 +548,7 @@ namespace Network_A.Bootstrap
                 GlobalMessageManager.Clear(NetworkCheckingMessageId);
                 GlobalMessageManager.Clear(NetworkStateMessageId);
             }
+#endif
 
             Action<NetworkState> stateChangedHandler = OnNetworkStateChanged;
 
@@ -610,4 +648,151 @@ namespace Network_A.Bootstrap
 
         //* پایان این اسکریپت: این مدیر فقط سلامت ارتباط را می‌سنجد، وضعیت سراسری را اعلام می‌کند و هیچ صحنه‌ای را تغییر نمی‌دهد.
     }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+    // The ONE reachability authority for the WebGL client. The endpoint is always
+    // GET /health on the game's origin, and ONLY HTTP 200 counts as reachable.
+    // All callers share one in-flight request and a short result cache.
+    public static class WebGLSingleHealthAuthority
+    {
+        public struct Result
+        {
+            public bool Reachable;
+            public int StatusCode;
+            public string Url;
+            public string HealthStatus;
+            public string Details;
+        }
+
+        private const string FallbackUrl = "https://dev-world-3d.metarang.com/health";
+        private const float TimeoutSeconds = 3f;
+        private const float MinimumIntervalSeconds = 1f;
+        private static Task<Result> inFlight;
+        private static Result lastResult;
+        private static float lastCompletedAt = -1f;
+        private static bool hasLoggedStatus;
+        private static bool lastLoggedReachable;
+        private static float lastLoggedAt = -1f;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void Reset()
+        {
+            inFlight = null;
+            lastResult = default(Result);
+            lastCompletedAt = -1f;
+            hasLoggedStatus = false;
+            lastLoggedReachable = false;
+            lastLoggedAt = -1f;
+        }
+
+        public static Task<Result> ProbeAsync()
+        {
+            if (inFlight != null && !inFlight.IsCompleted)
+                return inFlight;
+
+            float now = Time.realtimeSinceStartup;
+            if (lastCompletedAt >= 0f && now >= lastCompletedAt &&
+                now - lastCompletedAt < MinimumIntervalSeconds)
+                return Task.FromResult(lastResult);
+
+            inFlight = SendOnceAsync();
+            return inFlight;
+        }
+
+        private static string BuildUrl()
+        {
+            string url = FallbackUrl;
+            if (Uri.TryCreate(Application.absoluteURL, UriKind.Absolute, out Uri pageUri) &&
+                (pageUri.Scheme == Uri.UriSchemeHttps || pageUri.Scheme == Uri.UriSchemeHttp))
+                url = pageUri.GetLeftPart(UriPartial.Authority) + "/health";
+
+            return url + (url.Contains("?") ? "&" : "?") +
+                   "healthProbe=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        }
+
+        [Serializable]
+        private sealed class PublicHealthPayload
+        {
+            public bool success;
+            public string status;
+        }
+
+        private static async Task<Result> SendOnceAsync()
+        {
+            string url = BuildUrl();
+            float startedAt = Time.realtimeSinceStartup;
+            Result result = new Result
+            {
+                Reachable = false,
+                StatusCode = 0,
+                Url = url,
+                HealthStatus = string.Empty,
+                Details = "webgl_single_health_no_response"
+            };
+
+            try
+            {
+                using (UnityWebRequest request = UnityWebRequest.Get(url))
+                {
+                    request.timeout = Mathf.CeilToInt(TimeoutSeconds);
+                    request.SetRequestHeader("Accept", "application/json");
+                    request.SetRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
+                    request.SetRequestHeader("Pragma", "no-cache");
+                    UnityWebRequestAsyncOperation operation = request.SendWebRequest();
+                    float deadline = startedAt + TimeoutSeconds;
+                    while (!operation.isDone && Time.realtimeSinceStartup < deadline)
+                        await Task.Yield();
+
+                    bool timedOut = !operation.isDone;
+                    if (timedOut) request.Abort();
+                    result.StatusCode = (int)request.responseCode;
+                    result.Reachable = !timedOut && result.StatusCode == 200 &&
+                                       request.result == UnityWebRequest.Result.Success;
+
+                    if (result.Reachable && request.downloadHandler != null)
+                    {
+                        try
+                        {
+                            PublicHealthPayload payload =
+                                JsonUtility.FromJson<PublicHealthPayload>(request.downloadHandler.text);
+                            if (payload != null && payload.success)
+                                result.HealthStatus = payload.status ?? string.Empty;
+                        }
+                        catch (Exception) { /* Status 200 remains the only decision. */ }
+                    }
+
+                    result.Details = "WEBGL_SINGLE_HEALTH | reachable=" + result.Reachable +
+                        " | httpStatus=" + result.StatusCode +
+                        " | timedOut=" + timedOut +
+                        " | healthStatus=" + result.HealthStatus +
+                        " | result=" + request.result +
+                        " | error=" + (request.error ?? string.Empty) +
+                        " | url=" + url;
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Details = "WEBGL_SINGLE_HEALTH | reachable=False | requestError=" +
+                                 ex.Message + " | url=" + url;
+            }
+            finally
+            {
+                lastResult = result;
+                lastCompletedAt = Time.realtimeSinceStartup;
+                // Mobile logging stays low-volume: only a state change or
+                // one periodic sample, never each probe or each consumer.
+                if (!hasLoggedStatus || result.Reachable != lastLoggedReachable ||
+                    lastLoggedAt < 0f || lastCompletedAt - lastLoggedAt >= 30f)
+                {
+                    Debug.Log(result.Details);
+                    hasLoggedStatus = true;
+                    lastLoggedReachable = result.Reachable;
+                    lastLoggedAt = lastCompletedAt;
+                }
+            }
+
+            return result;
+        }
+    }
+#endif
 }

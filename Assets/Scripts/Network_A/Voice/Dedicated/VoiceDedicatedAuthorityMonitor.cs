@@ -45,6 +45,7 @@ namespace Network_A.Voice.Dedicated
         private const float SessionEligibilityRefreshIntervalSeconds = 0.5f;
         private const float SessionGuardHeartbeatIntervalSeconds = 2.0f;
         private const float MissingSessionAuditIntervalSeconds = 2.0f;
+        private const float MinimumReadinessRecoveryIntervalSeconds = 30.0f;
 
         private long stabilityDelayMs;
         private string authorityEpochId = string.Empty;
@@ -62,6 +63,7 @@ namespace Network_A.Voice.Dedicated
         private float nextEligibilityRefreshAtRealtime;
         private CancellationTokenSource eligibilityCts;
         private int authorityEpochResetCount;
+        private float nextReadinessRecoveryAtRealtime;
 
         public bool IsConfigured { get { return configured; } }
         public bool IsAuthorityRunning { get { return authorityRunning; } }
@@ -141,6 +143,7 @@ namespace Network_A.Voice.Dedicated
             eligibilityRefreshRunning = false;
             nextEligibilityRefreshAtRealtime = 0.0f;
             authorityEpochResetCount = 0;
+            nextReadinessRecoveryAtRealtime = 0.0f;
             nextSampleAtRealtime = 0.0f;
             nextMissingSessionAuditAtRealtime = 0.0f;
 
@@ -369,6 +372,8 @@ namespace Network_A.Voice.Dedicated
             eligibleParticipantKeys.UnionWith(nextEligibleParticipantKeys);
             eligibilitySnapshotReady = true;
 
+            TryRecoverSustainedReadinessConflict(snapshotServerId);
+
             if (changed)
             {
                 Debug.Log(
@@ -377,6 +382,100 @@ namespace Network_A.Voice.Dedicated
                     " | eligibleParticipants=" + eligibleParticipantKeys.Count +
                     " | snapshotParticipants=" + participants.Length);
             }
+        }
+
+        //* این تابع فقط با اثبات عضویت فعلی یا منسوخ‌شدن شناسه Dedicated، صف بلوکه‌شده را پس از مهلت Retry بازسازی می‌کند.
+        private void TryRecoverSustainedReadinessConflict(string serverId)
+        {
+            if (deltaSender == null || playerRegistry == null ||
+                groupTopologyRuntime == null || !authorityRunning || authorityFaulted ||
+                Time.realtimeSinceStartup < nextReadinessRecoveryAtRealtime)
+            {
+                return;
+            }
+
+            VoiceDedicatedSessionDelta head;
+            float blockedSeconds;
+            if (!deltaSender.TryGetSustainedReadinessBlockedHead(
+                    out head, out blockedSeconds) || head == null ||
+                !string.Equals(head.serverId, serverId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            bool firstStillCurrent = false;
+            bool secondStillCurrent = false;
+            List<DedicatedPlayerSession> players = playerRegistry.CreateSnapshot();
+
+            for (int index = 0; index < players.Count; index += 1)
+            {
+                DedicatedPlayerSession player = players[index];
+                if (player == null || !player.IsMirrorLikeReady ||
+                    !string.Equals(player.serverId, serverId, StringComparison.Ordinal) ||
+                    !string.Equals(player.roomId, head.roomId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (string.Equals(player.userId, head.firstUserId, StringComparison.Ordinal) &&
+                    string.Equals(player.connectionId, head.firstConnectionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    firstStillCurrent = true;
+                }
+
+                if (string.Equals(player.userId, head.secondUserId, StringComparison.Ordinal) &&
+                    string.Equals(player.connectionId, head.secondConnectionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    secondStillCurrent = true;
+                }
+            }
+
+            bool obsoletePair = !firstStillCurrent || !secondStillCurrent;
+            bool bothVoiceReady =
+                eligibleParticipantKeys.Contains(BuildScopeParticipantKey(
+                    serverId, head.roomId, head.firstUserId, head.firstConnectionId)) &&
+                eligibleParticipantKeys.Contains(BuildScopeParticipantKey(
+                    serverId, head.roomId, head.secondUserId, head.secondConnectionId));
+
+            // Never discard an unresolved, still-authoritative pair during a
+            // temporary Voice outage. The same FIFO batch can succeed on retry.
+            if (!obsoletePair && !bothVoiceReady) return;
+
+            // Sequence/epoch is scoped to the whole Dedicated process. An
+            // epoch reset would also discard deltas from unrelated rooms.
+            // Permit it only when the blocked pair is the sole local session.
+            if (!deltaSender.PendingEventsBelongToRoom(head.roomId)) return;
+
+            IReadOnlyList<VoiceDedicatedGroupSessionSnapshot> activeSessions =
+                groupTopologyRuntime.CreateSessionSnapshot();
+            for (int index = 0; index < activeSessions.Count; index += 1)
+            {
+                VoiceDedicatedGroupSessionSnapshot session = activeSessions[index];
+                if (session == null ||
+                    !string.Equals(session.SessionId, head.sessionId, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(session.RoomId, head.roomId, StringComparison.Ordinal) ||
+                    session.Members == null || session.Members.Count != 2)
+                {
+                    return;
+                }
+            }
+
+            nextReadinessRecoveryAtRealtime =
+                Time.realtimeSinceStartup + MinimumReadinessRecoveryIntervalSeconds;
+
+            Debug.LogWarning(
+                "VOICE_G4_STALE_READINESS_DELTA_RECOVERY=PASS" +
+                " | roomId=" + CompactForLog(head.roomId) +
+                " | sessionId=" + CompactForLog(head.sessionId) +
+                " | sourceSequence=" + head.sourceSequence +
+                " | blockedSeconds=" + blockedSeconds.ToString("F1") +
+                " | obsoletePair=" + obsoletePair +
+                " | bothVoiceReady=" + bothVoiceReady);
+
+            ResetAuthorityEpochAfterSenderQueueFault(
+                "voice_readiness_conflict_recovered_after_authoritative_snapshot" +
+                " | obsoletePair=" + obsoletePair +
+                " | bothVoiceReady=" + bothVoiceReady);
         }
 
         //* این تابع اسنپ‌شات معتبر بازیکنان را می‌گیرد، آبجکت قطعی آن‌ها را پیدا می‌کند و فقط زوج‌های همان روم را ارزیابی می‌کند.
@@ -706,9 +805,12 @@ namespace Network_A.Voice.Dedicated
                 bool voiceEligible =
                     IsVoiceSessionEligible(participantKey);
 
-                if (userStillInScope && connectionStillInScope && voiceEligible &&
-                    transientPositionGraceKeys.Contains(participantKey))
+                // A live, eligible registry identity must never be removed
+                // just because a transient position marker was not populated.
+                // Re-arm protection here before topology and tracker cleanup.
+                if (userStillInScope && connectionStillInScope && voiceEligible)
                 {
+                    IsWithinTransientPositionGrace(participantKey);
                     continue;
                 }
 
@@ -981,7 +1083,9 @@ namespace Network_A.Voice.Dedicated
                         StringComparison.OrdinalIgnoreCase) ||
                     tracker.LastDistanceMeters >=
                         VoiceDedicatedProximityEvaluator.ExitDistanceMeters ||
-                    now < tracker.NextSessionGuardAtRealtime)
+                    now < tracker.NextSessionGuardAtRealtime ||
+                    deltaSender.ShouldDeferSessionGuard(
+                        session.RoomId, session.SessionId))
                 {
                     continue;
                 }

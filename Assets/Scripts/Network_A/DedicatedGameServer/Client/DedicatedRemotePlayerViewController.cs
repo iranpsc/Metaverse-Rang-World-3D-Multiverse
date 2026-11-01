@@ -110,6 +110,9 @@ namespace Network_A.DedicatedGameServer.Client
         private float nextRemoteTimeoutStaleLogTime;
         private float nextRemoteRecoveryPreserveLogTime;
         private float nextRemoteStateSilenceLogTime;
+        private DedicatedGameServerRealtimeRoomBinderWebGL dedicatedGameServerBinder;
+        private readonly HashSet<string> set_remoteHiddenAwaitingFreshState = new HashSet<string>();
+        private readonly HashSet<string> set_remoteDisconnectedByDedicated = new HashSet<string>();
 
         public event Action<string, string> DedicatedRemotePlayerJoinedForUi;
         public event Action<string, string> DedicatedRemotePlayerLeftForUi;
@@ -193,6 +196,8 @@ namespace Network_A.DedicatedGameServer.Client
         //* این تابع رفرنس های خالی را از صحنه پیدا می کند.
         private void ResolveReferences()
         {
+            if (dedicatedGameServerBinder == null)
+                dedicatedGameServerBinder = FindObjectOfType<DedicatedGameServerRealtimeRoomBinderWebGL>(true);
             if (wsClient == null) wsClient = DedicatedGameServerWsClient.Instance;
             if (wsClient == null) wsClient = FindObjectOfType<DedicatedGameServerWsClient>(true);
             if (remoteStateReceiver == null) remoteStateReceiver = FindObjectOfType<DedicatedRemotePlayerStateReceiver>(true);
@@ -233,11 +238,13 @@ namespace Network_A.DedicatedGameServer.Client
                 remoteStateReceiver.RemotePlayerJoined -= HandleRemotePlayerJoined;
                 remoteStateReceiver.RemotePlayerLeft -= HandleRemotePlayerLeft;
                 remoteStateReceiver.RemotePlayerVisibilityChanged -= HandleRemotePlayerVisibilityChanged;
+                remoteStateReceiver.RemotePlayerConnectionChanged -= HandleRemotePlayerConnectionChanged;
 
                 remoteStateReceiver.RemotePlayerStateReceived += HandleRemotePlayerStateReceived;
                 remoteStateReceiver.RemotePlayerJoined += HandleRemotePlayerJoined;
                 remoteStateReceiver.RemotePlayerLeft += HandleRemotePlayerLeft;
                 remoteStateReceiver.RemotePlayerVisibilityChanged += HandleRemotePlayerVisibilityChanged;
+                remoteStateReceiver.RemotePlayerConnectionChanged += HandleRemotePlayerConnectionChanged;
             }
 
             if (realtimeRoomGameServerManager != null)
@@ -293,6 +300,7 @@ namespace Network_A.DedicatedGameServer.Client
                 remoteStateReceiver.RemotePlayerJoined -= HandleRemotePlayerJoined;
                 remoteStateReceiver.RemotePlayerLeft -= HandleRemotePlayerLeft;
                 remoteStateReceiver.RemotePlayerVisibilityChanged -= HandleRemotePlayerVisibilityChanged;
+                remoteStateReceiver.RemotePlayerConnectionChanged -= HandleRemotePlayerConnectionChanged;
             }
 
             if (realtimeRoomGameServerManager != null)
@@ -578,6 +586,8 @@ namespace Network_A.DedicatedGameServer.Client
             if (!CanApplyRemoteState(state)) return;
 
             string playerId = state.ResolvePlayerId();
+            if (set_remoteDisconnectedByDedicated.Contains(playerId)) return;
+            set_remoteHiddenAwaitingFreshState.Remove(playerId);
             ClearSuppressedRemoteRespawn(playerId, "dedicated_state_received");
             CancelPendingDedicatedLeftAfterFreshState(playerId, "dedicated_state_received");
 
@@ -630,6 +640,7 @@ namespace Network_A.DedicatedGameServer.Client
             ClearSuppressedRemoteRespawn(playerId, "dedicated_join_received");
             ClearPendingDedicatedLeft(playerId, "dedicated_join_received");
             set_remoteBrowserHiddenPlayerIds.Remove(playerId);
+            set_remoteDisconnectedByDedicated.Remove(playerId);
 
             string displayName = ResolveRemoteDisplayName(playerId, evt.userName);
             dict_remoteNamesByPlayerId[playerId] = displayName;
@@ -656,27 +667,40 @@ namespace Network_A.DedicatedGameServer.Client
             playerId = playerId.Trim();
             if (IsLocalPlayer(playerId)) return;
 
+            if (!MatchesCurrentDedicatedRoom(evt.roomId)) return;
             set_remoteBrowserHiddenPlayerIds.Remove(playerId);
+            set_remoteDisconnectedByDedicated.Remove(playerId);
 
-            EmitDedicatedRoomOnlineCountForUi(evt.onlineCount, "dedicated_presence_left");
-            MarkDedicatedRemotePlayerLeftPending(playerId, evt.reason);
-
-            if (confirmDedicatedLeftByStateTimeout)
-            {
-                Log("Remote player_left pending until dedicated state timeout. playerId=" + SafeForLog(playerId) + " | reason=" + SafeForLog(evt.reason));
-                return;
-            }
-
-            if (!useServerLeaveAsPrimaryRemoteRemoval)
-            {
-                Log("Remote player_left deferred to state timeout because dedicated state stream is source of truth. playerId=" + SafeForLog(playerId) + " | reason=" + SafeForLog(evt.reason));
-                return;
-            }
-
+            // player_left is sent only after authoritative PlayerRegistry removal.
+            // Never defer a confirmed departure to a state-silence timer.
             string displayName = ResolveRemoteDisplayName(playerId, string.Empty);
+            EmitDedicatedRoomOnlineCountForUi(evt.onlineCount, "dedicated_presence_left");
             RemoveRemotePlayerFromDedicatedView(playerId, "leave");
             EmitDedicatedRemotePlayerLeftForUi(playerId, displayName, "dedicated_presence_left");
             SuppressRemoteRespawn(playerId, evt.reason);
+        }
+
+        private void HandleRemotePlayerConnectionChanged(DedicatedRemotePlayerConnectionEvent evt)
+        {
+            if (evt == null || !MatchesCurrentDedicatedRoom(evt.roomId)) return;
+            string playerId = evt.ResolvePlayerId();
+            if (string.IsNullOrWhiteSpace(playerId) || IsLocalPlayer(playerId)) return;
+
+            if (!evt.connected)
+            {
+                set_remoteDisconnectedByDedicated.Add(playerId);
+                set_remoteHiddenAwaitingFreshState.Add(playerId);
+                threeDModeController?.SetRemotePlayerActive(playerId, false);
+                Log("Remote player hidden during dedicated reconnect grace | playerId=" +
+                    SafeForLog(playerId) + " | reason=" + SafeForLog(evt.reason));
+                return;
+            }
+
+            set_remoteDisconnectedByDedicated.Remove(playerId);
+            // Re-show only when a genuinely fresh player_state arrives.
+            set_remoteHiddenAwaitingFreshState.Add(playerId);
+            Log("Remote player dedicated connection resumed; waiting for fresh state | playerId=" +
+                SafeForLog(playerId));
         }
 
         //* این تابع وضعیت hidden تایید شده توسط سرور را برای نمایش مشترک WebGL و Windows اعمال می کند.
@@ -691,6 +715,7 @@ namespace Network_A.DedicatedGameServer.Client
 
             playerId = playerId.Trim();
             if (IsLocalPlayer(playerId)) return;
+            if (set_remoteDisconnectedByDedicated.Contains(playerId)) return;
 
             float now = Time.unscaledTime;
 
@@ -701,6 +726,7 @@ namespace Network_A.DedicatedGameServer.Client
             else
             {
                 set_remoteBrowserHiddenPlayerIds.Remove(playerId);
+                set_remoteHiddenAwaitingFreshState.Remove(playerId);
             }
 
             dict_remoteLastSeenTimeByPlayerId[playerId] = now;
@@ -723,6 +749,13 @@ namespace Network_A.DedicatedGameServer.Client
         private void ApplyReceiverSnapshot()
         {
             if (remoteStateReceiver == null) return;
+
+            List<DedicatedRemotePlayerConnectionEvent> disconnectedSnapshot =
+                remoteStateReceiver.CreateDisconnectedSnapshot();
+            for (int i = 0; i < disconnectedSnapshot.Count; i++)
+            {
+                HandleRemotePlayerConnectionChanged(disconnectedSnapshot[i]);
+            }
 
             List<DedicatedRemotePlayerState> snapshot = remoteStateReceiver.CreateSnapshot();
             for (int i = 0; i < snapshot.Count; i++)
@@ -979,6 +1012,7 @@ namespace Network_A.DedicatedGameServer.Client
 
             foreach (string playerId in playerIds)
             {
+                if (set_remoteHiddenAwaitingFreshState.Contains(playerId)) continue;
                 dict_remoteLastSeenTimeByPlayerId[playerId] = now;
                 dict_remoteLastDedicatedStateTimeByPlayerId[playerId] = now;
                 threeDModeController?.SetRemotePlayerActive(playerId, true);
@@ -1009,6 +1043,70 @@ namespace Network_A.DedicatedGameServer.Client
         }
 
         //* هنگام وقفه موقت مختصات، حضور ریموت را حفظ می کند؛ خروج قطعی در مسیرهای مجزای سرور اعمال می شود.
+#if UNITY_WEBGL && !UNITY_EDITOR
+        private void DeactivateStateSilentRemotePlayers()
+        {
+            if (!deactivateRemotePlayerWhenStateSilent) return;
+            if (threeDModeController == null) return;
+            if (Time.unscaledTime < nextRemoteDeactivateCheckTime) return;
+
+            nextRemoteDeactivateCheckTime =
+                Time.unscaledTime + Mathf.Max(0.1f, remotePlayerDeactivateCheckIntervalSeconds);
+
+            if (dict_remoteLastDedicatedStateTimeByPlayerId.Count <= 0) return;
+
+            // Full local outage: hide remote *visuals* only. Do not destroy remote data,
+            // send a leave event, or close a voice session. A fresh Dedicated state restores them.
+            bool confirmedLocalInternetLoss =
+                dedicatedGameServerBinder != null &&
+                dedicatedGameServerBinder.HasConfirmedWebGLInternetLoss;
+            if (confirmedLocalInternetLoss)
+            {
+                foreach (string playerId in dict_remoteLastDedicatedStateTimeByPlayerId.Keys)
+                {
+                    if (string.IsNullOrWhiteSpace(playerId)) continue;
+                    set_remoteHiddenAwaitingFreshState.Add(playerId);
+                    threeDModeController.SetRemotePlayerActive(playerId, false);
+                }
+                return;
+            }
+
+            // A healthy local Dedicated stream allows us to distinguish the *other*
+            // player's silence from our own transient transport failure.
+            bool freshDedicatedEvidence = wsClient != null &&
+                wsClient.IsConnected && wsClient.IsAuthenticated &&
+                wsClient.HasRecentInboundMessage(
+                    Mathf.Max(2f, remotePlayerDeactivateCheckIntervalSeconds * 12f));
+            if (!freshDedicatedEvidence)
+            {
+                if (ShouldPreserveRemoteVisibilityDuringConnectionRecovery())
+                    PreserveRemoteVisibilityDuringConnectionRecovery("dedicated_state_silence_guard");
+                return;
+            }
+
+            float silenceSeconds = ResolveRemotePlayerDeactivateSilenceSeconds();
+            float now = Time.unscaledTime;
+            int hiddenCount = 0;
+            foreach (KeyValuePair<string, float> pair in dict_remoteLastDedicatedStateTimeByPlayerId)
+            {
+                if (set_remoteBrowserHiddenPlayerIds.Contains(pair.Key)) continue;
+                if (now - pair.Value <= silenceSeconds) continue;
+                if (!set_remoteHiddenAwaitingFreshState.Add(pair.Key)) continue;
+                threeDModeController.SetRemotePlayerActive(pair.Key, false);
+                hiddenCount++;
+            }
+
+            if (hiddenCount > 0 && verboseLogs && now >= nextRemoteStateSilenceLogTime)
+            {
+                nextRemoteStateSilenceLogTime =
+                    now + Mathf.Max(10f, remoteTimeoutStaleLogIntervalSeconds);
+                Log("DEDICATED_REMOTE_STATE_STALE_AVATAR_HIDDEN=PASS | count=" +
+                    hiddenCount + " | thresholdSeconds=" + silenceSeconds.ToString("F2") +
+                    " | authoritativeMembershipPreserved=True");
+            }
+        }
+
+#else
         private void DeactivateStateSilentRemotePlayers()
         {
             if (!deactivateRemotePlayerWhenStateSilent) return;
@@ -1053,6 +1151,7 @@ namespace Network_A.DedicatedGameServer.Client
             }
         }
 
+#endif
         //* این تابع بازه امن غیرفعال سازی را طوری محاسبه می کند که یک هارت بیت دیررس سالم باعث خاموش و روشن شدن اشتباه نشود.
         private float ResolveRemotePlayerDeactivateSilenceSeconds()
         {
@@ -1213,6 +1312,7 @@ namespace Network_A.DedicatedGameServer.Client
 
             foreach (string playerId in playerIds)
             {
+                if (set_remoteHiddenAwaitingFreshState.Contains(playerId)) continue;
                 dict_remoteLastSeenTimeByPlayerId[playerId] = now;
                 dict_remoteLastDedicatedStateTimeByPlayerId[playerId] = now;
                 threeDModeController?.SetRemotePlayerActive(playerId, true);
@@ -1351,6 +1451,7 @@ namespace Network_A.DedicatedGameServer.Client
 
             foreach (string playerId in playerIds)
             {
+                if (set_remoteHiddenAwaitingFreshState.Contains(playerId)) continue;
                 dict_remoteLastSeenTimeByPlayerId[playerId] = now;
                 dict_remoteLastDedicatedStateTimeByPlayerId[playerId] = now;
                 threeDModeController?.SetRemotePlayerActive(playerId, true);
@@ -1435,6 +1536,7 @@ namespace Network_A.DedicatedGameServer.Client
             dict_remoteLastDedicatedStateTimeByPlayerId.Clear();
             dict_remoteNamesByPlayerId.Clear();
             set_remoteBrowserHiddenPlayerIds.Clear();
+            set_remoteHiddenAwaitingFreshState.Clear();
 
             if (!shouldClearSceneRemotes)
             {
@@ -1458,6 +1560,8 @@ namespace Network_A.DedicatedGameServer.Client
             dict_remoteLastDedicatedStateTimeByPlayerId.Clear();
             dict_remoteNamesByPlayerId.Clear();
             set_remoteBrowserHiddenPlayerIds.Clear();
+            set_remoteHiddenAwaitingFreshState.Clear();
+            set_remoteDisconnectedByDedicated.Clear();
             threeDModeController?.ClearRemotePlayers();
         }
 
@@ -1825,6 +1929,8 @@ namespace Network_A.DedicatedGameServer.Client
             string safePlayerId = playerId.Trim();
             if (IsLocalPlayer(safePlayerId)) return;
 
+            set_remoteHiddenAwaitingFreshState.Remove(safePlayerId);
+            set_remoteDisconnectedByDedicated.Remove(safePlayerId);
             dict_remoteLastSeenTimeByPlayerId.Remove(safePlayerId);
             dict_remoteLastDedicatedStateTimeByPlayerId.Remove(safePlayerId);
             dict_remoteNamesByPlayerId.Remove(safePlayerId);

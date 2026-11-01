@@ -402,6 +402,44 @@ namespace Network_A.Voice.Client.Runtime
             }
         }
 
+        // The explicit user recovery button must never send a terminal Voice DISCONNECT.
+        // Reuse the existing transport-closed cleanup and resume state; do not
+        // change the automatic reconnect event handler or server session lifecycle.
+        public async Task<bool> RestartVoiceTransportForManualRecoveryAsync(string reason)
+        {
+            if (shuttingDown || runtimeResourcesDisposed || connecting ||
+                IsDisconnecting || !MetaverseNetworkClient.isReady)
+            {
+                Debug.LogWarning("VOICE_CLIENT_MANUAL_REBUILD=SKIPPED | reason=runtime_not_ready");
+                return false;
+            }
+
+            string safeReason = "manual_voice_rebuild_" + Safe(reason);
+            try
+            {
+                IVoiceClientTransport oldTransport = transport;
+                if (oldTransport != null)
+                    await CloseDetachedTransportAsync(oldTransport, safeReason);
+
+                // The detached transport has no Disconnected listener: call the
+                // same existing cleanup path once, with transport already null.
+                HandleTransportDisconnected(safeReason);
+
+                bool localResetComplete = !IsAuthenticated && transport == null;
+                Debug.Log("VOICE_CLIENT_MANUAL_REBUILD=" +
+                    (localResetComplete ? "PASS" : "FAIL") +
+                    " | protocolDisconnectSent=False" +
+                    " | roomExit=False" +
+                    " | resumesPreviousConnection=True");
+                return localResetComplete;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError("VOICE_CLIENT_MANUAL_REBUILD=FAIL | detail=" + exception.Message);
+                return false;
+            }
+        }
+
         //* این تابع پاک‌سازی صوت بازیکن خارج‌شده را انجام می‌دهد و پس از آن رانتایم را برای ورود تازه قابل استفاده نگه می‌دارد.
         private async Task<bool> RunPlayerUnavailableDisconnectAsync(
             string reason,

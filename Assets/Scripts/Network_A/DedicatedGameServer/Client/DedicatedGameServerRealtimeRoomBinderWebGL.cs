@@ -26,12 +26,37 @@ namespace Network_A.DedicatedGameServer.Client
         public event Action<bool> DisconnectAvailabilityChanged;
 
         public string CurrentStatus => lastStatus;
+        public string CurrentNetworkDiagnosticMessage =>
+            !string.IsNullOrEmpty(webGLConnectivityNotice)
+                ? webGLConnectivityNotice
+                : webGLServiceNotice;
         public string CurrentGameServerState => lastGameServerStateStatus;
         public bool IsConnectFlowRunning => isConnectClickRunning || (autoConnectController != null && autoConnectController.IsRunning);
         public bool IsDisconnectFlowRunning => isDisconnectClickRunning || isSafetyDedicatedCloseRunning;
+        public bool HasConfirmedWebGLInternetLoss
+        {
+            get
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                return webGLActiveHealthConfirmedOffline;
+#else
+                return false;
+#endif
+            }
+        }
         public bool HasActiveDedicatedConnection => wsClient != null && (wsClient.IsConnected || wsClient.IsAuthenticated);
         public bool HasUnclosedDedicatedSession => HasActiveDedicatedConnection || wasInsideDedicatedGameServer || dedicatedCloseConfirmationRequired;
-        public bool CanDisconnect => !isDisconnectClickRunning && (IsConnectFlowRunning || HasUnclosedDedicatedSession || (realtimeRoomGameServerManager != null && realtimeRoomGameServerManager.IsJoinedRoom));
+        // After a confirmed terminal recovery failure, the player must retain
+        // a manual return-to-Lobby action even if Realtime room state was cleared.
+        // The existing coordinated disconnect still protects unclosed sessions.
+        public bool CanDisconnect => !isDisconnectClickRunning &&
+            (IsConnectFlowRunning || HasUnclosedDedicatedSession ||
+             (realtimeRoomGameServerManager != null && realtimeRoomGameServerManager.IsJoinedRoom) ||
+             (pendingLobbyReturnAfterPermanentReconnectFailure &&
+              !permanentFailureLobbyReturnRunning &&
+              SceneManager.GetActiveScene().IsValid() &&
+              !string.Equals(SceneManager.GetActiveScene().name,
+                  WebGLLobbySceneName, StringComparison.Ordinal)));
 
         [Header("References")]
         [SerializeField] private RealtimeRoomGameServerManager realtimeRoomGameServerManager;
@@ -104,8 +129,8 @@ namespace Network_A.DedicatedGameServer.Client
         [SerializeField] private string dedicatedConnectionLostDebugMessage = "اینترنت شما قطع شده است. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
         [SerializeField] private string realtimeConnectionLostWhileInsideGameServerDebugMessage = "اینترنت شما قطع شده است. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
         [SerializeField] private string networkLostReconnectMessage = "اینترنت شما قطع شده است. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
-        private const string FixedInternetLostDebugTitle = "اتصال اینترنت قطع است";
-        private const string FixedInternetLostUserMessage = "اینترنت شما قطع شده است. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.";
+        private const string FixedInternetLostDebugTitle = "ارتباط با سرور برقرار نیست";
+        private const string FixedInternetLostUserMessage = "ارتباط با سرور برقرار نیست. در حال بررسی و تلاش مجدد...";
         private const string FixedRealtimeTransportDropDebugTitle = "بازیابی اتصال Realtime";
         private const string FixedRealtimeTransportDropUserMessage = "ارتباط Realtime موقتاً قطع شد. در حال بازیابی اتصال...";
         [SerializeField] private string gameServerReconnectRetryMessage = "در حال تلاش برای اتصال مجدد به Game Server...";
@@ -151,6 +176,8 @@ namespace Network_A.DedicatedGameServer.Client
         private bool webGLActiveHealthConfirmedOffline;
         private bool webGLInternetLostMessageVisible;
         private bool webGLNetworkRecoveryMessageActive;
+        private string webGLConnectivityNotice = string.Empty;
+        private string webGLServiceNotice = string.Empty;
         private int webGLActiveHealthProbeGeneration;
         private bool webGLDedicatedReconnectPending;
         private string webGLDedicatedReconnectPendingRoomId = string.Empty;
@@ -1282,7 +1309,16 @@ namespace Network_A.DedicatedGameServer.Client
         private void PublishDedicatedConnectProgress(string stage, string userMessage, string technicalDetails)
         {
             if (!publishDedicatedConnectMessagesGlobally) return;
-
+#if UNITY_WEBGL && !UNITY_EDITOR
+            Scene activeSceneForProgress = SceneManager.GetActiveScene();
+            if ((activeSceneForProgress.IsValid() &&
+                 string.Equals(activeSceneForProgress.name, WebGLLobbySceneName, StringComparison.Ordinal)) ||
+                IsCurrentRealtimeRoomPublicLobby())
+            {
+                GlobalMessageManager.Clear(DedicatedConnectProgressMessageId);
+                return;
+            }
+#endif
             GlobalMessageManager.Clear(DedicatedConnectErrorMessageId);
 
             GlobalMessageManager.Publish(
@@ -1395,11 +1431,24 @@ namespace Network_A.DedicatedGameServer.Client
             return safeStageMessage + "\n" + remainingText;
         }
 
-        //* این تابع پیام قطعی WebGL را از لحظه افت سوکت تا پایان کامل بازیابی در صف اصلی پنل نگه می‌دارد.
+        //* این تابع پیام عمومی را فقط پس از شکست تأییدشده Health و نبود پیام تازه Dedicated نشان می‌دهد.
         private void ShowWebGLNetworkLostGlobal(string technicalDetails)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (!webGLActiveHealthConfirmedOffline)
+            {
+                nextWebGLActiveHealthProbeAt = 0f;
+                webGLInternetLostMessageVisible = false;
+                webGLNetworkRecoveryMessageActive = false;
+                webGLConnectivityNotice = "در حال بررسی ارتباط با سرور...";
+                GlobalMessageManager.Clear(WebGLNetworkRecoveryMessageId);
+                Log("WEBGL_NETWORK_LOST_UI_BLOCKED_UNVERIFIED | " + Safe(technicalDetails), true);
+                return;
+            }
+#endif
             webGLInternetLostMessageVisible = true;
             webGLNetworkRecoveryMessageActive = true;
+            webGLConnectivityNotice = FixedInternetLostUserMessage;
             GlobalMessageManager.Publish(
                 WebGLNetworkRecoveryMessageId,
                 GlobalMessageManager.MessageSource.Network,
@@ -1414,9 +1463,23 @@ namespace Network_A.DedicatedGameServer.Client
             );
         }
 
-        //* این تابع همان پیام قطعی را پس از بازگشت Realtime به مرحله بازیابی Game Server تبدیل می‌کند.
+        //* این تابع اختلال Realtime و Dedicated را در WebGL به وضعیت غیرمسدودکننده تبدیل می‌کند.
         private void ShowWebGLNetworkRecoveringGlobal(string userMessage, string technicalDetails)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            webGLServiceNotice = string.IsNullOrWhiteSpace(userMessage)
+                ? "اختلال موقت در ارتباط بازی؛ در حال بازیابی..."
+                : userMessage.Trim();
+            if (webGLActiveHealthConfirmedOffline)
+            {
+                Log("WEBGL_HEALTH_OUTAGE_REMAINS_ACTIVE | " + Safe(technicalDetails), true);
+                return;
+            }
+            webGLInternetLostMessageVisible = false;
+            webGLNetworkRecoveryMessageActive = false;
+            GlobalMessageManager.Clear(WebGLNetworkRecoveryMessageId);
+            Log("WEBGL_SERVICE_RECOVERY_NONBLOCKING | " + Safe(technicalDetails), true);
+#else
             webGLInternetLostMessageVisible = false;
             webGLNetworkRecoveryMessageActive = true;
             GlobalMessageManager.Publish(
@@ -1433,13 +1496,16 @@ namespace Network_A.DedicatedGameServer.Client
                 true,
                 false
             );
+#endif
         }
 
-        //* این تابع پیام قطعی WebGL را فقط پس از موفقیت کامل یا خروج رسمی پاک می‌کند.
+        //* این تابع پیام بازیابی شبکه و وضعیت موقت آن را پس از پایان جریان پاک می‌کند.
         private void ClearWebGLNetworkRecoveryGlobal()
         {
             webGLInternetLostMessageVisible = false;
             webGLNetworkRecoveryMessageActive = false;
+            webGLConnectivityNotice = string.Empty;
+            webGLServiceNotice = string.Empty;
             GlobalMessageManager.Clear(WebGLNetworkRecoveryMessageId);
             ResetWebGLActiveHealthProbeState("network_recovery_message_cleared", true);
         }
@@ -1779,19 +1845,13 @@ namespace Network_A.DedicatedGameServer.Client
             string safeName = ResolveDedicatedPresenceDisplayName(playerId, displayName);
             string message = FormatDedicatedPresenceMessage(dedicatedRemoteJoinedStatusFormat, safeName, "joined Game Server");
 
-            if (showDedicatedPresenceInStatusText)
-            {
+            // Show joined players in gameplay's status Text only.
+            // Public Lobby has no user-joined announcements at all.
+            Scene presenceScene = SceneManager.GetActiveScene();
+            if (!presenceScene.IsValid() ||
+                !string.Equals(presenceScene.name, WebGLLobbySceneName, StringComparison.Ordinal))
                 SetStatus(message, true);
-            }
-
-            GlobalMessageManager.ShowInfo(
-                BuildDedicatedPresenceMessageId("JOINED", playerId),
-                "ورود کاربر",
-                safeName + " وارد محیط شد.",
-                "playerId=" + Safe(playerId),
-                3f,
-                GlobalMessageManager.MessageSource.DedicatedServer
-            );
+            GlobalMessageManager.Clear(BuildDedicatedPresenceMessageId("JOINED", playerId));
 
             if (logDedicatedPresenceUiEvents)
             {
@@ -1807,12 +1867,15 @@ namespace Network_A.DedicatedGameServer.Client
             string safeName = ResolveDedicatedPresenceDisplayName(playerId, displayName);
             string message = FormatDedicatedPresenceMessage(dedicatedRemoteLeftStatusFormat, safeName, "left Game Server");
 
-            if (showDedicatedPresenceInStatusText)
+            Scene leavingPresenceScene = SceneManager.GetActiveScene();
+            bool inPublicLobbyScene = leavingPresenceScene.IsValid() &&
+                string.Equals(leavingPresenceScene.name, WebGLLobbySceneName, StringComparison.Ordinal);
+            if (!inPublicLobbyScene && showDedicatedPresenceInStatusText)
             {
                 SetStatus(message, true);
             }
 
-            if (showDedicatedPresenceLeftInServerDebugPanel)
+            if (!inPublicLobbyScene && showDedicatedPresenceLeftInServerDebugPanel)
             {
                 ShowGameServerDebugProgress(message, "DEDICATED_PLAYER_LEFT", dedicatedRemoteLeftDebugTechnical + " | playerId=" + Safe(playerId), false);
                 if (txtServerDebugTitle != null) txtServerDebugTitle.text = string.IsNullOrWhiteSpace(dedicatedRemoteLeftDebugTitle) ? "خروج بازیکن از Game Server" : dedicatedRemoteLeftDebugTitle.Trim();
@@ -1868,9 +1931,34 @@ namespace Network_A.DedicatedGameServer.Client
         }
 
         //* این تابع بعد از ورود به روم ریل تایم، کانتکست را برای تیکت آماده می کند.//* این تابع بعد از ورود به روم ریل تایم، کانتکست را برای تیکت آماده می کند.
-        //* این تابع قطع کامل شبکه محلی را قبل از تایم اوت وب سوکت تشخیص می دهد و پیام قطع اینترنت را فوری نشان می دهد.
+        //* در WebGL فقط بررسی Health را جلو می‌اندازد؛ رفتار دیگر پلتفرم‌ها را حفظ می‌کند.
         private void CheckImmediateLocalNetworkLoss()
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (!showInternetLostImmediatelyFromLocalReachability) return;
+            if (Time.unscaledTime < nextImmediateNetworkLossCheckAt) return;
+            nextImmediateNetworkLossCheckAt = Time.unscaledTime + Mathf.Max(0.05f, immediateNetworkLossCheckIntervalSeconds);
+            if (isDisconnectClickRunning) return;
+            bool shouldWatch = IsInsideGameServer() || realtimeReconnectInProgress || wasInsideDedicatedGameServer;
+            if (!shouldWatch) return;
+            if (!IsLocalNetworkUnavailableFast())
+            {
+                if (hasShownImmediateNetworkLossForCurrentOutage)
+                {
+                    nextWebGLActiveHealthProbeAt = 0f;
+                    hasShownImmediateNetworkLossForCurrentOutage = false;
+                }
+                return;
+            }
+            if (!hasShownImmediateNetworkLossForCurrentOutage)
+            {
+                hasShownImmediateNetworkLossForCurrentOutage = true;
+                nextWebGLActiveHealthProbeAt = 0f;
+                webGLConnectivityNotice = "در حال بررسی ارتباط با سرور...";
+                Log("WEBGL_LOCAL_REACHABILITY_REQUIRES_HEALTH_CONFIRMATION", true);
+            }
+            return;
+#else
             if (!showInternetLostImmediatelyFromLocalReachability) return;
             if (Time.unscaledTime < nextImmediateNetworkLossCheckAt) return;
 
@@ -1940,6 +2028,7 @@ namespace Network_A.DedicatedGameServer.Client
 
             Log("Immediate network loss UI shown before WebSocket timeout.", true);
             RefreshUiState(true);
+#endif
         }
 
         //* این تابع وضعیت تشخیص فوری قطع شبکه محلی را ریست می کند.
@@ -1973,6 +2062,10 @@ namespace Network_A.DedicatedGameServer.Client
             string reason
         )
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // Transport errors do not establish public Health failure.
+            return false;
+#else
             if (IsLocalNetworkUnavailableFast()) return true;
             if (string.IsNullOrWhiteSpace(reason)) return false;
 
@@ -1986,6 +2079,7 @@ namespace Network_A.DedicatedGameServer.Client
                    || value.Contains("abnormal closure")
                    || value.Contains("code=1006")
                    || value.Contains("checknet_fast_server_unreachable");
+#endif
         }
 
         //* این تابع قطع ددیکیتد را برای UI طبقه بندی می کند.
@@ -1994,6 +2088,10 @@ namespace Network_A.DedicatedGameServer.Client
             string reason
         )
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // An individual Dedicated disconnect is not a Health failure.
+            return false;
+#else
             if (IsLocalNetworkUnavailableFast()) return true;
             if (string.IsNullOrWhiteSpace(reason)) return true;
 
@@ -2017,6 +2115,7 @@ namespace Network_A.DedicatedGameServer.Client
                    || value.Contains("not_reachable")
                    || value.Contains("internet")
                    || value.Contains("checknet_fast_server_unreachable");
+#endif
         }
 
         //* این تابع متن ثابت افت ترنسپورت ریل تایم را برمی گرداند.
@@ -3043,7 +3142,7 @@ namespace Network_A.DedicatedGameServer.Client
                 // فقط روم ساختمان اجازه دارد صحنه مستقل WebGL_Enviroment را بارگذاری کند.
                 string targetSceneName = publicLobbyRoom
                     ? (activeScene.IsValid() ? activeScene.name : WebGLLobbySceneName)
-                    : WebGLGameplaySceneName;
+                    : Network_A.Voice.Client.Routing.WebGL.WebGlVoiceOnlySceneTargetWrapper.ResolveForBuildingRoom();
 
                 #endregion
 
@@ -3941,6 +4040,13 @@ namespace Network_A.DedicatedGameServer.Client
             string technicalDetails
         )
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // Recovery of an individual transport is a non-blocking status.
+            SetStatus(message, false);
+            Log("WEBGL_CONNECTION_ISSUE_TEXT_ONLY | stage=" + Safe(stage) +
+                " | details=" + Safe(technicalDetails), true);
+            return;
+#else
             if (!showServerDebugPanelImmediatelyOnDedicatedConnectionLost) return;
 
             ShowGameServerDebugProgress(
@@ -3950,11 +4056,11 @@ namespace Network_A.DedicatedGameServer.Client
                 true
             );
 
-            // دکمه Close فقط پنل را مخفی می کند و نباید Reconnect را متوقف کند.
             if (showServerDebugCloseDuringDedicatedReconnect)
             {
                 SetButtonGameObjectActive(btnServerDebugClose, true);
             }
+#endif
         }
 
         private static bool IsGameServerConnectionRecoveryStage(string stage)
@@ -4300,6 +4406,17 @@ namespace Network_A.DedicatedGameServer.Client
         }
 
         //* این تابع پس از شکست نهایی بازیابی، فقط بعد از برگشت قطعی اینترنت و ورود موفق کاربر، بازگشت به لابی را آغاز می‌کند.
+        // Called by the existing user-triggered same-room retry only.
+        // Do not cancel an already running exit / scene change.
+        public bool TryReserveTerminalRecoveryForManualRoomReentry()
+        {
+            if (permanentFailureLobbyReturnRunning || isDisconnectClickRunning || isSafetyDedicatedCloseRunning)
+                return false;
+            pendingLobbyReturnAfterPermanentReconnectFailure = false;
+            permanentFailureNetworkConfirmedReachable = false;
+            return true;
+        }
+
         private void TryStartLobbyReturnAfterPermanentReconnectFailure()
         {
             if (!pendingLobbyReturnAfterPermanentReconnectFailure || permanentFailureLobbyReturnRunning) return;
@@ -4700,7 +4817,8 @@ namespace Network_A.DedicatedGameServer.Client
                 ApplyWebGLActiveHealthProbeResult(
                     result.reachable,
                     result.technicalDetails,
-                    probeStartedAt
+                    probeStartedAt,
+                    result.serverHealthStatus
                 );
             }
             catch (Exception ex)
@@ -4710,7 +4828,8 @@ namespace Network_A.DedicatedGameServer.Client
                     ApplyWebGLActiveHealthProbeResult(
                         false,
                         "probe_exception=" + Safe(ex.Message),
-                        probeStartedAt
+                        probeStartedAt,
+                        string.Empty
                     );
                 }
             }
@@ -4727,80 +4846,22 @@ namespace Network_A.DedicatedGameServer.Client
         private async Task<WebGLActiveHealthProbeResult> SendWebGLActiveHealthProbeOnceAsync()
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            string url = BuildWebGLActiveHealthProbeUrl();
-            float startedAt = Time.realtimeSinceStartup;
-
-            using (UnityWebRequest request = UnityWebRequest.Get(url))
-            {
-                request.timeout = Mathf.Clamp(
-                    Mathf.CeilToInt(WebGLActiveHealthProbeTimeoutMs / 1000f),
-                    1,
-                    5
-                );
-
-                request.SetRequestHeader("Accept", "application/json");
-                request.SetRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
-                request.SetRequestHeader("Pragma", "no-cache");
-
-                UnityWebRequestAsyncOperation operation = request.SendWebRequest();
-                float probeDeadlineAt =
-                    startedAt +
-                    (WebGLActiveHealthProbeTimeoutMs / 1000f);
-
-                while (!operation.isDone &&
-                       Time.realtimeSinceStartup < probeDeadlineAt)
-                {
-                    await Task.Yield();
-                }
-
-                bool probeDeadlineExceeded = !operation.isDone;
-                if (probeDeadlineExceeded) request.Abort();
-
-                int statusCode = (int)request.responseCode;
-                int elapsedMs = Mathf.Max(
-                    0,
-                    Mathf.RoundToInt(
-                        (Time.realtimeSinceStartup - startedAt) * 1000f
-                    )
-                );
-
-                bool transportFailed =
-                    request.result == UnityWebRequest.Result.ConnectionError ||
-                    request.result == UnityWebRequest.Result.DataProcessingError;
-
-                // در WebGL خطای واقعی شبکه ممکن است همراه status=500 برگردد؛
-                // فقط پاسخ HTTP بدون خطای ترنسپورت، دسترسی واقعی مسیر را ثابت می‌کند.
-                bool reachable =
-                    !probeDeadlineExceeded &&
-                    statusCode > 0 &&
-                    !transportFailed;
-
-                string technicalDetails =
-                    "url=" + url +
-                    " | reachable=" + reachable +
-                    " | deadlineExceeded=" + probeDeadlineExceeded +
-                    " | result=" + request.result +
-                    " | status=" + statusCode +
-                    " | elapsedMs=" + elapsedMs +
-                    " | error=" + Safe(request.error) +
-                    " | reachability=" + Application.internetReachability;
-
-                return new WebGLActiveHealthProbeResult(
-                    reachable,
-                    technicalDetails
-                );
-            }
+            WebGLSingleHealthAuthority.Result health =
+                await WebGLSingleHealthAuthority.ProbeAsync();
+            return new WebGLActiveHealthProbeResult(
+                health.Reachable, health.Details, health.HealthStatus);
 #else
             await Task.CompletedTask;
-            return new WebGLActiveHealthProbeResult(true, "non_webgl");
+            return new WebGLActiveHealthProbeResult(true, "non_webgl", string.Empty);
 #endif
         }
 
-        //* این تابع نتیجه Health را به پیام قطعی، پیام بازگشت شبکه و شروع امن Reconnect تبدیل می کند.
+        //* این تابع نتیجه HTTP 200 یا شکست Health را مستقل از وضعیت ترنسپورت به‌روزرسانی می‌کند.
         private void ApplyWebGLActiveHealthProbeResult(
             bool reachable,
             string technicalDetails,
-            float probeStartedAt
+            float probeStartedAt,
+            string serverHealthStatus
         )
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -4811,18 +4872,21 @@ namespace Network_A.DedicatedGameServer.Client
                     webGLActiveHealthProbeFailures = 0;
                     webGLActiveHealthProbeSuccesses++;
                     webGLActiveHealthConfirmedOffline = false;
+                    webGLInternetLostMessageVisible = false;
+                    webGLNetworkRecoveryMessageActive = false;
+                    webGLConnectivityNotice = string.Equals(serverHealthStatus, "degraded",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? "سرور در دسترس است؛ سلامت برخی سرویس‌ها کاهش یافته است."
+                        : string.Empty;
+                    GlobalMessageManager.Clear(WebGLNetworkRecoveryMessageId);
                     permanentFailureNetworkConfirmedReachable =
-                        webGLActiveHealthProbeSuccesses >=
-                        WebGLActiveHealthProbeSuccessesBeforeRecovery;
-
+                        webGLActiveHealthProbeSuccesses >= WebGLActiveHealthProbeSuccessesBeforeRecovery;
                     if (permanentFailureNetworkConfirmedReachable)
                     {
-                        Log(
-                            "Permanent recovery Health confirmed before fresh Lobby reload | " +
-                            technicalDetails,
-                            true
-                        );
-
+                        StartupNetworkSceneRouter.Instance?.ConfirmWebGLServerReachableFromHealth();
+                        GlobalMessageManager.Clear("GLOBAL_NETWORK_STATE");
+                        GlobalMessageManager.Clear("GLOBAL_NETWORK_CHECKING");
+                        Log("WEBGL_HEALTH_200_PERMANENT_RECOVERY | " + technicalDetails, true);
                         TryStartLobbyReturnAfterPermanentReconnectFailure();
                     }
                 }
@@ -4830,31 +4894,59 @@ namespace Network_A.DedicatedGameServer.Client
                 {
                     webGLActiveHealthProbeSuccesses = 0;
                     webGLActiveHealthProbeFailures++;
-                    webGLActiveHealthConfirmedOffline = true;
                     permanentFailureNetworkConfirmedReachable = false;
-
-                    Log(
-                        "Permanent recovery is waiting for reachable Health before fresh Lobby reload | failures=" +
-                        webGLActiveHealthProbeFailures +
-                        " | " +
-                        technicalDetails,
-                        webGLActiveHealthProbeFailures <=
-                        WebGLActiveHealthProbeFailuresBeforeInternetLost
-                    );
+                    webGLConnectivityNotice = "پاسخ سرور دریافت نشد؛ در حال بررسی ارتباط...";
+                    Log("WEBGL_HEALTH_PENDING_LOBBY_RECOVERY | failures=" +
+                        webGLActiveHealthProbeFailures + " | " + technicalDetails,
+                        webGLActiveHealthProbeFailures <= WebGLActiveHealthProbeFailuresBeforeInternetLost);
                 }
-
                 return;
             }
 
-            bool freshForPendingReconnect =
-                !webGLDedicatedReconnectPending ||
+            bool freshForPendingReconnect = !webGLDedicatedReconnectPending ||
                 webGLDedicatedReconnectPendingAt < 0f ||
                 probeStartedAt >= webGLDedicatedReconnectPendingAt;
 
             if (reachable)
             {
+                bool hadNetworkWarning = webGLActiveHealthConfirmedOffline ||
+                    webGLActiveHealthProbeFailures > 0 ||
+                    webGLInternetLostMessageVisible || webGLNetworkRecoveryMessageActive;
+                string previousConnectivityNotice = webGLConnectivityNotice;
+
                 webGLActiveHealthProbeFailures = 0;
                 webGLActiveHealthProbeSuccesses++;
+                webGLActiveHealthConfirmedOffline = false;
+                webGLInternetLostMessageVisible = false;
+                webGLNetworkRecoveryMessageActive = false;
+                webGLConnectivityNotice = string.Equals(serverHealthStatus, "degraded",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "سرور در دسترس است؛ سلامت برخی سرویس‌ها کاهش یافته است."
+                    : string.Empty;
+
+                hadNetworkWarning |= !string.Equals(
+                    previousConnectivityNotice, webGLConnectivityNotice, StringComparison.Ordinal);
+
+                // HTTP 200 always clears the public network-blocking message;
+                // Dedicated and Realtime recovery continue independently.
+                GlobalMessageManager.Clear(WebGLNetworkRecoveryMessageId);
+                if (hadNetworkWarning || !StartupNetworkSceneRouter.IsOnline)
+                {
+                    if (StartupNetworkSceneRouter.Instance != null)
+                        StartupNetworkSceneRouter.Instance.ConfirmWebGLServerReachableFromHealth();
+                    GlobalMessageManager.Clear("GLOBAL_NETWORK_STATE");
+                    GlobalMessageManager.Clear("GLOBAL_NETWORK_CHECKING");
+                }
+
+                if (hadNetworkWarning)
+                {
+                    if (pnlServerDebug != null && pnlServerDebug.activeSelf &&
+                        txtServerDebugTitle != null &&
+                        string.Equals(txtServerDebugTitle.text, FixedInternetLostDebugTitle,
+                            StringComparison.Ordinal))
+                        pnlServerDebug.SetActive(false);
+                    Log("WEBGL_HEALTH_200_CLEARED_PUBLIC_NETWORK_UI | " + technicalDetails, true);
+                }
 
                 if (!freshForPendingReconnect)
                 {
@@ -4862,145 +4954,75 @@ namespace Network_A.DedicatedGameServer.Client
                     return;
                 }
 
-                bool recoveryIsPending =
-                    realtimeReconnectInProgress || webGLDedicatedReconnectPending ||
+                bool recoveryIsPending = realtimeReconnectInProgress ||
+                    webGLDedicatedReconnectPending ||
                     isAutoReconnectGameServerAfterRealtimeRunning ||
                     (realtimeRoomGameServerManager != null &&
                      realtimeRoomGameServerManager.IsRecoveryRunning);
-
-                // A server Health response proves reachability, not completion of
-                // Realtime/Dedicated re-authentication or room recovery.
-                bool needsNetworkReturnTransition =
-                    webGLActiveHealthConfirmedOffline ||
-                    webGLInternetLostMessageVisible ||
-                    (recoveryIsPending && !StartupNetworkSceneRouter.IsOnline);
-
-                if (needsNetworkReturnTransition)
+                if (recoveryIsPending && string.IsNullOrEmpty(webGLServiceNotice))
+                    webGLServiceNotice = "سرور در دسترس است؛ ارتباط بازی در حال بازیابی است.";
+                if (hadNetworkWarning)
                 {
-                    webGLActiveHealthConfirmedOffline = false;
-                    webGLInternetLostMessageVisible = false;
-
-                    // Wake Realtime quickly, but retain a *recovering* network
-                    // priority message until the existing Dedicated success path
-                    // explicitly clears it after real authentication.
-                    if (StartupNetworkSceneRouter.Instance != null)
-                        StartupNetworkSceneRouter.Instance.ConfirmWebGLServerReachableFromHealth();
-                    GlobalMessageManager.Clear("GLOBAL_NETWORK_STATE");
-
-                    string recoveringMessage =
-                        "اینترنت برقرار شد. اتصال مجدد به بازی در حال انجام است...";
-                    if (recoveryIsPending)
-                    {
-                        ShowWebGLNetworkRecoveringGlobal(
-                            recoveringMessage,
-                            "source=webgl_verified_health_waiting_for_dedicated | " +
-                            technicalDetails
-                        );
-                    }
-                    else
-                    {
-                        webGLNetworkRecoveryMessageActive = false;
-                        GlobalMessageManager.Clear(WebGLNetworkRecoveryMessageId);
-                    }
-
-                    SetGameServerStateText(reconnectingInsideGameServerStatusMessage, true);
-                    SetStatus(recoveringMessage, true);
-
-                    // The old Internet-lost debug panel must not remain blocking mobile UI.
-                    if (pnlServerDebug != null && pnlServerDebug.activeSelf &&
-                        txtServerDebugTitle != null &&
-                        string.Equals(txtServerDebugTitle.text, FixedInternetLostDebugTitle,
-                            StringComparison.Ordinal))
-                        pnlServerDebug.SetActive(false);
-
-                    Log("WEBGL_FAST_HEALTH_RECOVERED=PASS | internet_lost_message_cleared=True" +
-                        " | dedicated_auth_still_required=True | " + technicalDetails, true);
+                    string status = recoveryIsPending
+                        ? "سرور در دسترس است؛ اتصال بازی در حال بازیابی است."
+                        : (string.IsNullOrEmpty(webGLConnectivityNotice)
+                            ? "ارتباط با سرور برقرار است."
+                            : webGLConnectivityNotice);
+                    SetStatus(status, true);
                 }
-
                 if (recoveryIsPending && realtimeRoomGameServerManager != null)
                     realtimeRoomGameServerManager.WakeRealtimeRecoveryAfterVerifiedWebGLHealth();
-
-                TryStartDedicatedReconnectAfterWebGLHealthRecovery(
-                    technicalDetails
-                );
-
+                TryStartDedicatedReconnectAfterWebGLHealthRecovery(technicalDetails);
                 return;
             }
 
             webGLActiveHealthProbeSuccesses = 0;
-            webGLActiveHealthProbeFailures++;
-            nextWebGLActiveHealthProbeAt =
-                Time.unscaledTime +
+            webGLActiveHealthProbeFailures = Mathf.Min(
+                WebGLActiveHealthProbeFailuresBeforeInternetLost,
+                webGLActiveHealthProbeFailures + 1);
+            nextWebGLActiveHealthProbeAt = Time.unscaledTime +
                 WebGLActiveHealthProbeIntervalSeconds;
 
-            if (webGLActiveHealthProbeFailures <
-                WebGLActiveHealthProbeFailuresBeforeInternetLost)
+            if (webGLActiveHealthProbeFailures < WebGLActiveHealthProbeFailuresBeforeInternetLost)
             {
-                Log(
-                    "WebGL active health probe temporary failure | failures=" +
-                    webGLActiveHealthProbeFailures +
-                    "/" +
-                    WebGLActiveHealthProbeFailuresBeforeInternetLost +
-                    " | " +
-                    technicalDetails,
-                    true
-                );
-
+                webGLConnectivityNotice = "پاسخ سرور موقتاً دریافت نشد؛ در حال بررسی مجدد...";
+                Log("WEBGL_HEALTH_TEMPORARY_FAILURE | failures=" +
+                    webGLActiveHealthProbeFailures + " | " + technicalDetails, true);
                 return;
             }
 
+            // A live Dedicated socket is NOT a second internet/health authority.
+            // Its validity continues to be checked separately for gameplay.
+
+            webGLConnectivityNotice =
+                "ارتباط با سرور برقرار نیست؛ در حال بررسی و تلاش مجدد...";
             if (webGLActiveHealthConfirmedOffline) return;
 
             webGLActiveHealthConfirmedOffline = true;
             hasShownImmediateNetworkLossForCurrentOutage = true;
             hasShownConnectionLostDebugForCurrentReconnect = true;
             realtimeReconnectInProgress = true;
-
             if (IsInsideGameServer() || HasActiveDedicatedConnection)
-            {
                 wasInsideDedicatedGameServer = true;
-            }
 
             realtimeRoomGameServerManager?.BeginUnifiedRecoveryFromDedicatedDisconnect(
-                "webgl_active_health_probe_failed"
-            );
+                "webgl_active_health_probe_failed");
             MarkWebGLDedicatedReconnectPending("webgl_active_health_probe_failed");
-
-            string lostMessage = GetFixedInternetLostUserMessage();
-
-            SetRealtimeDedicatedPresenceGuard(
-                true,
-                "webgl_active_health_probe_failed"
-            );
-
-            SetGameServerStateText(
-                reconnectingInsideGameServerStatusMessage,
-                true
-            );
-
-            SetStatus(lostMessage, true);
-
-            ShowWebGLNetworkLostGlobal(
-                "source=webgl_active_health_probe | " +
-                technicalDetails
-            );
-
+            SetRealtimeDedicatedPresenceGuard(true, "webgl_active_health_probe_failed");
+            SetGameServerStateText(reconnectingInsideGameServerStatusMessage, true);
+            SetStatus(webGLConnectivityNotice, true);
+            ShowWebGLNetworkLostGlobal("source=webgl_health_200_unavailable | " + technicalDetails);
             ShowConnectionIssueDebug(
-                lostMessage,
-                "GAME_SERVER_NETWORK_LOST_ACTIVE_HEALTH",
-                technicalDetails
-            );
-
-            Log(
-                "WebGL active health probe confirmed internet loss before WebSocket timeout | failures=" +
-                webGLActiveHealthProbeFailures +
-                " | " +
-                technicalDetails,
-                true
-            );
-
+                webGLConnectivityNotice, "GAME_SERVER_NETWORK_LOST_ACTIVE_HEALTH", technicalDetails);
+            Log("WEBGL_HEALTH_CONFIRMED_UNAVAILABLE | " + technicalDetails, true);
             RefreshUiState(true);
 #endif
+        }
+
+        private bool HasFreshDedicatedInboundEvidence()
+        {
+            return wsClient != null && wsClient.IsReady &&
+                wsClient.HasRecentInboundMessage(6f);
         }
 
         //* این تابع پس از پاسخ موفق Health، در صورت معتبر ماندن همان روم، اتصال Dedicated را بدون انتظار 30 ثانیه آغاز می کند.
@@ -5269,6 +5291,7 @@ namespace Network_A.DedicatedGameServer.Client
             webGLActiveHealthProbeFailures = 0;
             webGLActiveHealthProbeSuccesses = 0;
             webGLActiveHealthConfirmedOffline = false;
+            webGLConnectivityNotice = string.Empty;
 
             if (clearPendingReconnect)
             {
@@ -5281,15 +5304,25 @@ namespace Network_A.DedicatedGameServer.Client
         {
             public readonly bool reachable;
             public readonly string technicalDetails;
+            public readonly string serverHealthStatus;
 
             public WebGLActiveHealthProbeResult(
                 bool reachable,
-                string technicalDetails
+                string technicalDetails,
+                string serverHealthStatus
             )
             {
                 this.reachable = reachable;
                 this.technicalDetails = technicalDetails ?? string.Empty;
+                this.serverHealthStatus = serverHealthStatus ?? string.Empty;
             }
+        }
+
+        [Serializable]
+        private sealed class WebGLPublicHealthPayload
+        {
+            public bool success;
+            public string status;
         }
 
         private void CheckImmediateDedicatedNetworkProbe()

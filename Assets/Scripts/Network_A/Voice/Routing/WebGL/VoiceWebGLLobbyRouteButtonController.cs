@@ -12,8 +12,9 @@ namespace Network_A.Voice.Client.Routing.WebGL
         {
             if (voiceButton == null)
             {
-                Debug.LogError("VOICE_WEBGL_LOBBY_ROUTE_BUTTON=FAIL | reason=voice_button_missing");
-                enabled = false;
+                // Voice is chosen by the WebGL lobby bootstrap, not by a required UI button.
+                // The button has intentionally been removed from Lobby 1 WebGL.
+                Debug.Log("VOICE_WEBGL_LOBBY_ROUTE_BUTTON=OPTIONAL_ABSENT | route=auto_voice");
                 return;
             }
 

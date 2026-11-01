@@ -70,38 +70,18 @@ namespace Network_A.Realtime.Stability.WebGL
         //* این تابع تغییر واقعی وضعیت اینترنت مرورگر را مستقل از صدا دنبال می کند.
         private void Update()
         {
-            bool browserOnline =
-                WebGLWebSocketRealtimeTransport.IsBrowserOnline;
-
-            ObservePermanentRecoveryFailure();
-
+            bool browserOnline = WebGLWebSocketRealtimeTransport.IsBrowserOnline;
             if (!browserStateObserved)
             {
                 browserStateObserved = true;
                 browserWasOnline = browserOnline;
-                TryStartFreshLobbyRecovery(browserOnline);
                 return;
             }
-
             if (browserWasOnline && !browserOnline)
-            {
-                BeginRecoveryFromBrowserOffline();
-            }
-
-            if (recoveryPending &&
-                !recoveryRunning &&
-                browserOnline)
-            {
-                recoveryRunning = true;
-                int generation = recoveryGeneration;
-                _ = RecoverRealtimeAndRoomAsync(
-                    generation,
-                    lifetimeCts.Token);
-            }
-
-            TryStartFreshLobbyRecovery(browserOnline);
-
+                RealtimeRoomGameServerManager.Instance?.RequestWebGLHealthFirstReconnect(
+                    "legacy_wrapper_browser_offline_advisory");
             browserWasOnline = browserOnline;
+            // All automatic WebGL connection/room recovery is owned by the Manager.
         }
 
         //* این تابع پایان مهلت روم قدیمی را تشخیص می دهد و بازیابی همان روم را برای همیشه متوقف می کند.
@@ -643,60 +623,22 @@ namespace Network_A.Realtime.Stability.WebGL
         private async Task<bool> EnsureGlobalNetworkOnlineAsync(
             CancellationToken cancellationToken)
         {
-            StartupNetworkSceneRouter router =
-                StartupNetworkSceneRouter.Instance;
-
-            if (router == null ||
-                !WebGLWebSocketRealtimeTransport.IsBrowserOnline)
-            {
-                return false;
-            }
-
+            cancellationToken.ThrowIfCancellationRequested();
             recoveryNetworkProbeAttempts += 1;
-            bool checkedOnline;
+            WebGLSingleHealthAuthority.Result health =
+                await WebGLSingleHealthAuthority.ProbeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
 
-            // navigator.onLine only reports that a network interface exists.
-            // Even when the global state still says Online, require a fresh
-            // request to the real server before opening /ws.  This prevents the
-            // ERR_NETWORK_CHANGED race visible in Build 0064.
-            if (StartupNetworkSceneRouter.IsOnline)
-            {
-                checkedOnline =
-                    await router.CheckNetFastSilentAsync(
-                        cancellationToken);
-
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-            else
-            {
-                ResolvePrivateMethods();
-                if (networkCheckMethod == null) return false;
-
-                object result = networkCheckMethod.Invoke(router, null);
-                Task<bool> checkTask = result as Task<bool>;
-                if (checkTask == null) return false;
-
-                cancellationToken.ThrowIfCancellationRequested();
-                checkedOnline = await checkTask;
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            bool ready =
-                checkedOnline &&
-                StartupNetworkSceneRouter.IsOnline &&
-                WebGLWebSocketRealtimeTransport.IsBrowserOnline;
+            if (health.Reachable)
+                StartupNetworkSceneRouter.Instance?.ConfirmWebGLServerReachableFromHealth();
 
             Debug.Log(
                 "REALTIME_WEBGL_GENERAL_RECONNECT=HEALTH_" +
-                (ready ? "PASS" : "WAIT") +
+                (health.Reachable ? "PASS" : "WAIT") +
+                " | authority=webgl_single_health" +
                 " | probeAttempt=" + recoveryNetworkProbeAttempts +
-                " | browserOnline=" +
-                    WebGLWebSocketRealtimeTransport.IsBrowserOnline +
-                " | globalNetworkState=" +
-                    StartupNetworkSceneRouter.CurrentState +
-                " | serverReachable=" + checkedOnline);
-
-            return ready;
+                " | httpStatus=" + health.StatusCode);
+            return health.Reachable;
         }
 
         //* این تابع تا تلاش بعدی روی زمان واقعی یونیتی صبر می کند.

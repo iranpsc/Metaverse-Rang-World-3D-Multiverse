@@ -15,7 +15,8 @@ namespace Network_A.Voice.Client.BrowserAudio
         private static void Initialize()
         {
             SceneManager.sceneLoaded -= HandleSceneLoaded;
-            SceneManager.sceneLoaded += HandleSceneLoaded;
+            // Scene-authored voice button positions are authoritative.
+            // Do not install the WebGL runtime layout override.
         }
 
         private static void HandleSceneLoaded(

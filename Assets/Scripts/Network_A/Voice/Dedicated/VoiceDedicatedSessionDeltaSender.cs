@@ -25,6 +25,7 @@ namespace Network_A.Voice.Dedicated
         private const float MaximumRetryDelaySeconds = 4.0f;
         private const float RetryDelayMultiplier = 1.75f;
         private const int PermanentConflictStatusCode = 409;
+        private const float SustainedReadinessConflictSeconds = 12.0f;
 
         private readonly Queue<VoiceDedicatedSessionDelta> pendingEvents =
             new Queue<VoiceDedicatedSessionDelta>();
@@ -38,6 +39,9 @@ namespace Network_A.Voice.Dedicated
         private bool queueFaulted;
         private float nextRetryAtRealtime;
         private float currentRetryDelaySeconds = InitialRetryDelaySeconds;
+        private float readinessBlockedSinceRealtime = -1.0f;
+        private long readinessBlockedHeadSequence;
+        private string readinessBlockedHeadEpochId = string.Empty;
 
         public int PendingEventCount { get { return pendingEvents.Count; } }
         public bool IsConfigured { get { return configured; } }
@@ -76,6 +80,7 @@ namespace Network_A.Voice.Dedicated
             LastFailure = string.Empty;
             currentRetryDelaySeconds = InitialRetryDelaySeconds;
             nextRetryAtRealtime = 0.0f;
+            ClearReadinessBlock();
 
             if (lifecycleCts != null)
             {
@@ -260,6 +265,7 @@ namespace Network_A.Voice.Dedicated
                             result.StatusCode,
                             result.RawBody))
                     {
+                        RememberReadinessBlockedHead(batch[0]);
                         RegisterFailure(
                             "VOICE_G4_PAIR_CONNECTION_NOT_READY_RETRY" +
                             " | " + rejectedError);
@@ -268,10 +274,12 @@ namespace Network_A.Voice.Dedicated
 
                     if (result.StatusCode == PermanentConflictStatusCode)
                     {
+                        ClearReadinessBlock();
                         RegisterPermanentQueueFault(rejectedError);
                         return;
                     }
 
+                    ClearReadinessBlock();
                     RegisterFailure(rejectedError);
                     return;
                 }
@@ -306,6 +314,7 @@ namespace Network_A.Voice.Dedicated
                 }
 
                 RemoveAcceptedBatch(batch.Length);
+                ClearReadinessBlock();
                 TotalAcceptedEvents += batch.Length;
                 TotalSuccessfulBatches += 1;
                 LastFailure = string.Empty;
@@ -466,6 +475,7 @@ namespace Network_A.Voice.Dedicated
         {
             int clearedCount = pendingEvents.Count;
             pendingEvents.Clear();
+            ClearReadinessBlock();
             queueFaulted = false;
             LastFailure = string.Empty;
             currentRetryDelaySeconds = InitialRetryDelaySeconds;
@@ -475,6 +485,103 @@ namespace Network_A.Voice.Dedicated
                 "VOICE_G3_DELTA_SENDER_QUEUE_RESET=PASS" +
                 " | cleared=" + clearedCount +
                 " | reason=" + CompactForLog(reason));
+        }
+
+        //* این تابع شناسه نخستین رویداد مسدود را ثبت می‌کند؛ Retryهای همان رویداد زمان انتظار را از نو شروع نمی‌کنند.
+        private void RememberReadinessBlockedHead(VoiceDedicatedSessionDelta head)
+        {
+            if (head == null) return;
+
+            if (readinessBlockedSinceRealtime < 0.0f ||
+                readinessBlockedHeadSequence != head.sourceSequence ||
+                !string.Equals(
+                    readinessBlockedHeadEpochId,
+                    head.authorityEpochId,
+                    StringComparison.Ordinal))
+            {
+                readinessBlockedSinceRealtime = Time.realtimeSinceStartup;
+                readinessBlockedHeadSequence = head.sourceSequence;
+                readinessBlockedHeadEpochId = head.authorityEpochId;
+            }
+        }
+
+        //* این تابع فقط پس از تایید Snapshot معتبر در مانیتور، رویداد مسدود قدیمی را برای بررسی بازیابی عرضه می‌کند.
+        public bool TryGetSustainedReadinessBlockedHead(
+            out VoiceDedicatedSessionDelta head,
+            out float blockedSeconds)
+        {
+            head = null;
+            blockedSeconds = 0.0f;
+
+            if (!configured || !transportEnabled || queueFaulted ||
+                sendLoopRunning || pendingEvents.Count == 0 ||
+                readinessBlockedSinceRealtime < 0.0f)
+            {
+                return false;
+            }
+
+            VoiceDedicatedSessionDelta first = pendingEvents.Peek();
+            if (first.sourceSequence != readinessBlockedHeadSequence ||
+                !string.Equals(
+                    first.authorityEpochId,
+                    readinessBlockedHeadEpochId,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            blockedSeconds = Mathf.Max(
+                0.0f,
+                Time.realtimeSinceStartup - readinessBlockedSinceRealtime);
+            if (blockedSeconds < SustainedReadinessConflictSeconds) return false;
+
+            head = first;
+            return true;
+        }
+
+        //* این تابع فقط Heartbeat تکراری همان نشست قفل‌شده را به تعویق می‌اندازد؛ SourceSequence جدیدی مصرف نمی‌شود.
+        public bool ShouldDeferSessionGuard(string roomId, string sessionId)
+        {
+            if (readinessBlockedSinceRealtime < 0.0f ||
+                pendingEvents.Count == 0 ||
+                string.IsNullOrWhiteSpace(roomId) ||
+                string.IsNullOrWhiteSpace(sessionId))
+            {
+                return false;
+            }
+
+            VoiceDedicatedSessionDelta head = pendingEvents.Peek();
+            return head.sourceSequence == readinessBlockedHeadSequence &&
+                   string.Equals(
+                       head.authorityEpochId,
+                       readinessBlockedHeadEpochId,
+                       StringComparison.Ordinal) &&
+                   string.Equals(head.roomId, roomId, StringComparison.Ordinal) &&
+                   string.Equals(head.sessionId, sessionId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        //* این تابع از پاک‌شدن رویدادهای معوق دیگر روم‌ها هنگام بازسازی Epoch جلوگیری می‌کند.
+        public bool PendingEventsBelongToRoom(string roomId)
+        {
+            if (string.IsNullOrWhiteSpace(roomId)) return false;
+            foreach (VoiceDedicatedSessionDelta delta in pendingEvents)
+            {
+                if (delta == null ||
+                    !string.Equals(delta.roomId, roomId, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return pendingEvents.Count > 0;
+        }
+
+        //* این تابع پس از پذیرش قطعی یا تعویض Epoch، وضعیت Retry موقت را پاک می‌کند.
+        private void ClearReadinessBlock()
+        {
+            readinessBlockedSinceRealtime = -1.0f;
+            readinessBlockedHeadSequence = 0;
+            readinessBlockedHeadEpochId = string.Empty;
         }
 
         //* این تابع فقط خطای موقت آماده‌نبودن اتصال صوتی را بدون حذف Queue یا تغییر Epoch دوباره قابل ارسال می‌کند.

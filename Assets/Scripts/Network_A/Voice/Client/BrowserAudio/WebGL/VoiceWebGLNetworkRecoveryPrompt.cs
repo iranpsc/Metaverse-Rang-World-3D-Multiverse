@@ -79,6 +79,10 @@ namespace Network_A.Voice.Client.BrowserAudio
         private const float ManualFullResetCooldownSeconds = 10f;
         private const float PermanentButtonRefreshSeconds = 0.5f;
         private const float FaultSettleSeconds = 0.8f;
+        // A short SFU/media reconnection is not a reason to show the manual
+        // full-voice reset panel while a valid logical session still exists.
+        private const float PersistentMediaFailureSeconds = 12f;
+        private const float MissingSessionGraceSeconds = 12f;
         private const float RetryCooldownSeconds = 12f;
         private const float FaultMemorySeconds = 20f;
 
@@ -232,6 +236,16 @@ namespace Network_A.Voice.Client.BrowserAudio
             if (missingNearSession && !evidence)
                 lastFaultReason = "authenticated_near_peer_session_missing";
 
+            // If proximity authority has not yet delivered a session, do not
+            // mistake concurrent media noise for a failure requiring a manual
+            // full-voice reset. Let the normal authority path rebuild it first.
+            if (!displaying && runtime.ActiveSessionCount == 0 &&
+                !missingNearSession)
+            {
+                firstFaultAt = -1f;
+                return;
+            }
+
             // Display is latched: never auto-reconnect or auto-dismiss.
             // A shown prompt waits for an explicit user click, except when the
             // player leaves this scene/room or no nearby participant remains.
@@ -252,7 +266,12 @@ namespace Network_A.Voice.Client.BrowserAudio
             {
                 if (firstFaultAt < 0f)
                     firstFaultAt = now;
-                if (now - firstFaultAt < FaultSettleSeconds ||
+                // An active logical session should survive ordinary media
+                // recovery attempts without prompting for a destructive reset.
+                float settleSeconds = runtime.ActiveSessionCount > 0
+                    ? PersistentMediaFailureSeconds
+                    : FaultSettleSeconds;
+                if (now - firstFaultAt < settleSeconds ||
                     now < nextRecoveryAt)
                     return;
                 ShowPrompt(now);
@@ -330,7 +349,8 @@ namespace Network_A.Voice.Client.BrowserAudio
 
             if (missingNearSessionSince < 0f)
                 missingNearSessionSince = now;
-            return now - missingNearSessionSince >= 5f;
+            return now - missingNearSessionSince >=
+                MissingSessionGraceSeconds;
         }
 
         private void ResolveVoiceComponents()
@@ -485,9 +505,16 @@ namespace Network_A.Voice.Client.BrowserAudio
                 // The control reconnect below must not inherit a stopped stream.
                 bool captureRestarted = selectedMic && adapter != null &&
                     adapter.RecreateAudioPipelineForUserRecovery();
-                bool result = await runtime.DisconnectForPlayerUnavailableAsync(
-                    "user_full_voice_reconnect_without_room_exit", 1500,
-                    CancellationToken.None);
+                // A receiver-only user still needs fresh WebRTC media transport.
+                if (!captureRestarted && adapter != null &&
+                    resetMediaSessionMethod != null)
+                    resetMediaSessionMethod.Invoke(adapter,
+                        new object[] { "user_full_voice_rebuild" });
+
+                // Close only the client transport and reuse its regular cleanup.
+                // A protocol DISCONNECT would close the authoritative session.
+                bool result = await runtime.RestartVoiceTransportForManualRecoveryAsync(
+                    "user_full_voice_rebuild_without_room_exit");
                 if (runtime != null && runtime.IsSpeakerOff != selectedSpeakerOff)
                     runtime.SetSpeakerOff(selectedSpeakerOff);
                 if (selectedMic && runtime != null)
@@ -504,8 +531,9 @@ namespace Network_A.Voice.Client.BrowserAudio
                     retryAtField?.SetValue(adapter, 0f);
                 // VoiceClientAutoConnector reconnects control automatically.
                 Debug.Log("VOICE_WEBGL_RECOVERY_PROMPT=FULL_VOICE_RECONNECT" +
-                    " | result=" + result +
+                    " | localResetComplete=" + result +
                     " | captureRestarted=" + captureRestarted +
+                    " | protocolDisconnectSent=False" +
                     " | roomExit=False");
             }
             catch (Exception error)

@@ -1,4 +1,8 @@
+﻿using System;
 using System.Collections;
+using Network_A.DedicatedGameServer.Client;
+using Network_A.Realtime.Controllers;
+using Network_A.Voice.Dedicated;
 using RTLTMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -28,6 +32,22 @@ namespace Network_A.Voice.Client.Runtime
         private bool displayedStatusInitialized;
         private bool displayedAuthenticated;
         private int displayedSessionCount = -1;
+
+        // Visual-only connection indicators. Never rotate a Button's own
+        // RectTransform: that would change the UI hit area and mobile layout.
+        private const float SessionSpinnerSpeedDegrees = 230f;
+        private const int SessionSpinnerSegments = 10;
+        private const float SessionSpinnerRadius = 57f;
+        private RectTransform microphoneSessionSpinner;
+        private RectTransform speakerSessionSpinner;
+        private RectTransform microphoneSessionStatusBadge;
+        private RectTransform speakerSessionStatusBadge;
+        private bool sessionSpinnerVisible;
+        private const float SessionSpinnerPeerCheckIntervalSeconds = 0.25f;
+        private float nextSessionSpinnerPeerCheckAt;
+        private bool cachedNearbyVoicePeer;
+        private DedicatedRemotePlayerStateReceiver sessionSpinnerRemoteStates;
+        private G7ThreeDModeController sessionSpinnerThreeDMode;
 
         //* این تابع هنگام فعال شدن پنل، دکمه‌های دستی صحنه را به کنترل‌های صوت وصل می‌کند.
         private void OnEnable()
@@ -63,7 +83,10 @@ namespace Network_A.Voice.Client.Runtime
         //* این تابع هنگام غیرفعال شدن پنل، اتصال دکمه‌ها را آزاد می‌کند.
         private void OnDisable()
         {
+            SetSessionSpinnerVisible(false);
             StopAllCoroutines();
+            nextSessionSpinnerPeerCheckAt = 0f;
+            cachedNearbyVoicePeer = false;
             microphonePermissionRequestRunning = false;
             if (microphoneButton != null)
             {
@@ -83,6 +106,7 @@ namespace Network_A.Voice.Client.Runtime
         {
             TryResolveRuntime();
             UpdateUi();
+            AnimateSessionSpinners();
         }
 
         //* این تابع Runtime صوت را از ریشه ساخته‌شده توسط مسیر Voice پیدا می‌کند.
@@ -252,6 +276,15 @@ namespace Network_A.Voice.Client.Runtime
                     ? runtime.ActiveSessionCount
                     : 0;
 
+            // An absent session is not an active connection attempt when
+            // no eligible Dedicated participant is within voice-entry range.
+            // Visual only: this never starts, stops or resets any connection.
+            bool waitingForNearbyVoiceSession =
+                runtimeReady && runtime.IsVoiceEligible &&
+                (!authenticated || sessionCount <= 0) &&
+                IsNearbyVoicePeerPresent();
+            SetSessionSpinnerVisible(waitingForNearbyVoiceSession);
+
             if (statusText != null &&
                 (!displayedStatusInitialized ||
                  displayedAuthenticated != authenticated ||
@@ -259,9 +292,11 @@ namespace Network_A.Voice.Client.Runtime
             {
                 statusText.text =
                     "وضعیت صدا: " +
-                    (authenticated
+                    (authenticated && sessionCount > 0
                         ? "وصل"
-                        : "در انتظار اتصال") +
+                        : authenticated
+                            ? "در انتظار تشکیل نشست"
+                            : "در انتظار اتصال") +
                     "\n" +
                     "نشست فعال: " +
                     sessionCount;
@@ -329,6 +364,251 @@ namespace Network_A.Voice.Client.Runtime
                 if (speakerButton.interactable != runtimeReady)
                     speakerButton.interactable = runtimeReady;
             }
+        }
+
+        // Follow the same Dedicated room/position source and 3m entry policy
+        // already used by the WebGL voice recovery prompt. Never infer a
+        // nearby peer from ActiveSessionCount alone or from a cached scene
+        // object during a disconnected/room-exit state.
+        private bool IsNearbyVoicePeerPresent()
+        {
+            RealtimeRoomGameServerManager room =
+                RealtimeRoomGameServerManager.Instance;
+            DedicatedGameServerWsClient dedicated =
+                DedicatedGameServerWsClient.Instance;
+
+            if (room == null || !room.IsRealtimeReady || !room.IsJoinedRoom ||
+                room.IsRoomExitInProgress ||
+                string.IsNullOrWhiteSpace(room.CurrentRoomId) ||
+                dedicated == null || !dedicated.IsReady ||
+                !string.Equals(dedicated.RoomId, room.CurrentRoomId,
+                    StringComparison.Ordinal) ||
+                !dedicated.HasRecentInboundMessage(8f))
+            {
+                cachedNearbyVoicePeer = false;
+                nextSessionSpinnerPeerCheckAt = 0f;
+                return false;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            if (now < nextSessionSpinnerPeerCheckAt)
+                return cachedNearbyVoicePeer;
+
+            nextSessionSpinnerPeerCheckAt =
+                now + SessionSpinnerPeerCheckIntervalSeconds;
+            cachedNearbyVoicePeer = false;
+
+            if (sessionSpinnerRemoteStates == null)
+                sessionSpinnerRemoteStates =
+                    FindObjectOfType<DedicatedRemotePlayerStateReceiver>();
+            if (sessionSpinnerThreeDMode == null)
+                sessionSpinnerThreeDMode =
+                    FindObjectOfType<G7ThreeDModeController>();
+
+            Transform local = sessionSpinnerThreeDMode != null
+                ? sessionSpinnerThreeDMode.GetLocalPlayerTransform()
+                : null;
+            if (local == null || sessionSpinnerRemoteStates == null ||
+                sessionSpinnerRemoteStates.RemotePlayerCount == 0)
+                return false;
+
+            var peers = sessionSpinnerRemoteStates.CreateSnapshot();
+            for (int i = 0; i < peers.Count; i++)
+            {
+                DedicatedRemotePlayerState peer = peers[i];
+                if (peer == null ||
+                    !string.Equals(peer.roomId, room.CurrentRoomId,
+                        StringComparison.Ordinal))
+                    continue;
+
+                if (Vector3.Distance(local.position, peer.Position) <=
+                    VoiceDedicatedProximityEvaluator.EnterDistanceMeters)
+                {
+                    cachedNearbyVoicePeer = true;
+                    break;
+                }
+            }
+            return cachedNearbyVoicePeer;
+        }
+
+        private void SetSessionSpinnerVisible(bool visible)
+        {
+            bool wasVisible = sessionSpinnerVisible;
+            if (visible)
+            {
+                if (microphoneSessionSpinner == null)
+                    microphoneSessionSpinner = CreateSessionSpinner(
+                        microphoneButton, "Voice_Microphone_Connecting_Ring");
+
+                if (speakerSessionSpinner == null)
+                    speakerSessionSpinner = CreateSessionSpinner(
+                        speakerButton, "Voice_Speaker_Connecting_Ring");
+
+                if (microphoneSessionStatusBadge == null)
+                    microphoneSessionStatusBadge = CreateSessionStatusBadge(
+                        microphoneButton, "Voice_Microphone_Connecting_Status");
+
+                if (speakerSessionStatusBadge == null)
+                    speakerSessionStatusBadge = CreateSessionStatusBadge(
+                        speakerButton, "Voice_Speaker_Connecting_Status");
+            }
+
+            // Only decorations change; button interaction and Voice stay intact.
+            ApplySessionSpinnerVisibility(microphoneSessionSpinner, visible);
+            ApplySessionSpinnerVisibility(speakerSessionSpinner, visible);
+            ApplySessionSpinnerVisibility(microphoneSessionStatusBadge, visible);
+            ApplySessionSpinnerVisibility(speakerSessionStatusBadge, visible);
+            sessionSpinnerVisible = visible &&
+                (microphoneSessionSpinner != null || speakerSessionSpinner != null);
+
+            if (wasVisible != sessionSpinnerVisible)
+            {
+                Debug.Log("VOICE_SESSION_UI_SPINNER=" +
+                    (sessionSpinnerVisible ? "START" : "STOP") +
+                    " | source=voice_client_runtime" +
+                    " | visualOnly=True");
+            }
+        }
+
+        private static void ApplySessionSpinnerVisibility(
+            RectTransform spinner, bool visible)
+        {
+            if (spinner == null)
+                return;
+
+            if (spinner.gameObject.activeSelf != visible)
+                spinner.gameObject.SetActive(visible);
+
+            if (!visible)
+                spinner.localRotation = Quaternion.identity;
+        }
+
+        private void AnimateSessionSpinners()
+        {
+            if (!sessionSpinnerVisible)
+                return;
+
+            float angle = SessionSpinnerSpeedDegrees * Time.unscaledDeltaTime;
+            if (microphoneSessionSpinner != null)
+                microphoneSessionSpinner.Rotate(0f, 0f, -angle);
+            if (speakerSessionSpinner != null)
+                speakerSessionSpinner.Rotate(0f, 0f, -angle);
+        }
+
+        private static RectTransform CreateSessionSpinner(
+            Button button, string spinnerName)
+        {
+            if (button == null)
+                return null;
+
+            Transform existing = button.transform.Find(spinnerName);
+            if (existing != null)
+                return existing as RectTransform;
+
+            GameObject root = new GameObject(
+                spinnerName, typeof(RectTransform));
+            root.layer = button.gameObject.layer;
+
+            RectTransform spinner = root.GetComponent<RectTransform>();
+            spinner.SetParent(button.transform, false);
+            spinner.anchorMin = new Vector2(0.5f, 0.5f);
+            spinner.anchorMax = new Vector2(0.5f, 0.5f);
+            spinner.pivot = new Vector2(0.5f, 0.5f);
+            spinner.anchoredPosition = Vector2.zero;
+            spinner.sizeDelta = Vector2.zero;
+            spinner.localScale = Vector3.one;
+
+            for (int i = 0; i < SessionSpinnerSegments; i++)
+            {
+                GameObject segment = new GameObject(
+                    "Segment_" + i,
+                    typeof(RectTransform),
+                    typeof(CanvasRenderer),
+                    typeof(Image));
+                segment.layer = button.gameObject.layer;
+
+                RectTransform rect = segment.GetComponent<RectTransform>();
+                rect.SetParent(spinner, false);
+                rect.anchorMin = new Vector2(0.5f, 0.5f);
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.sizeDelta = new Vector2(4.5f, 11f);
+
+                float degrees = i * 360f / SessionSpinnerSegments;
+                float radians = degrees * Mathf.Deg2Rad;
+                rect.anchoredPosition = new Vector2(
+                    Mathf.Sin(radians) * SessionSpinnerRadius,
+                    Mathf.Cos(radians) * SessionSpinnerRadius);
+                rect.localRotation = Quaternion.Euler(0f, 0f, -degrees);
+
+                Image image = segment.GetComponent<Image>();
+                image.raycastTarget = false;
+                image.color = new Color(
+                    1f, 0.66f, 0.19f,
+                    0.22f + 0.73f * (i + 1f) / SessionSpinnerSegments);
+            }
+
+            Debug.Log("VOICE_SESSION_UI_SPINNER=READY" +
+                " | target=" + button.name +
+                " | visualOnly=True");
+            return spinner;
+        }
+
+        private static RectTransform CreateSessionStatusBadge(
+            Button button, string badgeName)
+        {
+            if (button == null)
+                return null;
+
+            Transform existing = button.transform.Find(badgeName);
+            if (existing != null)
+                return existing as RectTransform;
+
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (font == null)
+            {
+                Debug.LogWarning("VOICE_SESSION_UI_BADGE_FONT=UNAVAILABLE");
+                return null;
+            }
+
+            GameObject badgeObject = new GameObject(
+                badgeName, typeof(RectTransform),
+                typeof(CanvasRenderer), typeof(Image));
+            badgeObject.layer = button.gameObject.layer;
+
+            RectTransform badge = badgeObject.GetComponent<RectTransform>();
+            badge.SetParent(button.transform, false);
+            badge.anchorMin = new Vector2(0.5f, 0.5f);
+            badge.anchorMax = new Vector2(0.5f, 0.5f);
+            badge.pivot = new Vector2(0.5f, 0.5f);
+            badge.anchoredPosition = new Vector2(38f, 38f);
+            badge.sizeDelta = new Vector2(26f, 26f);
+            badge.localScale = Vector3.one;
+
+            Image background = badgeObject.GetComponent<Image>();
+            background.raycastTarget = false;
+            background.color = new Color(0.22f, 0.14f, 0.06f, 0.94f);
+
+            GameObject markObject = new GameObject(
+                "Connecting_Mark", typeof(RectTransform),
+                typeof(CanvasRenderer), typeof(Text));
+            markObject.layer = button.gameObject.layer;
+            RectTransform markRect = markObject.GetComponent<RectTransform>();
+            markRect.SetParent(badge, false);
+            markRect.anchorMin = Vector2.zero;
+            markRect.anchorMax = Vector2.one;
+            markRect.offsetMin = Vector2.zero;
+            markRect.offsetMax = Vector2.zero;
+
+            Text mark = markObject.GetComponent<Text>();
+            mark.font = font;
+            mark.text = "?";
+            mark.fontSize = 21;
+            mark.fontStyle = FontStyle.Bold;
+            mark.alignment = TextAnchor.MiddleCenter;
+            mark.color = new Color(1f, 0.85f, 0.45f, 1f);
+            mark.raycastTarget = false;
+            return badge;
         }
     }
 }

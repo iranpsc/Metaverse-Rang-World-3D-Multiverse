@@ -1,0 +1,1 @@
+Run npm install && npm run bundle in client/ to create VME2WebRtcVoice.bundle.js. Do not build Unity until the bundle exists.

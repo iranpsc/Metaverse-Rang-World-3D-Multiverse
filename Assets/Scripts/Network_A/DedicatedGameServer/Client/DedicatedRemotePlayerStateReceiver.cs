@@ -29,6 +29,8 @@ namespace Network_A.DedicatedGameServer.Client
         private readonly Dictionary<string, long> dict_lastSequenceByPlayerId = new Dictionary<string, long>();
         private readonly Dictionary<string, DedicatedRemotePlayerVisibilityEvent> dict_hiddenVisibilityByPlayerId =
             new Dictionary<string, DedicatedRemotePlayerVisibilityEvent>();
+        private readonly Dictionary<string, DedicatedRemotePlayerConnectionEvent> dict_disconnectedByPlayerId =
+            new Dictionary<string, DedicatedRemotePlayerConnectionEvent>();
 
         private bool wsEventsBound;
         private DedicatedGameServerWsClient boundWsClient;
@@ -42,6 +44,7 @@ namespace Network_A.DedicatedGameServer.Client
         public event Action<DedicatedRemotePresenceEvent> RemotePlayerJoined;
         public event Action<DedicatedRemotePresenceEvent> RemotePlayerLeft;
         public event Action<DedicatedRemotePlayerVisibilityEvent> RemotePlayerVisibilityChanged;
+        public event Action<DedicatedRemotePlayerConnectionEvent> RemotePlayerConnectionChanged;
         public event Action<DedicatedPlayerStateAcceptedEvent> PlayerStateAccepted;
 
         private void Awake()
@@ -131,6 +134,11 @@ namespace Network_A.DedicatedGameServer.Client
                 dict_hiddenVisibilityByPlayerId.Values);
         }
 
+        public List<DedicatedRemotePlayerConnectionEvent> CreateDisconnectedSnapshot()
+        {
+            return new List<DedicatedRemotePlayerConnectionEvent>(dict_disconnectedByPlayerId.Values);
+        }
+
         private void HandleRawMessageReceived(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return;
@@ -159,6 +167,12 @@ namespace Network_A.DedicatedGameServer.Client
             if (messageType == "player_visibility")
             {
                 HandlePlayerVisibility(raw);
+                return;
+            }
+
+            if (messageType == "player_connection_state")
+            {
+                HandlePlayerConnectionState(raw);
                 return;
             }
 
@@ -247,6 +261,7 @@ namespace Network_A.DedicatedGameServer.Client
                 set_leftNotifiedPlayerIds.Remove(joinedPlayerId);
                 dict_lastSequenceByPlayerId.Remove(joinedPlayerId);
                 dict_hiddenVisibilityByPlayerId.Remove(joinedPlayerId);
+                dict_disconnectedByPlayerId.Remove(joinedPlayerId);
             }
 
             RemotePlayerJoined?.Invoke(evt);
@@ -294,6 +309,7 @@ namespace Network_A.DedicatedGameServer.Client
                 dict_remoteStatesByPlayerId.Remove(playerId);
                 dict_lastSequenceByPlayerId.Remove(playerId);
                 dict_hiddenVisibilityByPlayerId.Remove(playerId);
+                dict_disconnectedByPlayerId.Remove(playerId);
             }
 
             RemotePlayerLeft?.Invoke(evt);
@@ -305,6 +321,32 @@ namespace Network_A.DedicatedGameServer.Client
                           " | onlineCount=" + evt.onlineCount +
                           BuildFormatLog(raw));
             }
+        }
+
+        private void HandlePlayerConnectionState(string raw)
+        {
+            DedicatedRemotePlayerConnectionEvent evt;
+            try
+            {
+                evt = JsonUtility.FromJson<DedicatedRemotePlayerConnectionEvent>(ReadPayloadOrRawJson(raw));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError("[DedicatedRemotePlayerStateReceiver] player_connection_state parse failed | " + ex.Message);
+                return;
+            }
+
+            if (evt == null) return;
+            string playerId = evt.ResolvePlayerId();
+            if (string.IsNullOrWhiteSpace(playerId)) return;
+            if (ignoreOwnPlayerState && wsClient != null &&
+                (string.Equals(playerId, wsClient.PlayerId, StringComparison.Ordinal) ||
+                 string.Equals(playerId, wsClient.UserId, StringComparison.Ordinal))) return;
+
+            evt.rawJson = raw;
+            if (evt.connected) dict_disconnectedByPlayerId.Remove(playerId);
+            else dict_disconnectedByPlayerId[playerId] = evt;
+            RemotePlayerConnectionChanged?.Invoke(evt);
         }
 
         //* این تابع پیام authoritative مخفی یا قابل مشاهده بودن پلیر وب جی ال را دریافت می کند.
@@ -406,6 +448,7 @@ namespace Network_A.DedicatedGameServer.Client
             set_leftNotifiedPlayerIds.Clear();
             dict_lastSequenceByPlayerId.Clear();
             dict_hiddenVisibilityByPlayerId.Clear();
+            dict_disconnectedByPlayerId.Clear();
 
             if (previousCount > 0)
             {
@@ -642,6 +685,27 @@ namespace Network_A.DedicatedGameServer.Client
             if (!string.IsNullOrWhiteSpace(playerId)) return playerId.Trim();
             if (!string.IsNullOrWhiteSpace(userId)) return userId.Trim();
             if (!string.IsNullOrWhiteSpace(connectionId)) return connectionId.Trim();
+            return string.Empty;
+        }
+    }
+
+    [Serializable]
+    public class DedicatedRemotePlayerConnectionEvent
+    {
+        public string type;
+        public bool connected;
+        public string userId;
+        public string playerId;
+        public string connectionId;
+        public string roomId;
+        public string reason;
+        public long serverTimeUnixMs;
+        public string rawJson;
+
+        public string ResolvePlayerId()
+        {
+            if (!string.IsNullOrWhiteSpace(playerId)) return playerId.Trim();
+            if (!string.IsNullOrWhiteSpace(userId)) return userId.Trim();
             return string.Empty;
         }
     }

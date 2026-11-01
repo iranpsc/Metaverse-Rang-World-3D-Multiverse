@@ -78,35 +78,41 @@ namespace Network_A.Voice.Client.BrowserAudio
 
         private void HandleVoiceFailure(string message)
         {
-            if (string.IsNullOrEmpty(message) ||
-                !message.Contains("Voice connection preparation failed.") ||
-                !(message.StartsWith("Voice authentication failed: 6 |", StringComparison.Ordinal) ||
-                  message.StartsWith("Voice authentication failed: 7 |", StringComparison.Ordinal)))
+            bool authCode6 = !string.IsNullOrEmpty(message) &&
+                message.StartsWith("Voice authentication failed: 6 |", StringComparison.Ordinal);
+            bool authCode7 = !string.IsNullOrEmpty(message) &&
+                message.StartsWith("Voice authentication failed: 7 |", StringComparison.Ordinal);
+            if ((!authCode6 && !authCode7) ||
+                !message.Contains("Voice connection preparation failed."))
                 return;
 
             if (repairing || Time.realtimeSinceStartup < nextRepairAt)
                 return;
 
             RealtimeRoomGameServerManager room = RealtimeRoomGameServerManager.Instance;
-            if (room == null || !room.IsRealtimeReady || !room.IsJoinedRoom ||
-                room.IsRoomExitInProgress || room.IsRecoveryRunning ||
+            if (room == null || room.IsRoomExitInProgress || room.IsRecoveryRunning ||
                 string.IsNullOrWhiteSpace(room.CurrentRoomId) || !MetaverseNetworkClient.isReady)
             {
-                Debug.LogWarning("VOICE_REALTIME_REPAIR=SKIPPED | reason=game_or_realtime_not_ready");
+                Debug.LogWarning("VOICE_REALTIME_REPAIR=SKIPPED | reason=game_or_room_not_ready");
                 return;
             }
 
+            bool requiresFreshTransport = authCode6 || !room.IsRealtimeReady || !room.IsJoinedRoom;
             nextRepairAt = Time.realtimeSinceStartup + MinimumRepairIntervalSeconds;
-            RunRepairAsync(room);
+            RunRepairAsync(room, requiresFreshTransport);
         }
 
-        private async void RunRepairAsync(RealtimeRoomGameServerManager room)
+        private async void RunRepairAsync(RealtimeRoomGameServerManager room, bool requiresFreshTransport)
         {
             repairing = true;
             try
             {
-                Debug.Log("VOICE_REALTIME_REPAIR=START | cause=auth_6_or_7 | preserve_game_server=True");
-                bool success = await room.RevalidateRealtimeMembershipForVoiceAsync();
+                Debug.Log("VOICE_REALTIME_REPAIR=START | mode=" +
+                    (requiresFreshTransport ? "fresh_realtime_transport" : "same_socket_rejoin") +
+                    " | preserve_game_server=True");
+                bool success = requiresFreshTransport
+                    ? await room.RebuildRealtimeMembershipForVoiceAsync()
+                    : await room.RevalidateRealtimeMembershipForVoiceAsync();
                 Debug.Log(success
                     ? "VOICE_REALTIME_REPAIR=PASS | voice_auto_retry=True | room_exit=False"
                     : "VOICE_REALTIME_REPAIR=FAILED | voice_auto_retry=True | room_exit=False");

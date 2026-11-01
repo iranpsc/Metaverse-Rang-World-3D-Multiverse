@@ -104,6 +104,8 @@ namespace Network_A.Voice.Client.Capture
         private VoiceMicrophonePublisher publisher;
         private Thread nativeStartThread;
         private string requestedDevice = string.Empty;
+        private string requestedEndpointId = string.Empty;
+        private bool requestedExplicitSelection;
         private string nativeStartError = string.Empty;
         private string nativeRecoveryReason = string.Empty;
         private float nextDevicePollAt;
@@ -249,13 +251,25 @@ namespace Network_A.Voice.Client.Capture
             if (publisher == null || publisher.IsMuted) return;
             if (nativeDisabledForSession || nativeStarted || nativeStartInProgress) return;
 
-            if (!TryGetSelectedDevice(out requestedDevice, out string resolverError))
+            // Optional in-app selection. Without it, preserve the exact original default path.
+            requestedExplicitSelection = VoiceWindowsMicDeviceSelection.TryGetPreferred(
+                out string selectedId, out string selectedName);
+            if (requestedExplicitSelection)
             {
-                requestedDevice = "<windows-default>";
-                Debug.LogWarning(
-                    "VOICE_WINDOWS_NATIVE_DEVICE_RESOLVER_WARNING" +
-                    " | reason=" + Safe(resolverError) +
-                    " | nativeStartUsesDefaultEndpoint=True");
+                requestedEndpointId = selectedId;
+                requestedDevice = selectedName;
+            }
+            else
+            {
+                requestedEndpointId = string.Empty;
+                if (!TryGetSelectedDevice(out requestedDevice, out string resolverError))
+                {
+                    requestedDevice = "<windows-default>";
+                    Debug.LogWarning(
+                        "VOICE_WINDOWS_NATIVE_DEVICE_RESOLVER_WARNING" +
+                        " | reason=" + Safe(resolverError) +
+                        " | nativeStartUsesDefaultEndpoint=True");
+                }
             }
 
             nextDevicePollAt = Time.unscaledTime + DevicePollSeconds;
@@ -265,7 +279,11 @@ namespace Network_A.Voice.Client.Capture
             nativeStartError = string.Empty;
             nativeStartInProgress = true;
 
-            nativeStartThread = new Thread(NativeStartThreadMain)
+            string endpointIdForStart = requestedEndpointId;
+            string deviceNameForStart = requestedDevice;
+            bool explicitlySelectedForStart = requestedExplicitSelection;
+            nativeStartThread = new Thread(() => NativeStartThreadMain(
+                endpointIdForStart, deviceNameForStart, explicitlySelectedForStart))
             {
                 IsBackground = true,
                 Name = "VME2 Unity Native Capture Start"
@@ -273,7 +291,8 @@ namespace Network_A.Voice.Client.Capture
             nativeStartThread.Start();
         }
 
-        private void NativeStartThreadMain()
+        private void NativeStartThreadMain(
+            string endpointIdForStart, string deviceNameForStart, bool explicitlySelectedForStart)
         {
             bool success = false;
             string error = string.Empty;
@@ -314,16 +333,39 @@ namespace Network_A.Voice.Client.Capture
                     }
                     else
                     {
-                        int startResult =
-                            Vme2WindowsCaptureNativeP921.StartDefaultEx(
-                                CapturePolicyPreferRaw,
-                                AutoChannel);
+                        // Prefer a stable endpoint ID if available. Unity's
+                        // microphone fallback only knows friendly names, so use
+                        // the already exported native StartByNameEx for those.
+                        // Never silently start the system default for an explicit choice.
+                        int startResult;
+                        string startMethod;
+                        if (explicitlySelectedForStart && endpointIdForStart.Length > 0)
+                        {
+                            startMethod = "StartByIdEx";
+                            startResult = Vme2WindowsCaptureNativeP921.StartByIdEx(
+                                Encoding.UTF8.GetBytes(endpointIdForStart + "\0"),
+                                CapturePolicyPreferRaw, AutoChannel);
+                        }
+                        else if (explicitlySelectedForStart &&
+                                 !string.IsNullOrWhiteSpace(deviceNameForStart))
+                        {
+                            startMethod = "StartByNameEx";
+                            startResult = Vme2WindowsCaptureNativeP921.StartByNameEx(
+                                Encoding.UTF8.GetBytes(deviceNameForStart + "\0"),
+                                CapturePolicyPreferRaw, AutoChannel);
+                        }
+                        else
+                        {
+                            startMethod = "StartDefaultEx";
+                            startResult = Vme2WindowsCaptureNativeP921.StartDefaultEx(
+                                CapturePolicyPreferRaw, AutoChannel);
+                        }
 
                         if (startResult != 0 ||
                             Vme2WindowsCaptureNativeP921.Status() != 2)
                         {
                             error =
-                                "StartDefaultEx failed. code=" + startResult +
+                                startMethod + " failed. code=" + startResult +
                                 " | status=" + Vme2WindowsCaptureNativeP921.Status() +
                                 " | nativeError=" +
                                 ReadNativeText(Vme2WindowsCaptureNativeP921.GetError);
@@ -388,6 +430,15 @@ namespace Network_A.Voice.Client.Capture
                 {
                     if (nativeRecoveryPending)
                     {
+                        ScheduleNativeRecoveryRetry(error);
+                    }
+                    else if (requestedExplicitSelection)
+                    {
+                        // Never silently capture another user's/default microphone
+                        // when a specifically selected endpoint failed to start.
+                        nativeRecoveryPending = true;
+                        nativeRecoveryAttempt = 0;
+                        nativeRecoveryReason = error;
                         ScheduleNativeRecoveryRetry(error);
                     }
                     else
@@ -677,6 +728,21 @@ namespace Network_A.Voice.Client.Capture
 
             nextDevicePollAt = Time.unscaledTime + DevicePollSeconds;
 
+            // Device selection is scoped to this WindowsPlayer process.
+            // A new selection uses the existing native device-recovery cycle,
+            // never a room / realtime / WebRTC reconnect.
+            bool hasPreferred = VoiceWindowsMicDeviceSelection.TryGetPreferred(
+                out string preferredId, out string preferredName);
+            if (hasPreferred != requestedExplicitSelection ||
+                (hasPreferred &&
+                 (!string.Equals(preferredId, requestedEndpointId, StringComparison.Ordinal) ||
+                  !string.Equals(preferredName, requestedDevice, StringComparison.Ordinal))))
+            {
+                BeginNativeDeviceRecovery("in-app microphone selection changed");
+                return;
+            }
+            if (hasPreferred) return;
+
             if (!TryGetSelectedDevice(out string selected, out _)) return;
             if (string.Equals(
                     selected,
@@ -717,6 +783,8 @@ namespace Network_A.Voice.Client.Capture
 
             nativeStarted = false;
             requestedDevice = string.Empty;
+            requestedEndpointId = string.Empty;
+            requestedExplicitSelection = false;
             nextDevicePollAt = 0f;
             firstFrameLogged = false;
             levelFrameCount = 0;
@@ -903,6 +971,12 @@ namespace Network_A.Voice.Client.Capture
 
         [DllImport(LibraryName, EntryPoint = "Vme2WindowsCapture_StartDefaultEx", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int StartDefaultEx(int capturePolicy, int channelIndex);
+
+        [DllImport(LibraryName, EntryPoint = "Vme2WindowsCapture_StartByIdEx", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int StartByIdEx([In] byte[] utf8EndpointId, int capturePolicy, int channelIndex);
+
+        [DllImport(LibraryName, EntryPoint = "Vme2WindowsCapture_StartByNameEx", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int StartByNameEx([In] byte[] utf8DeviceName, int capturePolicy, int channelIndex);
 
         [DllImport(LibraryName, EntryPoint = "Vme2WindowsCapture_Stop", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void Stop();

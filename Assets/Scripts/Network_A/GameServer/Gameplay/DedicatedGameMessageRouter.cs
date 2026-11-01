@@ -13,6 +13,7 @@ namespace Network_A.GameServer.Gameplay
     public class DedicatedGameMessageRouter : MonoBehaviour
     {
         private const string PlayerVisibilityMessageType = "player_visibility";
+        private const string PlayerConnectionStateMessageType = "player_connection_state";
         [Header("References")]
         [SerializeField] private DedicatedWebSocketServer webSocketServer;
         [SerializeField] private DedicatedPlayerRegistry playerRegistry;
@@ -52,6 +53,8 @@ namespace Network_A.GameServer.Gameplay
 
         private readonly ConcurrentDictionary<string, bool> dict_browserHiddenByRoomPlayerKey =
             new ConcurrentDictionary<string, bool>();
+        private readonly ConcurrentDictionary<string, string> dict_disconnectedConnectionByRoomPlayerKey =
+            new ConcurrentDictionary<string, string>();
 
         //* این تابع رفرنس های لازم را هنگام شروع آبجکت پیدا می کند.
         private void Awake()
@@ -801,10 +804,17 @@ namespace Network_A.GameServer.Gameplay
 
             if (session == null) return;
 
+            string connectionStateKey = BuildVisibilityKey(
+                session.roomId,
+                !string.IsNullOrWhiteSpace(session.playerId) ? session.playerId.Trim() : SafeForLog(session.userId));
+            dict_disconnectedConnectionByRoomPlayerKey.TryRemove(connectionStateKey, out string _);
+
             if (session.wasReconnectRebound)
             {
+                BroadcastPlayerConnectionState(session, true, "reconnect_rebound");
                 SendSpawnSnapshotToSession(session);
                 SendVisibilitySnapshotToSession(session);
+                SendDisconnectedConnectionSnapshotToSession(session);
 
                 Debug.Log("[DedicatedGameMessageRouter] Player joined broadcast skipped for reconnect | userId=" +
                           session.userId + " | connectionId=" + session.connectionId +
@@ -836,6 +846,7 @@ namespace Network_A.GameServer.Gameplay
 
             SendSpawnSnapshotToSession(session);
             SendVisibilitySnapshotToSession(session);
+            SendDisconnectedConnectionSnapshotToSession(session);
 
             Debug.Log("[DedicatedGameMessageRouter] Player joined broadcast | userId=" +
                       session.userId + " | sentCount=" + sentCount +
@@ -862,6 +873,9 @@ namespace Network_A.GameServer.Gameplay
                 dict_browserHiddenByRoomPlayerKey.TryRemove(
                     visibilityKey,
                     out bool _);
+                dict_disconnectedConnectionByRoomPlayerKey.TryRemove(
+                    visibilityKey,
+                    out string _);
             }
 
             if (!string.IsNullOrWhiteSpace(session.connectionId))
@@ -1052,6 +1066,45 @@ namespace Network_A.GameServer.Gameplay
             }
 
             return string.Empty;
+        }
+
+        private void BroadcastPlayerConnectionState(DedicatedPlayerSession session, bool connected, string reason)
+        {
+            if (session == null || !broadcastPresenceEvents) return;
+            DedicatedPlayerConnectionStateDto evt = DedicatedPlayerConnectionStateDto.FromSession(
+                session, connected, reason, NowUnixMs());
+            string json = WrapPresenceEnvelope(PlayerConnectionStateMessageType,
+                JsonUtility.ToJson(evt), session.roomId);
+            int count = BroadcastToRoom(session.roomId, json, session.connectionId);
+            Debug.Log("[DedicatedGameMessageRouter] Player connection state | playerId=" +
+                      SafeForLog(evt.playerId) + " | connected=" + connected +
+                      " | sentCount=" + count + " | reason=" + SafeForLog(reason));
+        }
+
+        private void SendDisconnectedConnectionSnapshotToSession(DedicatedPlayerSession targetSession)
+        {
+            if (targetSession == null || playerRegistry == null) return;
+            ConcurrentDictionary<string, DedicatedWebSocketConnection> connections = GetConnections();
+            if (connections == null ||
+                !connections.TryGetValue(targetSession.connectionId, out DedicatedWebSocketConnection targetConnection) ||
+                targetConnection == null || !targetConnection.IsOpen) return;
+
+            System.Collections.Generic.List<DedicatedPlayerSession> sessions = playerRegistry.CreateRoomSnapshot(targetSession.roomId);
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                DedicatedPlayerSession remote = sessions[i];
+                if (remote == null || remote.connectionId == targetSession.connectionId) continue;
+                string playerId = !string.IsNullOrWhiteSpace(remote.playerId)
+                    ? remote.playerId.Trim() : SafeForLog(remote.userId);
+                string key = BuildVisibilityKey(remote.roomId, playerId);
+                if (!dict_disconnectedConnectionByRoomPlayerKey.TryGetValue(key, out string disconnectedId) ||
+                    !string.Equals(disconnectedId, remote.connectionId, StringComparison.Ordinal)) continue;
+
+                DedicatedPlayerConnectionStateDto evt = DedicatedPlayerConnectionStateDto.FromSession(
+                    remote, false, "reconnect_pending_snapshot", NowUnixMs());
+                _ = targetConnection.SendTextAsync(WrapPresenceEnvelope(
+                    PlayerConnectionStateMessageType, JsonUtility.ToJson(evt), remote.roomId));
+            }
         }
 
         //* این تابع وضعیت hidden پلیرهای موجود روم را هنگام ورود یا ریکانکت برای همان کلاینت می فرستد.
@@ -1308,10 +1361,22 @@ namespace Network_A.GameServer.Gameplay
                 }
             }
 
-            // Do not remove authoritative player state merely because the websocket dropped.
-            // DedicatedTicketHandshakeHandler owns the reconnect grace decision. When the registry
-            // finally removes the player (manual close or grace expiry), HandlePlayerRemoved removes
-            // the state through the single authoritative cleanup path.
+            // Preserve player membership for the existing reconnect contract. Only inform
+            // observers that this exact socket is no longer connected; do not emit player_left.
+            DedicatedPlayerSession disconnectedSession = playerRegistry != null
+                ? playerRegistry.GetByConnectionId(connectionId)
+                : null;
+            if (disconnectedSession != null &&
+                string.Equals(disconnectedSession.connectionId, connectionId, StringComparison.Ordinal))
+            {
+                string disconnectedPlayerId = !string.IsNullOrWhiteSpace(disconnectedSession.playerId)
+                    ? disconnectedSession.playerId.Trim()
+                    : SafeForLog(disconnectedSession.userId);
+                string connectionStateKey = BuildVisibilityKey(disconnectedSession.roomId, disconnectedPlayerId);
+                dict_disconnectedConnectionByRoomPlayerKey[connectionStateKey] = connectionId;
+                BroadcastPlayerConnectionState(disconnectedSession, false, reason);
+            }
+
             Debug.Log("[DedicatedGameMessageRouter] Websocket disconnect observed; player state retained until registry removal | connectionId=" +
                       connectionId + " | reason=" + (string.IsNullOrWhiteSpace(reason) ? "unknown" : reason.Trim()));
         }
@@ -1686,6 +1751,35 @@ namespace Network_A.GameServer.Gameplay
         برای تست تک کلاینت، پیام player_state_accepted به همان فرستنده برمی گردد.
         این فایل با GameServerClient قدیمی هیچ تداخلی ندارد.
         */
+    }
+
+    [Serializable]
+    public class DedicatedPlayerConnectionStateDto
+    {
+        public string type;
+        public bool connected;
+        public string userId;
+        public string playerId;
+        public string connectionId;
+        public string roomId;
+        public string reason;
+        public long serverTimeUnixMs;
+
+        public static DedicatedPlayerConnectionStateDto FromSession(
+            DedicatedPlayerSession session, bool isConnected, string reason, long serverTimeUnixMs)
+        {
+            return new DedicatedPlayerConnectionStateDto
+            {
+                type = "player_connection_state",
+                connected = isConnected,
+                userId = session != null ? session.userId : string.Empty,
+                playerId = session != null ? session.playerId : string.Empty,
+                connectionId = session != null ? session.connectionId : string.Empty,
+                roomId = session != null ? session.roomId : string.Empty,
+                reason = reason ?? string.Empty,
+                serverTimeUnixMs = serverTimeUnixMs
+            };
+        }
     }
 
     [Serializable]

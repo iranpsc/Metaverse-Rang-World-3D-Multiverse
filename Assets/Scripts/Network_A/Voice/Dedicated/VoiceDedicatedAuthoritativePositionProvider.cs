@@ -9,47 +9,33 @@ namespace Network_A.Voice.Dedicated
     [DisallowMultipleComponent]
     public sealed class VoiceDedicatedAuthoritativePositionProvider : MonoBehaviour
     {
-        public const long DefaultMaxStateAgeMs = 15000;
-
         private DedicatedPlayerStateStore playerStateStore;
         private readonly HashSet<string> resolvedParticipantKeys =
             new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<string, string> lastRejectReasonByParticipantKey =
             new Dictionary<string, string>(StringComparer.Ordinal);
 
-        private long maxStateAgeMs;
         private bool configured;
 
         public bool IsConfigured { get { return configured; } }
-        public long MaxStateAgeMs { get { return maxStateAgeMs; } }
 
         //* این تابع فراهم‌کننده موقعیت را به مخزن وضعیت پذیرفته‌شده سرور اختصاصی متصل می‌کند.
         public void Configure(
-            DedicatedPlayerStateStore dedicatedPlayerStateStore,
-            long acceptedMaxStateAgeMs)
+            DedicatedPlayerStateStore dedicatedPlayerStateStore)
         {
             if (dedicatedPlayerStateStore == null)
             {
                 throw new ArgumentNullException("dedicatedPlayerStateStore");
             }
 
-            if (acceptedMaxStateAgeMs <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    "acceptedMaxStateAgeMs",
-                    "The accepted state age must be greater than zero.");
-            }
-
             playerStateStore = dedicatedPlayerStateStore;
-            maxStateAgeMs = acceptedMaxStateAgeMs;
             configured = true;
             resolvedParticipantKeys.Clear();
             lastRejectReasonByParticipantKey.Clear();
 
             Debug.Log(
                 "VOICE_V3_DEDICATED_POSITION_PROVIDER_CONFIGURED=PASS" +
-                " | source=DedicatedPlayerStateStore" +
-                " | maxStateAgeMs=" + maxStateAgeMs);
+                " | source=DedicatedPlayerStateStore");
         }
 
         //* این تابع آخرین موقعیت پذیرفته‌شده همان کاربر را فقط در همان روم، اتصال و سرور برمی‌گرداند.
@@ -113,15 +99,10 @@ namespace Network_A.Voice.Dedicated
                 return false;
             }
 
-            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            long stateAgeMs = nowUnixMs - record.serverTimestampUnixMs;
-
             if (record.sequence <= 0 ||
-                record.serverTimestampUnixMs <= 0 ||
-                stateAgeMs < -5000 ||
-                stateAgeMs > maxStateAgeMs)
+                record.serverTimestampUnixMs <= 0)
             {
-                rejectReason = "accepted_player_state_stale_or_invalid";
+                rejectReason = "accepted_player_state_invalid_metadata";
                 LogRejectOnce(participantKey, userId, roomId, rejectReason);
                 return false;
             }
@@ -148,7 +129,6 @@ namespace Network_A.Voice.Dedicated
                     " | roomId=" + roomId +
                     " | connectionId=" + connectionId +
                     " | sequence=" + record.sequence +
-                    " | stateAgeMs=" + stateAgeMs +
                     " | position=" + authoritativePosition);
             }
 
@@ -225,5 +205,5 @@ namespace Network_A.Voice.Dedicated
 /*
 توضیح فایل:
 این پوشش فقط در بخش صوت سرور اختصاصی اجرا می‌شود و هیچ فایل یا آبجکت اصلی سرور اختصاصی را تغییر نمی‌دهد.
-موقعیت از آخرین وضعیت پذیرفته‌شده در مخزن سرور خوانده می‌شود و پیش از استفاده، کاربر، اتصال، روم، سرور، توالی و تازگی داده کنترل می‌شود.
+موقعیت از آخرین وضعیت پذیرفته‌شده در مخزن سرور خوانده می‌شود و پیش از استفاده، هویت اتصال، روم، سرور، توالی و معتبر بودن مقادیر عددی کنترل می‌شود. محدودیت زمانی برای آخرین موقعیت پذیرفته‌شده وجود ندارد.
 */

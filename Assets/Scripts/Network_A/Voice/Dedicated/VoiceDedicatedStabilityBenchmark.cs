@@ -34,7 +34,6 @@ namespace Network_A.Voice.Dedicated
 
         [Header("Manual Benchmark Settings")]
         [SerializeField, Min(1)] private int benchmarkSampleCount = 2400;
-        [SerializeField, Min(1)] private int maximumAcceptedStateAgeMs = 15000;
         [SerializeField] private bool configureOnStart = true;
 
         private readonly List<ResolvedParticipant> resolvedParticipants =
@@ -94,13 +93,6 @@ namespace Network_A.Voice.Dedicated
                     "The benchmark sample count must be greater than zero.");
             }
 
-            if (maximumAcceptedStateAgeMs <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    "maximumAcceptedStateAgeMs",
-                    "The maximum accepted state age must be greater than zero.");
-            }
-
             requiredSampleCount = benchmarkSampleCount;
             configured = true;
             captureRunning = false;
@@ -118,7 +110,6 @@ namespace Network_A.Voice.Dedicated
                 " | enterSetupRange=3.01..3.10" +
                 " | exitSetupRange=3.40..3.49" +
                 " | source=DedicatedPlayerStateStore" +
-                " | maxStateAgeMs=" + maximumAcceptedStateAgeMs +
                 " | identity=userId+connectionId");
         }
 
@@ -254,16 +245,6 @@ namespace Network_A.Voice.Dedicated
                     !Matches(record.connectionId, rawConnectionId) ||
                     record.sequence <= 0 ||
                     record.serverTimestampUnixMs <= 0)
-                {
-                    continue;
-                }
-
-                long stateAgeMs =
-                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() -
-                    record.serverTimestampUnixMs;
-
-                if (stateAgeMs < -5000 ||
-                    stateAgeMs > maximumAcceptedStateAgeMs)
                 {
                     continue;
                 }

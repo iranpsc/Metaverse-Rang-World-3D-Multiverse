@@ -73,8 +73,20 @@ namespace Network_A.Voice.Client.Routing.WebGL
                 return;
             }
 
-            string targetSceneName = VoiceWebGLLobbyRouteSelection.ResolveGameplaySceneName(VoiceWebGLLobbyRouteSelection.NormalGameplaySceneName);
             Scene activeScene = SceneManager.GetActiveScene();
+
+#if UNITY_WEBGL || UNITY_EDITOR
+            // WebGL lobby has no Set Voice button. Choose the route BEFORE this
+            // Authenticated handler requests a scene load (the Binder runs later).
+            // Editor is included because this WebGL lobby is tested in Play Mode.
+            if (activeScene.IsValid() && activeScene.name == VoiceWebGLLobbyRouteSelection.LobbySceneName)
+            {
+                WebGlVoiceOnlySceneTargetWrapper.ResolveForBuildingRoom();
+                Debug.Log("VOICE_WEBGL_SCENE_ROUTE=VOICE_SELECTED_BEFORE_LOAD | scene=" + activeScene.name);
+            }
+#endif
+
+            string targetSceneName = VoiceWebGLLobbyRouteSelection.ResolveGameplaySceneName(VoiceWebGLLobbyRouteSelection.NormalGameplaySceneName);
 
             if (activeScene.IsValid() && activeScene.name == targetSceneName)
             {
