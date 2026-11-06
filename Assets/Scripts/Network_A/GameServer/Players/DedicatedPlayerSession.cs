@@ -22,6 +22,10 @@ namespace Network_A.GameServer.Players
         public bool isReady;
         public bool isAuthenticated;
 
+        // True only for the current registration event when an existing verified player session
+        // was rebound to a new websocket connection instead of being created as a new player.
+        public bool wasReconnectRebound;
+
         public bool HasConnectionId => !string.IsNullOrWhiteSpace(connectionId);
         public bool HasUserId => !string.IsNullOrWhiteSpace(userId);
         public bool HasPlayerId => !string.IsNullOrWhiteSpace(playerId);
@@ -134,7 +138,36 @@ namespace Network_A.GameServer.Players
         {
             lastSeenAtUnixMs = nowUnixMs;
         }
+        //
+        //* این تابع اطلاعات اتصال تأییدشده جدید را روی همان سشن قبلی اعمال می کند.
+        public void RebindVerifiedConnection(DedicatedPlayerSession verifiedSession, long nowUnixMs)
+        {
+            if (verifiedSession == null) return;
 
+            long preservedJoinedAtUnixMs = joinedAtUnixMs;
+
+            connectionId = verifiedSession.connectionId;
+            remoteEndPoint = verifiedSession.remoteEndPoint;
+
+            userId = verifiedSession.userId;
+            playerId = verifiedSession.playerId;
+            userName = verifiedSession.userName;
+
+            roomId = verifiedSession.roomId;
+            serverId = verifiedSession.serverId;
+            sessionId = verifiedSession.sessionId;
+
+            joinedAtUnixMs = preservedJoinedAtUnixMs > 0
+                ? preservedJoinedAtUnixMs
+                : verifiedSession.joinedAtUnixMs > 0
+                    ? verifiedSession.joinedAtUnixMs
+                    : nowUnixMs;
+
+            isReady = verifiedSession.isReady;
+            isAuthenticated = verifiedSession.isAuthenticated;
+
+            Touch(nowUnixMs);
+        }
         /*
         توضیح مکتوب فایل:
         این فایل مدل داخلی پلیر تأیید شده داخل یونیتی ددیکیتد سرور است.

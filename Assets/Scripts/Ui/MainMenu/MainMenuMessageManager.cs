@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using RTLTMPro;
 using UnityEngine.UI;
+using Network_A.Core;
 
 namespace Project.UI.MainMenu
 {
@@ -186,7 +187,7 @@ namespace Project.UI.MainMenu
             lock (_lock)
             {
                 if (messageQueue.Count > 0)
-                    _currentRoutine = CoroutineRunner.Run(ProcessMessage(messageQueue.Dequeue()));//نمایش پیام شروع شود.
+                    _currentRoutine = CoroutineRunner_A.Run(ProcessMessage(messageQueue.Dequeue()));//نمایش پیام شروع شود.
             }
         }
         /*
@@ -292,7 +293,7 @@ namespace Project.UI.MainMenu
         private void ClearQueue()
         {
             lock (_lock) { messageQueue.Clear(); _currentClickAction = null; }
-            if (_currentRoutine != null) CoroutineRunner.Stop(_currentRoutine);
+            if (_currentRoutine != null) CoroutineRunner_A.Stop(_currentRoutine);
             _isProcessing = false;
             if (messagePanel != null) messagePanel.alpha = 0f;
 

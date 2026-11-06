@@ -111,7 +111,7 @@ public class MetaverseNetworkPlayerMovementBridge : MonoBehaviour
         {
             type = RealtimeMessageTypes.PlayerInput,
             netId = identity.NetId,
-            roomId = MetaverseNetworkClient.roomId,
+            roomId = !string.IsNullOrWhiteSpace(identity.RoomId) ? identity.RoomId : MetaverseNetworkClient.roomId,
             connectionId = MetaverseNetworkClient.connectionId,
             userId = MetaverseNetworkClient.userId,
             playerId = MetaverseNetworkClient.playerId,
@@ -238,6 +238,13 @@ public class MetaverseNetworkPlayerMovementBridge : MonoBehaviour
             return false;
         }
 
+        if (!string.IsNullOrWhiteSpace(identity.RoomId) &&
+            !string.Equals(identity.RoomId, session.roomId, StringComparison.Ordinal))
+        {
+            SetRejectReason("identity_room_mismatch");
+            return false;
+        }
+
         if (!IsOwner(identity, session))
         {
             SetRejectReason("not_owner");
@@ -296,7 +303,7 @@ public class MetaverseNetworkPlayerMovementBridge : MonoBehaviour
     private string BuildSequenceKey(DedicatedPlayerSession session, int netId)
     {
         string ownerKey = !string.IsNullOrWhiteSpace(session.connectionId) ? session.connectionId.Trim() : session.userId;
-        return Safe(ownerKey) + ":" + netId;
+        return Safe(session.roomId) + ":" + Safe(ownerKey) + ":" + netId;
     }
 
     private void RegisterSmokeMove(DedicatedPlayerSession session)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Network_A.Auth;
@@ -31,6 +31,10 @@ namespace Network_A.DedicatedGameServer.Client
         [Header("Auth")]
         [SerializeField] private string fallbackUserName = "unity_test_player";
         [SerializeField] private bool disconnectBeforeConnect = true;
+
+        [Header("Transient WebSocket Connect Retry")]
+        [SerializeField, Min(1)] private int websocketConnectMaxAttempts = 2;
+        [SerializeField, Min(0.1f)] private float websocketConnectRetryDelaySeconds = 1f;
 
         [Header("Debug")]
         [SerializeField] private bool verboseLogs = true;
@@ -162,7 +166,13 @@ namespace Network_A.DedicatedGameServer.Client
 
                 Log("Connecting to dedicated server | host=" + host + " | port=" + port + " | secure=" + secure + " | path=" + path);
 
-                bool connected = await wsClient.ConnectToDedicatedServerAsync(host, port, secure, path, flowCts.Token);
+                bool connected = await ConnectDedicatedWebSocketWithRetryAsync(
+                    host,
+                    port,
+                    secure,
+                    path,
+                    flowCts.Token
+                );
 
                 if (!connected)
                 {
@@ -220,6 +230,101 @@ namespace Network_A.DedicatedGameServer.Client
                     flowCts = null;
                 }
             }
+        }
+
+        //* این تابع فقط مرحله اتصال وب سوکت را با همان تیکت و تعداد محدود دوباره تلاش می کند.
+        //* در شکست اتصال، تیکت تازه نمی گیرد و فقط ترنسپورت قبلی توسط خود کلاینت پاک و دوباره ساخته می شود.
+        private async Task<bool> ConnectDedicatedWebSocketWithRetryAsync(
+            string host,
+            int port,
+            bool secure,
+            string path,
+            CancellationToken cancellationToken)
+        {
+            int maxAttempts = Mathf.Clamp(websocketConnectMaxAttempts, 1, 3);
+            int retryDelayMilliseconds = Mathf.Max(100, Mathf.RoundToInt(websocketConnectRetryDelaySeconds * 1000f));
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                Log(
+                    "Dedicated websocket connect attempt started | attempt=" +
+                    attempt +
+                    "/" +
+                    maxAttempts +
+                    " | host=" +
+                    host +
+                    " | port=" +
+                    port +
+                    " | secure=" +
+                    secure +
+                    " | path=" +
+                    path
+                );
+
+                bool connected = await wsClient.ConnectToDedicatedServerAsync(
+                    host,
+                    port,
+                    secure,
+                    path,
+                    cancellationToken
+                );
+
+                if (connected)
+                {
+                    Log(
+                        "Dedicated websocket connect attempt succeeded | attempt=" +
+                        attempt +
+                        "/" +
+                        maxAttempts
+                    );
+
+                    return true;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string lastError = wsClient != null && !string.IsNullOrWhiteSpace(wsClient.LastError)
+                    ? wsClient.LastError.Trim()
+                    : "unknown_connect_error";
+
+                Log(
+                    "Dedicated websocket connect attempt failed | attempt=" +
+                    attempt +
+                    "/" +
+                    maxAttempts +
+                    " | error=" +
+                    lastError
+                );
+
+                if (attempt >= maxAttempts || !IsTransientDedicatedWebSocketConnectError(lastError)) return false;
+
+                Log(
+                    "Dedicated websocket transient failure detected. Retrying with the same ticket after " +
+                    retryDelayMilliseconds +
+                    " ms."
+                );
+
+                await Task.Delay(retryDelayMilliseconds, cancellationToken);
+            }
+
+            return false;
+        }
+
+        //* این تابع فقط خطاهای موقت اتصال وب سوکت را برای تلاش دوباره مجاز می داند.
+        private static bool IsTransientDedicatedWebSocketConnectError(string error)
+        {
+            if (string.IsNullOrWhiteSpace(error)) return true;
+
+            string value = error.Trim().ToLowerInvariant();
+
+            return value.Contains("websocket_connect_failed")
+                   || value.Contains("connect_cancelled_or_timeout")
+                   || value.Contains("connect_exception")
+                   || value.Contains("unable to connect")
+                   || value.Contains("ssl")
+                   || value.Contains("transport");
         }
 
         //* این تابع منتظر می ماند تا اکسس توکن آماده شود و اگر لازم بود قبل از تیکت رفرش می زند.

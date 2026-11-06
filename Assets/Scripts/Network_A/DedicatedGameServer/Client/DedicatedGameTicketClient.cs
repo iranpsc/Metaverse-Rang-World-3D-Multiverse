@@ -16,6 +16,7 @@ namespace Network_A.DedicatedGameServer.Client
         [Header("Ticket Request")]
         [SerializeField] private string roomId = "";
         [SerializeField] private string roomName = "";
+        [SerializeField] private int roomMaxPlayers = 50;
         [SerializeField] private string region = "eu-central";
         [SerializeField] private string zone = "de-1";
         [SerializeField] private string preferredServerId = "";
@@ -25,6 +26,11 @@ namespace Network_A.DedicatedGameServer.Client
         [Header("Http")]
         [SerializeField] private int timeoutSeconds = 15;
         [SerializeField] private bool logRawResponse = true;
+
+        [Header("Http Transient Retry")]
+        [SerializeField] private int maxTicketRequestAttempts = 3;
+        [SerializeField] private int transientRetryBaseDelayMs = 500;
+        [SerializeField] private int transientRetryMaxDelayMs = 2000;
 
         [Header("Auth Refresh Gate")]
         [SerializeField] private int accessTokenRefreshSkewSeconds = 60;
@@ -60,6 +66,7 @@ namespace Network_A.DedicatedGameServer.Client
             {
                 roomId = SafeTrim(roomId),
                 roomName = SafeTrim(roomName),
+                roomMaxPlayers = Mathf.Clamp(roomMaxPlayers, 1, 1024),
                 region = SafeTrim(region),
                 zone = SafeTrim(zone),
                 preferredServerId = SafeTrim(preferredServerId),
@@ -70,7 +77,8 @@ namespace Network_A.DedicatedGameServer.Client
                     source = "unity_client",
                     platform = Application.platform.ToString(),
                     unityVersion = Application.unityVersion,
-                    client = "DedicatedGameTicketClient"
+                    client = "DedicatedGameTicketClient",
+                    roomMaxPlayers = Mathf.Clamp(roomMaxPlayers, 1, 1024)
                 }
             };
 
@@ -84,7 +92,11 @@ namespace Network_A.DedicatedGameServer.Client
             string url = BuildControlUrl("/game-server-control/client/ticket");
             string json = JsonUtility.ToJson(requestDto);
 
-            DedicatedTicketHttpResult httpResult = await SendJsonPostAsync(url, json, accessToken, cancellationToken);
+            DedicatedTicketHttpResult httpResult = await SendJsonPostWithRetryAsync(
+                url,
+                json,
+                accessToken,
+                cancellationToken);
 
             LastRawBody = httpResult.RawBody;
 
@@ -126,6 +138,7 @@ namespace Network_A.DedicatedGameServer.Client
                       " | serverId=" + response.data.connection.serverId +
                       " | roomId=" + response.data.connection.roomId +
                       " | roomName=" + SafeTrim(roomName) +
+                      " | roomMaxPlayers=" + Mathf.Clamp(roomMaxPlayers, 1, 1024) +
                       " | host=" + response.data.connection.host +
                       " | port=" + response.data.connection.port +
                       " | secure=" + response.data.connection.secure +
@@ -143,10 +156,22 @@ namespace Network_A.DedicatedGameServer.Client
             if (!string.IsNullOrWhiteSpace(safeRoomName)) roomName = safeRoomName;
         }
 
+        public void SetRoomContext(string newRoomId, string newRoomName, int newRoomMaxPlayers)
+        {
+            SetRoomContext(newRoomId, newRoomName);
+            SetRoomMaxPlayers(newRoomMaxPlayers);
+        }
+
+        public void SetRoomMaxPlayers(int newRoomMaxPlayers)
+        {
+            roomMaxPlayers = Mathf.Clamp(newRoomMaxPlayers, 1, 1024);
+        }
+
         public void ClearRoomContext()
         {
             roomId = string.Empty;
             roomName = string.Empty;
+            roomMaxPlayers = 50;
         }
 
         public void SetPreferredServerId(string newPreferredServerId)
@@ -162,6 +187,11 @@ namespace Network_A.DedicatedGameServer.Client
         public string GetCurrentRoomName()
         {
             return SafeTrim(roomName);
+        }
+
+        public int GetCurrentRoomMaxPlayers()
+        {
+            return Mathf.Clamp(roomMaxPlayers, 1, 1024);
         }
 
         //* این تابع بررسی می کند پاسخ تیکت برای اتصال به ددیکیتد سرور کافی است یا نه.
@@ -383,14 +413,114 @@ namespace Network_A.DedicatedGameServer.Client
             return long.TryParse(rawValue, out value);
         }
 
-        //* این تابع درخواست جیسون پست را با Authorization Bearer ارسال می کند.
-        private async Task<DedicatedTicketHttpResult> SendJsonPostAsync(
+        //* این تابع درخواست تیکت را در خطاهای موقت ترنسپورت با درخواست کاملاً جدید و تاخیر محدود دوباره ارسال می کند.
+        private async Task<DedicatedTicketHttpResult> SendJsonPostWithRetryAsync(
             string url,
             string json,
             string accessToken,
             CancellationToken cancellationToken)
         {
+            int safeMaxAttempts = maxTicketRequestAttempts <= 0
+                ? 3
+                : Mathf.Clamp(maxTicketRequestAttempts, 1, 10);
+            DedicatedTicketHttpResult lastResult = null;
+
+            for (int attempt = 1; attempt <= safeMaxAttempts; attempt++)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return DedicatedTicketHttpResult.Fail(
+                        0,
+                        "request_cancelled",
+                        string.Empty,
+                        false,
+                        "Cancelled");
+                }
+
+                lastResult = await SendJsonPostOnceAsync(
+                    url,
+                    json,
+                    accessToken,
+                    attempt,
+                    safeMaxAttempts,
+                    cancellationToken);
+
+                if (lastResult.IsSuccess)
+                {
+                    return lastResult;
+                }
+
+                bool hasAnotherAttempt = attempt < safeMaxAttempts;
+                bool shouldRetry =
+                    hasAnotherAttempt &&
+                    lastResult.IsTransientTransportFailure;
+
+                if (!shouldRetry)
+                {
+                    return lastResult;
+                }
+
+                int delayMs = CalculateTransientRetryDelayMs(attempt);
+
+                Debug.LogWarning(
+                    "[DedicatedGameTicketClient] Transient ticket transport failure. " +
+                    "A fresh request will be created after delay. " +
+                    "attempt=" + attempt + "/" + safeMaxAttempts +
+                    " | nextAttempt=" + (attempt + 1) +
+                    " | delayMs=" + delayMs +
+                    " | status=" + lastResult.StatusCode +
+                    " | transportResult=" + lastResult.TransportResult +
+                    " | error=" + lastResult.ErrorMessage);
+
+                await Task.Delay(delayMs, cancellationToken);
+            }
+
+            return lastResult ?? DedicatedTicketHttpResult.Fail(
+                0,
+                "ticket_request_failed_without_result",
+                string.Empty,
+                false,
+                "Unknown");
+        }
+
+        //* این تابع فاصله تلاش بعدی را به صورت افزایشی و محدود محاسبه می کند.
+        private int CalculateTransientRetryDelayMs(int completedAttempt)
+        {
+            int configuredBaseDelayMs = transientRetryBaseDelayMs <= 0
+                ? 500
+                : transientRetryBaseDelayMs;
+
+            int safeBaseDelayMs = Mathf.Clamp(
+                configuredBaseDelayMs,
+                100,
+                10000);
+
+            int configuredMaxDelayMs = transientRetryMaxDelayMs <= 0
+                ? 2000
+                : transientRetryMaxDelayMs;
+
+            int safeMaxDelayMs = Mathf.Clamp(
+                configuredMaxDelayMs,
+                safeBaseDelayMs,
+                30000);
+
+            int multiplier = Mathf.Max(1, completedAttempt);
+            long calculatedDelay = (long)safeBaseDelayMs * multiplier;
+
+            return (int)Math.Min(calculatedDelay, safeMaxDelayMs);
+        }
+
+        //* این تابع فقط یک درخواست جیسون پست را با Authorization Bearer ارسال می کند و در پایان کامل Dispose می شود.
+        private async Task<DedicatedTicketHttpResult> SendJsonPostOnceAsync(
+            string url,
+            string json,
+            string accessToken,
+            int attempt,
+            int maxAttempts,
+            CancellationToken cancellationToken)
+        {
             byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+            float startedAt = Time.realtimeSinceStartup;
 
             using (UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST))
             {
@@ -403,6 +533,12 @@ namespace Network_A.DedicatedGameServer.Client
                 request.SetRequestHeader("Authorization", "Bearer " + accessToken.Trim());
                 request.SetRequestHeader("X-Metaverse-Client", "unity");
 
+                Debug.Log(
+                    "[DedicatedGameTicketClient] Ticket HTTP attempt started" +
+                    " | attempt=" + attempt + "/" + maxAttempts +
+                    " | timeoutSeconds=" + request.timeout +
+                    " | url=" + url);
+
                 UnityWebRequestAsyncOperation operation = request.SendWebRequest();
 
                 while (!operation.isDone)
@@ -410,18 +546,47 @@ namespace Network_A.DedicatedGameServer.Client
                     if (cancellationToken.IsCancellationRequested)
                     {
                         request.Abort();
-                        return DedicatedTicketHttpResult.Fail(0, "request_cancelled", string.Empty);
+
+                        return DedicatedTicketHttpResult.Fail(
+                            0,
+                            "request_cancelled",
+                            string.Empty,
+                            false,
+                            "Cancelled");
                     }
 
                     await Task.Yield();
                 }
 
-                string rawBody = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
+                string rawBody = request.downloadHandler != null
+                    ? request.downloadHandler.text
+                    : string.Empty;
+
                 int statusCode = (int)request.responseCode;
+                int elapsedMs = Mathf.Max(
+                    0,
+                    Mathf.RoundToInt((Time.realtimeSinceStartup - startedAt) * 1000f));
+
+                string transportResult = request.result.ToString();
 
                 if (logRawResponse)
                 {
-                    Debug.Log("[DedicatedGameTicketClient] Status=" + statusCode + " Body=" + rawBody);
+                    Debug.Log(
+                        "[DedicatedGameTicketClient] Ticket HTTP attempt completed" +
+                        " | attempt=" + attempt + "/" + maxAttempts +
+                        " | result=" + transportResult +
+                        " | status=" + statusCode +
+                        " | elapsedMs=" + elapsedMs +
+                        " | Body=" + rawBody);
+                }
+                else
+                {
+                    Debug.Log(
+                        "[DedicatedGameTicketClient] Ticket HTTP attempt completed" +
+                        " | attempt=" + attempt + "/" + maxAttempts +
+                        " | result=" + transportResult +
+                        " | status=" + statusCode +
+                        " | elapsedMs=" + elapsedMs);
                 }
 
                 bool isHttpOk = statusCode >= 200 && statusCode < 300;
@@ -429,13 +594,28 @@ namespace Network_A.DedicatedGameServer.Client
                     request.result == UnityWebRequest.Result.ConnectionError ||
                     request.result == UnityWebRequest.Result.DataProcessingError;
 
+                bool isTransientTransportFailure =
+                    statusCode == 0 &&
+                    hasTransportError;
+
                 if (!isHttpOk || hasTransportError)
                 {
-                    string error = string.IsNullOrWhiteSpace(request.error) ? rawBody : request.error;
-                    return DedicatedTicketHttpResult.Fail(statusCode, error, rawBody);
+                    string error = string.IsNullOrWhiteSpace(request.error)
+                        ? rawBody
+                        : request.error;
+
+                    return DedicatedTicketHttpResult.Fail(
+                        statusCode,
+                        error,
+                        rawBody,
+                        isTransientTransportFailure,
+                        transportResult);
                 }
 
-                return DedicatedTicketHttpResult.Success(statusCode, rawBody);
+                return DedicatedTicketHttpResult.Success(
+                    statusCode,
+                    rawBody,
+                    transportResult);
             }
         }
 
@@ -487,6 +667,7 @@ namespace Network_A.DedicatedGameServer.Client
     {
         public string roomId;
         public string roomName;
+        public int roomMaxPlayers;
         public string region;
         public string zone;
         public string preferredServerId;
@@ -502,6 +683,7 @@ namespace Network_A.DedicatedGameServer.Client
         public string platform;
         public string unityVersion;
         public string client;
+        public int roomMaxPlayers;
     }
 
     [Serializable]
@@ -520,6 +702,7 @@ namespace Network_A.DedicatedGameServer.Client
         public string userId;
         public DedicatedGameTicketDto ticket;
         public DedicatedGameTicketConnectionDto connection;
+        public DedicatedGameTicketRoomCapacityDto roomCapacity;
         public DedicatedGameTicketSessionDto session;
     }
 
@@ -546,9 +729,24 @@ namespace Network_A.DedicatedGameServer.Client
         public string directHost;
         public int directPort;
         public string roomId;
+        public string roomName;
+        public int roomMaxPlayers;
         public string sessionId;
         public string region;
         public string zone;
+        public int reservedPlayers;
+        public int availableReservedSlots;
+    }
+
+    [Serializable]
+    public class DedicatedGameTicketRoomCapacityDto
+    {
+        public string roomId;
+        public string roomName;
+        public int roomMaxPlayers;
+        public string source;
+        public int reservedPlayers;
+        public int availableReservedSlots;
     }
 
     [Serializable]
@@ -570,28 +768,42 @@ namespace Network_A.DedicatedGameServer.Client
         public int StatusCode { get; private set; }
         public string ErrorMessage { get; private set; }
         public string RawBody { get; private set; }
+        public bool IsTransientTransportFailure { get; private set; }
+        public string TransportResult { get; private set; }
 
         //* این تابع نتیجه موفق اچ تی تی پی را می سازد.
-        public static DedicatedTicketHttpResult Success(int statusCode, string rawBody)
+        public static DedicatedTicketHttpResult Success(
+            int statusCode,
+            string rawBody,
+            string transportResult = "Success")
         {
             return new DedicatedTicketHttpResult
             {
                 IsSuccess = true,
                 StatusCode = statusCode,
                 ErrorMessage = string.Empty,
-                RawBody = rawBody
+                RawBody = rawBody,
+                IsTransientTransportFailure = false,
+                TransportResult = transportResult ?? string.Empty
             };
         }
 
-        //* این تابع نتیجه ناموفق اچ تی تی پی را می سازد.
-        public static DedicatedTicketHttpResult Fail(int statusCode, string errorMessage, string rawBody)
+        //* این تابع نتیجه ناموفق اچ تی تی پی را می سازد و مشخص می کند خطا برای Retry موقت مناسب است یا نه.
+        public static DedicatedTicketHttpResult Fail(
+            int statusCode,
+            string errorMessage,
+            string rawBody,
+            bool isTransientTransportFailure = false,
+            string transportResult = "")
         {
             return new DedicatedTicketHttpResult
             {
                 IsSuccess = false,
                 StatusCode = statusCode,
-                ErrorMessage = errorMessage,
-                RawBody = rawBody
+                ErrorMessage = errorMessage ?? string.Empty,
+                RawBody = rawBody ?? string.Empty,
+                IsTransientTransportFailure = isTransientTransportFailure,
+                TransportResult = transportResult ?? string.Empty
             };
         }
     }
