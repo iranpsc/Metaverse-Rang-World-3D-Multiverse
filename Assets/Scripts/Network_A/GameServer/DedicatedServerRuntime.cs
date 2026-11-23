@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Network_A.GameServer
@@ -12,6 +13,8 @@ namespace Network_A.GameServer
 
         public bool IsRunning { get; private set; }
         public DedicatedServerConfigData CurrentConfig { get; private set; }
+
+        private readonly List<string> list_BoundRoomId = new List<string>();
 
         public event Action<DedicatedServerConfigData> RuntimeStarted;
         public event Action RuntimeStopped;
@@ -152,21 +155,53 @@ namespace Network_A.GameServer
 
             if (IsRunning)
             {
+                if (CurrentConfig == null)
+                {
+                    CurrentConfig = config.CreateSnapshot();
+                }
+
                 string runningRoomId = CurrentConfig == null ? string.Empty : CurrentConfig.roomId;
                 string safeRunningRoomId = SafeTrim(runningRoomId);
 
                 if (!string.IsNullOrWhiteSpace(safeRunningRoomId) &&
                     !string.Equals(safeRunningRoomId, safeRoomId, StringComparison.Ordinal))
                 {
-                    error = "Dedicated runtime is already running for another room.";
-                    return false;
+                    AddBoundRoomId(safeRoomId);
+
+                    Log("Runtime room accepted as additional room | primaryRoomId=" +
+                        safeRunningRoomId + " | roomId=" + safeRoomId +
+                        " | boundRoomCount=" + list_BoundRoomId.Count);
+
+                    return true;
                 }
             }
 
             config.ApplyRealtimeRoom(safeRoomId, safeRoomName);
             CurrentConfig = config.CreateSnapshot();
-            Log("Runtime room updated | roomId=" + CurrentConfig.roomId + " | roomName=" + CurrentConfig.roomName);
+            AddBoundRoomId(safeRoomId);
+
+            Log("Runtime room updated | roomId=" + CurrentConfig.roomId +
+                " | roomName=" + CurrentConfig.roomName +
+                " | boundRoomCount=" + list_BoundRoomId.Count);
+
             return true;
+        }
+
+        //* این تابع روم های بایند شده به ران تایم را بدون تکرار نگه می دارد.
+        private void AddBoundRoomId(string roomId)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            if (string.IsNullOrWhiteSpace(safeRoomId)) return;
+
+            for (int i = 0; i < list_BoundRoomId.Count; i++)
+            {
+                if (string.Equals(list_BoundRoomId[i], safeRoomId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            list_BoundRoomId.Add(safeRoomId);
         }
 
         public void RefreshRuntimeConfigSnapshot()

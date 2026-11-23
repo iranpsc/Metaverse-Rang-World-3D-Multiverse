@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#000000">
+
+  <title>{{{ PRODUCT_NAME }}}</title>
+
+  <link rel="shortcut icon" href="TemplateData/favicon.ico">
+  <link rel="stylesheet" href="TemplateData/style.css">
+</head>
+
+<body>
+  <div id="unity-container">
+    <canvas id="unity-canvas"
+            width="{{{ WIDTH }}}"
+            height="{{{ HEIGHT }}}"
+            tabindex="-1"></canvas>
+
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+
+      <div id="unity-progress-text">0%</div>
+    </div>
+
+    <div id="unity-warning"></div>
+  </div>
+
+  <div id="mobile-entry">
+    <div class="card">
+      <button id="enter-game" type="button">ورود تمام‌صفحه به بازی</button>
+      <div class="hint">
+        با ورود به بازی، مرورگر تمام‌صفحه می‌شود و حالت افقی فعال می‌شود.
+      </div>
+    </div>
+  </div>
+
+  <div id="orientation-warning">
+    این مرورگر اجازهٔ قفل خودکار حالت افقی را نداد.<br>
+    برای ادامه، گوشی را افقی کنید.
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const container = document.getElementById("unity-container");
+      const canvas = document.getElementById("unity-canvas");
+      const loadingBar = document.getElementById("unity-loading-bar");
+      const progressBarFull = document.getElementById("unity-progress-bar-full");
+      const progressText = document.getElementById("unity-progress-text");
+      const warningBanner = document.getElementById("unity-warning");
+      const mobileEntry = document.getElementById("mobile-entry");
+      const enterButton = document.getElementById("enter-game");
+      const orientationWarning = document.getElementById("orientation-warning");
+
+      const isMobile =
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+        (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 1100);
+
+      let unityStarted = false;
+      let mobileEntryCompleted = false;
+
+      function unityShowBanner(msg, type) {
+        function updateBannerVisibility() {
+          warningBanner.style.display =
+            warningBanner.children.length ? "block" : "none";
+        }
+
+        const div = document.createElement("div");
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+
+        if (type === "error") {
+          div.style = "background:red;padding:10px;";
+        } else if (type === "warning") {
+          div.style = "background:yellow;padding:10px;";
+          setTimeout(() => {
+            if (div.parentNode === warningBanner) {
+              warningBanner.removeChild(div);
+            }
+            updateBannerVisibility();
+          }, 5000);
+        }
+
+        updateBannerVisibility();
+      }
+
+      function updateViewportHeight() {
+        const h =
+          (window.visualViewport && window.visualViewport.height) ||
+          window.innerHeight ||
+          document.documentElement.clientHeight;
+
+        if (h > 0) {
+          container.style.height = h + "px";
+          canvas.style.height = h + "px";
+        }
+      }
+
+      function isLandscape() {
+        return window.innerWidth > window.innerHeight;
+      }
+
+      function refreshOrientationWarning() {
+        if (!isMobile || !mobileEntryCompleted) {
+          orientationWarning.style.display = "none";
+          return;
+        }
+
+        orientationWarning.style.display =
+          isLandscape() ? "none" : "flex";
+      }
+
+      async function requestFullscreenNow() {
+        const root = document.documentElement;
+
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          return true;
+        }
+
+        try {
+          if (root.requestFullscreen) {
+            await root.requestFullscreen({ navigationUI: "hide" });
+            return true;
+          }
+
+          if (root.webkitRequestFullscreen) {
+            root.webkitRequestFullscreen();
+            return true;
+          }
+        } catch (error) {
+          console.warn("[MetaRang] Fullscreen request rejected:", error);
+        }
+
+        return false;
+      }
+
+      async function lockLandscapeNow() {
+        try {
+          if (screen.orientation && screen.orientation.lock) {
+            try {
+              await screen.orientation.lock("landscape-primary");
+              return true;
+            } catch (_) {
+              await screen.orientation.lock("landscape");
+              return true;
+            }
+          }
+        } catch (error) {
+          console.warn("[MetaRang] Landscape lock rejected:", error);
+        }
+
+        return false;
+      }
+
+      async function enterMobileGame() {
+        enterButton.disabled = true;
+
+        const fullscreenOk = await requestFullscreenNow();
+
+        let landscapeOk = await lockLandscapeNow();
+
+        if (!landscapeOk && fullscreenOk) {
+          await new Promise(resolve => setTimeout(resolve, 120));
+          landscapeOk = await lockLandscapeNow();
+        }
+
+        mobileEntryCompleted = true;
+        mobileEntry.style.display = "none";
+
+        updateViewportHeight();
+        refreshOrientationWarning();
+        startUnity();
+      }
+
+      async function tryRelockAfterFullscreenChange() {
+        if (!isMobile || !mobileEntryCompleted) return;
+
+        await lockLandscapeNow();
+        updateViewportHeight();
+        refreshOrientationWarning();
+      }
+
+      function startUnity() {
+        if (unityStarted) return;
+        unityStarted = true;
+
+        loadingBar.style.display = "block";
+        progressBarFull.style.width = "0%";
+        progressText.textContent = "0%";
+
+        const buildUrl = "Build";
+        const loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+
+        const config = {
+          arguments: [],
+          dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+          frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_WASM
+          codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#endif
+#if MEMORY_FILENAME
+          memoryUrl: buildUrl + "/{{{ MEMORY_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+          symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+          streamingAssetsUrl: "StreamingAssets",
+          companyName: "{{{ COMPANY_NAME }}}",
+          productName: "{{{ PRODUCT_NAME }}}",
+          productVersion: "{{{ PRODUCT_VERSION }}}",
+          showBanner: unityShowBanner
+        };
+
+        const script = document.createElement("script");
+        script.src = loaderUrl;
+
+        script.onload = () => {
+          createUnityInstance(canvas, config, (progress) => {
+            const safeProgress = Math.max(0, Math.min(1, progress || 0));
+            const percent = Math.round(safeProgress * 100);
+
+            progressBarFull.style.width = (safeProgress * 100) + "%";
+            progressText.textContent = percent + "%";
+
+            updateViewportHeight();
+          }).then((unityInstance) => {
+            window.unityInstance = unityInstance;
+            progressBarFull.style.width = "100%";
+            progressText.textContent = "100%";
+            loadingBar.style.display = "none";
+            updateViewportHeight();
+          }).catch((message) => {
+            console.error(message);
+            loadingBar.style.display = "none";
+            unityShowBanner(String(message), "error");
+          });
+        };
+
+        script.onerror = () => {
+          loadingBar.style.display = "none";
+          unityShowBanner("Unity WebGL loader failed to load.", "error");
+        };
+
+        document.body.appendChild(script);
+      }
+
+      enterButton.addEventListener("click", enterMobileGame, { once: true });
+
+      document.addEventListener(
+        "fullscreenchange",
+        tryRelockAfterFullscreenChange
+      );
+
+      document.addEventListener(
+        "webkitfullscreenchange",
+        tryRelockAfterFullscreenChange
+      );
+
+      window.addEventListener("resize", () => {
+        updateViewportHeight();
+        refreshOrientationWarning();
+      });
+
+      window.addEventListener("orientationchange", () => {
+        setTimeout(() => {
+          updateViewportHeight();
+          refreshOrientationWarning();
+        }, 120);
+      });
+
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener(
+          "resize",
+          updateViewportHeight
+        );
+      }
+
+      updateViewportHeight();
+
+      if (isMobile) {
+        mobileEntry.style.display = "flex";
+      } else {
+        startUnity();
+      }
+
+      window.MetaRangEnterMobileGame = enterMobileGame;
+    })();
+  </script>
+</body>
+</html>

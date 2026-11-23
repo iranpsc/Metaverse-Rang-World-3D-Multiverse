@@ -12,6 +12,9 @@ namespace Network_A.GameServer.Gameplay
         private readonly Dictionary<string, DedicatedPlayerStateRecord> dict_stateByConnectionId =
             new Dictionary<string, DedicatedPlayerStateRecord>();
 
+        private readonly Dictionary<string, DedicatedPlayerStateRecord> dict_stateByUserId =
+            new Dictionary<string, DedicatedPlayerStateRecord>();
+
         public int StateCount
         {
             get
@@ -37,6 +40,7 @@ namespace Network_A.GameServer.Gameplay
             long serverTimeUnixMs)
         {
             LastStateRejectReason = string.Empty;
+
             if (session == null)
             {
                 LastStateRejectReason = "session_missing";
@@ -51,14 +55,23 @@ namespace Network_A.GameServer.Gameplay
 
             lock (syncLock)
             {
-                if (dict_stateByConnectionId.TryGetValue(session.connectionId, out DedicatedPlayerStateRecord oldRecord))
+                DedicatedPlayerStateRecord oldRecord = null;
+
+                if (!string.IsNullOrWhiteSpace(session.connectionId))
                 {
-                    if (message.sequence > 0 && oldRecord.sequence > 0 && message.sequence <= oldRecord.sequence)
-                    {
-                        LastRejectedSequence = message.sequence;
-                        LastStateRejectReason = "stale_or_duplicate_sequence";
-                        return oldRecord;
-                    }
+                    dict_stateByConnectionId.TryGetValue(session.connectionId, out oldRecord);
+                }
+
+                if (oldRecord == null && !string.IsNullOrWhiteSpace(session.userId))
+                {
+                    dict_stateByUserId.TryGetValue(BuildRoomUserKey(session.roomId, session.userId), out oldRecord);
+                }
+
+                if (oldRecord != null && message.sequence > 0 && oldRecord.sequence > 0 && message.sequence <= oldRecord.sequence)
+                {
+                    LastRejectedSequence = message.sequence;
+                    LastStateRejectReason = "stale_or_duplicate_sequence";
+                    return oldRecord;
                 }
             }
 
@@ -92,7 +105,32 @@ namespace Network_A.GameServer.Gameplay
 
             lock (syncLock)
             {
-                dict_stateByConnectionId[session.connectionId] = record;
+                string safeConnectionId = SafeTrim(record.connectionId);
+                string safeUserId = SafeTrim(record.userId);
+                string roomUserKey = BuildRoomUserKey(record.roomId, record.userId);
+
+                if (!string.IsNullOrWhiteSpace(safeUserId) &&
+                    dict_stateByUserId.TryGetValue(roomUserKey, out DedicatedPlayerStateRecord previousRecord) &&
+                    previousRecord != null)
+                {
+                    string previousConnectionId = SafeTrim(previousRecord.connectionId);
+
+                    if (!string.IsNullOrWhiteSpace(previousConnectionId) &&
+                        !string.Equals(previousConnectionId, safeConnectionId, StringComparison.Ordinal))
+                    {
+                        dict_stateByConnectionId.Remove(previousConnectionId);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(safeConnectionId))
+                {
+                    dict_stateByConnectionId[safeConnectionId] = record;
+                }
+
+                if (!string.IsNullOrWhiteSpace(safeUserId))
+                {
+                    dict_stateByUserId[roomUserKey] = record;
+                }
             }
 
             LastAcceptedSequence = record.sequence;
@@ -104,24 +142,50 @@ namespace Network_A.GameServer.Gameplay
         //* این تابع وضعیت ذخیره شده یک کانکشن را حذف می کند.
         public bool RemoveByConnectionId(string connectionId, string reason)
         {
-            if (string.IsNullOrWhiteSpace(connectionId)) return false;
+            string safeConnectionId = SafeTrim(connectionId);
+            string safeReason = SafeTrim(reason);
+            if (string.IsNullOrWhiteSpace(safeConnectionId)) return false;
 
             DedicatedPlayerStateRecord removed = null;
+            bool skipRemoveEventForReconnect = string.Equals(safeReason, "duplicate_user_replaced", StringComparison.Ordinal);
 
             lock (syncLock)
             {
-                if (!dict_stateByConnectionId.TryGetValue(connectionId, out removed))
+                if (!dict_stateByConnectionId.TryGetValue(safeConnectionId, out removed))
                 {
                     return false;
                 }
 
-                dict_stateByConnectionId.Remove(connectionId);
+                dict_stateByConnectionId.Remove(safeConnectionId);
+
+                string safeUserId = SafeTrim(removed.userId);
+                string roomUserKey = BuildRoomUserKey(removed.roomId, removed.userId);
+                if (!string.IsNullOrWhiteSpace(safeUserId))
+                {
+                    if (skipRemoveEventForReconnect)
+                    {
+                        dict_stateByUserId[roomUserKey] = removed;
+                    }
+                    else if (dict_stateByUserId.TryGetValue(roomUserKey, out DedicatedPlayerStateRecord mappedRecord) && mappedRecord == removed)
+                    {
+                        dict_stateByUserId.Remove(roomUserKey);
+                    }
+                }
             }
 
-            PlayerStateRemoved?.Invoke(removed, reason);
+            if (skipRemoveEventForReconnect)
+            {
+                Debug.Log("[DedicatedPlayerStateStore] State remove skipped for reconnect rebind | userId=" +
+                          SafeTrim(removed.userId) + " | connectionId=" + safeConnectionId +
+                          " | reason=" + safeReason + " | event=NO | count=" + StateCount);
+
+                return true;
+            }
+
+            PlayerStateRemoved?.Invoke(removed, safeReason);
 
             Debug.Log("[DedicatedPlayerStateStore] State removed | connectionId=" +
-                      connectionId + " | reason=" + reason + " | count=" + StateCount);
+                      safeConnectionId + " | reason=" + safeReason + " | count=" + StateCount);
 
             return true;
         }
@@ -165,6 +229,18 @@ namespace Network_A.GameServer.Gameplay
             }
 
             return null;
+        }
+
+        //* این تابع وضعیت آخر یک یوزر را داخل روم مشخص برمی گرداند.
+        public DedicatedPlayerStateRecord GetByUserIdInRoom(string roomId, string userId)
+        {
+            string roomUserKey = BuildRoomUserKey(roomId, userId);
+            if (string.IsNullOrWhiteSpace(roomUserKey)) return null;
+
+            lock (syncLock)
+            {
+                return dict_stateByUserId.TryGetValue(roomUserKey, out DedicatedPlayerStateRecord record) ? record : null;
+            }
         }
 
         //* این تابع وضعیت آخر یک پلیر را برمی گرداند.
@@ -236,9 +312,105 @@ namespace Network_A.GameServer.Gameplay
             return "phase=33A" +
                    " | mirrorRoute=PlayerStateStore" +
                    " | states=" + StateCount +
+                   " | userStates=" + GetUserStateCount() +
                    " | lastAcceptedSequence=" + LastAcceptedSequence +
                    " | lastRejectedSequence=" + LastRejectedSequence +
                    " | lastRejectReason=" + LastStateRejectReason;
+        }
+
+
+        //* این تابع وضعیت ذخیره شده یک یوزر را به کانکشن جدید ریکانکت وصل می کند.
+        public bool RebindConnectionForUser(DedicatedPlayerSession session, string reason = "reconnect_rebind")
+        {
+            if (session == null) return false;
+            return RebindConnectionForUser(session.userId, session.connectionId, session, reason);
+        }
+
+        //* این تابع وضعیت ذخیره شده یک یوزر را با یوزر آی دی و کانکشن جدید دوباره مپ می کند.
+        public bool RebindConnectionForUser(string userId, string newConnectionId, DedicatedPlayerSession session = null, string reason = "reconnect_rebind")
+        {
+            string safeUserId = SafeTrim(userId);
+            string safeConnectionId = SafeTrim(newConnectionId);
+            string safeReason = SafeTrim(reason);
+
+            if (string.IsNullOrWhiteSpace(safeUserId) || string.IsNullOrWhiteSpace(safeConnectionId)) return false;
+
+            DedicatedPlayerStateRecord record = null;
+            string oldConnectionId = string.Empty;
+            string roomUserKey = session != null ? BuildRoomUserKey(session.roomId, safeUserId) : string.Empty;
+
+            lock (syncLock)
+            {
+                if (string.IsNullOrWhiteSpace(roomUserKey) || !dict_stateByUserId.TryGetValue(roomUserKey, out record) || record == null)
+                {
+                    foreach (KeyValuePair<string, DedicatedPlayerStateRecord> pair in dict_stateByUserId)
+                    {
+                        if (pair.Value == null) continue;
+                        if (!string.Equals(SafeTrim(pair.Value.userId), safeUserId, StringComparison.Ordinal)) continue;
+                        roomUserKey = pair.Key;
+                        record = pair.Value;
+                        break;
+                    }
+                }
+
+                if (record == null) return false;
+
+                oldConnectionId = SafeTrim(record.connectionId);
+
+                if (!string.IsNullOrWhiteSpace(oldConnectionId) &&
+                    !string.Equals(oldConnectionId, safeConnectionId, StringComparison.Ordinal))
+                {
+                    dict_stateByConnectionId.Remove(oldConnectionId);
+                }
+
+                ApplySessionToRecord(record, session, safeUserId, safeConnectionId);
+                roomUserKey = BuildRoomUserKey(record.roomId, record.userId);
+
+                dict_stateByConnectionId[safeConnectionId] = record;
+                dict_stateByUserId[roomUserKey] = record;
+            }
+
+            PlayerStateUpdated?.Invoke(record);
+
+            Debug.Log("[DedicatedPlayerStateStore] State rebound for reconnect | userId=" + safeUserId +
+                      " | oldConnectionId=" + oldConnectionId +
+                      " | newConnectionId=" + safeConnectionId +
+                      " | reason=" + safeReason +
+                      " | stateRemovedEvent=NO");
+
+            return true;
+        }
+
+        //* این تابع اطلاعات سشن جدید را روی رکورد وضعیت قبلی اعمال می کند.
+        private void ApplySessionToRecord(DedicatedPlayerStateRecord record, DedicatedPlayerSession session, string userId, string connectionId)
+        {
+            if (record == null) return;
+
+            record.connectionId = connectionId;
+            record.userId = userId;
+
+            if (session == null) return;
+
+            record.playerId = session.playerId;
+            record.userName = session.userName;
+            record.roomId = session.roomId;
+            record.serverId = session.serverId;
+            record.sessionId = session.sessionId;
+        }
+
+        //* این تابع تعداد وضعیت های ذخیره شده بر اساس یوزر آی دی را برمی گرداند.
+        public int GetUserStateCount()
+        {
+            lock (syncLock)
+            {
+                return dict_stateByUserId.Count;
+            }
+        }
+
+        //* این تابع کلید داخلی وضعیت یوزر داخل روم را می سازد.
+        private string BuildRoomUserKey(string roomId, string userId)
+        {
+            return SafeTrim(roomId) + "::" + SafeTrim(userId);
         }
 
         private string SafeTrim(string value)
@@ -255,6 +427,7 @@ namespace Network_A.GameServer.Gameplay
             {
                 removed = new List<DedicatedPlayerStateRecord>(dict_stateByConnectionId.Values);
                 dict_stateByConnectionId.Clear();
+                dict_stateByUserId.Clear();
             }
 
             for (int i = 0; i < removed.Count; i++)
@@ -268,7 +441,7 @@ namespace Network_A.GameServer.Gameplay
         /*
         توضیح مکتوب فایل:
         این اسکریپت سمت یونیتی ددیکیتد سرور آخرین وضعیت حرکتی پلیرهای احراز شده را نگه می دارد.
-        کلید اصلی وضعیت، کانکشن آی دی وب سوکت است.
+        کلیدهای وضعیت، کانکشن آی دی وب سوکت و یوزر آی دی هستند.
         اطلاعات قابل اعتماد پلیر از DedicatedPlayerSession گرفته می شود، نه از بادی کلاینت.
         DedicatedGameMessageRouter بعد از دریافت player_state این استور را به روز می کند.
         */

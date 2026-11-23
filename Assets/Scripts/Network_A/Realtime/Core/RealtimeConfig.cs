@@ -97,13 +97,13 @@ namespace Network_A.Realtime.Core
 #endif
         }
 
-        //* آدرس تارگت جی‌آر‌پی‌سی اِستریمینگ را برای کلاینت‌های مبتنی بر Channel آماده می‌کند.
+        //* آدرس تارگت جی‌آر‌پی‌سی اِستریمینگ را برای کلاینت‌های مبتنی بر چنِل آماده می‌کند.
         public string GetGrpcStreamingTarget()
         {
             return grpcStreamingHost + ":" + grpcStreamingPort;
         }
 
-        //* آدرس کامل جی‌آر‌پی‌سی اِستریمینگ را با اسکیم برای GrpcChannel آماده می‌کند.
+        //* آدرس کامل جی‌آر‌پی‌سی اِستریمینگ را با اسکیم برای جی آر پی سی چَنِل آماده می‌کند.
         public string GetGrpcStreamingAddress()
         {
             string scheme = grpcStreamingUseTls ? "https" : "http";

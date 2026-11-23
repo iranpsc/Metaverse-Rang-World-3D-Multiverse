@@ -1,5 +1,6 @@
 using UnityEngine;
 using Mirror;
+using UnityEngine.SceneManagement;
 
 namespace Meta
 {
@@ -15,7 +16,6 @@ namespace Meta
         {
             if (AutoStart) Invoke(nameof(StartNetwork), StartupDelay);
             //NetworkManager.singleton.StartHost();
-
         }
 
         public void StartNetwork()
@@ -28,7 +28,7 @@ namespace Meta
                 Debug.Log("[Meta_AutoStart] Server started automatically.");
             }
 
-#elif UNITY_WEBGL
+#elif UNITY_WEBGL && !UNITY_EDITOR
             // ---- WEBGL BUILD ----
             if (NetworkManager.singleton != null)
             {
@@ -45,10 +45,28 @@ namespace Meta
                 NetworkManager.singleton.StartClient();
                 //NetworkManager.singleton.StartHost();
 
-
                 Debug.Log("[Meta_AutoStart] Client started automatically (address: root).");
             }
 #endif
+        }
+
+        /*       public void GetLobby()
+              {
+      #if UNITY_WEBGL && !UNITY_EDITOR
+                  SceneManager.LoadSceneAsync("Lobby 1 WebGL", LoadSceneMode.Single);
+      #else
+                  SceneManager.LoadSceneAsync("Lobby 1", LoadSceneMode.Single);
+      #endif
+              } */
+
+        public void GetLobby()
+        {
+#if UNITY_WEBGL
+            SceneManager.LoadSceneAsync("Lobby 1 WebGL", LoadSceneMode.Single);
+#else
+    SceneManager.LoadSceneAsync("Lobby 1", LoadSceneMode.Single);
+#endif
+
         }
     }
 }

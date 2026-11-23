@@ -50,6 +50,9 @@ namespace Network_A.GameServer
         private string renewedServiceToken = string.Empty;
         private float lastServiceTokenRenewAttemptAt = -9999f;
         private bool isRenewingServiceToken;
+        private Task<bool> serviceTokenRenewalTask;
+        private float lastSuccessfulServiceTokenRenewAtRealtime = -1f;
+        private int lastSuccessfulServiceTokenTtlSeconds;
 
         //* این تابع رفرنس ران تایم ددیکیتد سرور را در شروع آبجکت پیدا می کند.
         private void Awake()
@@ -114,6 +117,9 @@ namespace Network_A.GameServer
             LastServiceTokenRenewReason = string.Empty;
             lastServiceTokenRenewAttemptAt = -9999f;
             isRenewingServiceToken = false;
+            serviceTokenRenewalTask = null;
+            lastSuccessfulServiceTokenRenewAtRealtime = -1f;
+            lastSuccessfulServiceTokenTtlSeconds = 0;
 
             if (!autoRegisterOnRuntimeStarted) return;
 
@@ -274,13 +280,28 @@ namespace Network_A.GameServer
         //* این تابع قبل از استفاده حساس، در صورت نیاز سرویس توکن را تازه می کند و مقدار فعال را برمی گرداند.
         public async Task<string> GetFreshServiceTokenAsync(CancellationToken cancellationToken = default, bool forceRenew = false)
         {
-            if (forceRenew)
+            bool renewalSucceeded = forceRenew
+                ? await RenewServiceTokenAsync(cancellationToken)
+                : await RenewServiceTokenIfNeededAsync(cancellationToken);
+            if (!renewalSucceeded) return string.Empty;
+
+            bool hasMonotonicLease = lastSuccessfulServiceTokenRenewAtRealtime >= 0f &&
+                                      lastSuccessfulServiceTokenTtlSeconds > 0;
+            if (hasMonotonicLease &&
+                Time.realtimeSinceStartup - lastSuccessfulServiceTokenRenewAtRealtime >=
+                    lastSuccessfulServiceTokenTtlSeconds)
             {
-                await RenewServiceTokenAsync(cancellationToken);
+                Debug.LogWarning("VOICE_G5_DEDICATED_SERVICE_TOKEN_EXPIRED_LOCAL=PASS" +
+                                 " | timeSource=monotonic_ttl");
+                return string.Empty;
             }
-            else
+
+            if (!hasMonotonicLease && LastServiceTokenExpiresAtMs > 0 &&
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= LastServiceTokenExpiresAtMs)
             {
-                await RenewServiceTokenIfNeededAsync(cancellationToken);
+                Debug.LogWarning("VOICE_G5_DEDICATED_SERVICE_TOKEN_EXPIRED_LOCAL=PASS" +
+                                 " | timeSource=utc_fallback");
+                return string.Empty;
             }
 
             return GetActiveServiceToken();
@@ -290,15 +311,23 @@ namespace Network_A.GameServer
         public bool ShouldRenewServiceToken()
         {
             if (!serviceTokenRenewalEnabled) return false;
-            if (isRenewingServiceToken) return false;
-
             DedicatedServerConfigData config = GetSafeConfig();
             if (config == null) return false;
             if (string.IsNullOrWhiteSpace(ResolveServiceToken(config))) return false;
 
+            if (lastSuccessfulServiceTokenRenewAtRealtime >= 0f &&
+                lastSuccessfulServiceTokenTtlSeconds > 0)
+            {
+                float renewAfterSeconds = Mathf.Max(
+                    1f,
+                    lastSuccessfulServiceTokenTtlSeconds -
+                    Mathf.Max(5, serviceTokenRenewalSafetyMarginSeconds));
+                return Time.realtimeSinceStartup - lastSuccessfulServiceTokenRenewAtRealtime >=
+                       renewAfterSeconds;
+            }
+
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             long safetyMs = Mathf.Max(5, serviceTokenRenewalSafetyMarginSeconds) * 1000L;
-
             if (LastServiceTokenExpiresAtMs <= 0) return true;
             return nowMs >= LastServiceTokenExpiresAtMs - safetyMs;
         }
@@ -309,9 +338,17 @@ namespace Network_A.GameServer
             if (!ShouldRenewServiceToken()) return true;
 
             float now = Time.realtimeSinceStartup;
-            if (now - lastServiceTokenRenewAttemptAt < Mathf.Max(1, serviceTokenRenewalRetryCooldownSeconds))
+            if (now - lastServiceTokenRenewAttemptAt < Mathf.Max(1, serviceTokenRenewalRetryCooldownSeconds) &&
+                (serviceTokenRenewalTask == null || serviceTokenRenewalTask.IsCompleted))
             {
-                return true;
+                if (serviceTokenRenewalTask != null)
+                {
+                    return serviceTokenRenewalTask.Status == TaskStatus.RanToCompletion &&
+                           serviceTokenRenewalTask.Result;
+                }
+
+                return LastServiceTokenExpiresAtMs <= 0 ||
+                       DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < LastServiceTokenExpiresAtMs;
             }
 
             return await RenewServiceTokenAsync(cancellationToken);
@@ -325,10 +362,21 @@ namespace Network_A.GameServer
         }
 
         //* این تابع سرویس توکن ددیکیتد سرور را به شکل مستقیم تمدید می کند.
-        public async Task<bool> RenewServiceTokenAsync(CancellationToken cancellationToken = default)
+        public Task<bool> RenewServiceTokenAsync(CancellationToken cancellationToken = default)
         {
-            if (!serviceTokenRenewalEnabled) return true;
-            if (isRenewingServiceToken) return true;
+            if (!serviceTokenRenewalEnabled) return Task.FromResult(true);
+            if (serviceTokenRenewalTask != null && !serviceTokenRenewalTask.IsCompleted)
+            {
+                return serviceTokenRenewalTask;
+            }
+
+            serviceTokenRenewalTask = RenewServiceTokenCoreAsync(cancellationToken);
+            return serviceTokenRenewalTask;
+        }
+
+        private async Task<bool> RenewServiceTokenCoreAsync(CancellationToken cancellationToken)
+        {
+            if (isRenewingServiceToken) return false;
 
             DedicatedServerConfigData config = GetSafeConfig();
 
@@ -396,6 +444,8 @@ namespace Network_A.GameServer
 
                 renewedServiceToken = response.data.serviceToken;
                 LastServiceTokenExpiresAtMs = response.data.expiresAt;
+                lastSuccessfulServiceTokenRenewAtRealtime = Time.realtimeSinceStartup;
+                lastSuccessfulServiceTokenTtlSeconds = Mathf.Max(0, response.data.ttlSeconds);
                 LastServiceTokenRenewReason = response.reason;
                 LastError = string.Empty;
 
@@ -560,6 +610,9 @@ namespace Network_A.GameServer
             int effectiveCurrentPlayers = isOffline ? 0 : ReadCurrentPlayersFromRegistry(currentPlayers);
             string heartbeatRoomId = ResolveHeartbeatRoomId(config);
             string heartbeatRoomName = ResolveHeartbeatRoomName(config);
+            DedicatedHeartbeatRoomDto[] heartbeatRooms = isOffline
+                ? new DedicatedHeartbeatRoomDto[0]
+                : CreateHeartbeatRoomSnapshot(config, heartbeatRoomId);
 
             DedicatedHeartbeatRequestDto request = new DedicatedHeartbeatRequestDto
             {
@@ -577,14 +630,25 @@ namespace Network_A.GameServer
                 memoryMb = isOffline ? 0 : ReadMemoryMb(),
                 cpuPercent = 0f,
                 pingMs = 0,
-                uptimeSeconds = Mathf.RoundToInt(Time.realtimeSinceStartup)
+                uptimeSeconds = Mathf.RoundToInt(Time.realtimeSinceStartup),
+                rooms = heartbeatRooms,
+                metadata = new DedicatedHeartbeatMetadataDto
+                {
+                    source = "unity_dedicated_server_heartbeat",
+                    activeRoomCount = heartbeatRooms.Length,
+                    totalRoomPlayers = Mathf.Max(0, effectiveCurrentPlayers),
+                    rooms = heartbeatRooms
+                }
             };
 
             string url = BuildControlUrl(config.controlBaseUrl, "/game-server-control/dedicated/heartbeat");
             string json = JsonUtility.ToJson(request);
 
             Debug.Log("[GameServerControlDedicatedClient] Heartbeat request | currentPlayers=" +
-                      request.currentPlayers + " | status=" + request.status + " | roomId=" + request.roomId);
+                      request.currentPlayers + " | status=" + request.status +
+                      " | roomId=" + request.roomId +
+                      " | roomCount=" + heartbeatRooms.Length +
+                      " | rooms=" + FormatHeartbeatRoomsForLog(heartbeatRooms));
 
             DedicatedHttpResult httpResult = await SendJsonPostAsync(url, json, cancellationToken);
 
@@ -639,7 +703,12 @@ namespace Network_A.GameServer
                 return "online";
             }
 
-            return HasRoomContext(config) ? safeStatus : "idle";
+            if (!HasRoomContext(config))
+            {
+                return "warm";
+            }
+
+            return string.Equals(safeStatus, "warm", StringComparison.OrdinalIgnoreCase) ? "online" : safeStatus;
         }
 
         private int ReadCurrentPlayersFromRegistry(int fallback)
@@ -673,6 +742,89 @@ namespace Network_A.GameServer
         private string ResolveHeartbeatRoomName(DedicatedServerConfigData config)
         {
             return config == null ? string.Empty : SafeTrim(config.roomName);
+        }
+
+        //* این تابع اسنپ شات روم های فعال را برای هارت بیت مولتی روم می سازد.
+        private DedicatedHeartbeatRoomDto[] CreateHeartbeatRoomSnapshot(DedicatedServerConfigData config, string primaryRoomId)
+        {
+            EnsurePlayerRegistryReference();
+
+            if (playerRegistry == null)
+            {
+                string configRoomId = config == null ? string.Empty : SafeTrim(config.roomId);
+                if (string.IsNullOrWhiteSpace(configRoomId)) return new DedicatedHeartbeatRoomDto[0];
+
+                return new[]
+                {
+                    new DedicatedHeartbeatRoomDto
+                    {
+                        roomId = configRoomId,
+                        roomName = config == null ? string.Empty : SafeTrim(config.roomName),
+                        currentPlayers = 0,
+                        isPrimary = true
+                    }
+                };
+            }
+
+            System.Collections.Generic.List<string> roomIds = playerRegistry.CreateActiveRoomIdSnapshot();
+            System.Collections.Generic.List<DedicatedHeartbeatRoomDto> result = new System.Collections.Generic.List<DedicatedHeartbeatRoomDto>();
+            string safePrimaryRoomId = SafeTrim(primaryRoomId);
+
+            for (int i = 0; i < roomIds.Count; i++)
+            {
+                string roomId = SafeTrim(roomIds[i]);
+                if (string.IsNullOrWhiteSpace(roomId)) continue;
+
+                result.Add(new DedicatedHeartbeatRoomDto
+                {
+                    roomId = roomId,
+                    roomName = ResolveRoomNameForHeartbeat(config, roomId, safePrimaryRoomId),
+                    currentPlayers = playerRegistry.GetCurrentPlayerCountInRoom(roomId),
+                    isPrimary = string.Equals(roomId, safePrimaryRoomId, StringComparison.Ordinal)
+                });
+            }
+
+            if (result.Count <= 0 && !string.IsNullOrWhiteSpace(safePrimaryRoomId))
+            {
+                result.Add(new DedicatedHeartbeatRoomDto
+                {
+                    roomId = safePrimaryRoomId,
+                    roomName = config == null ? string.Empty : SafeTrim(config.roomName),
+                    currentPlayers = 0,
+                    isPrimary = true
+                });
+            }
+
+            return result.ToArray();
+        }
+
+        //* این تابع نام روم را برای گزارش هارت بیت انتخاب می کند.
+        private string ResolveRoomNameForHeartbeat(DedicatedServerConfigData config, string roomId, string primaryRoomId)
+        {
+            if (config == null) return string.Empty;
+            if (string.Equals(SafeTrim(roomId), SafeTrim(primaryRoomId), StringComparison.Ordinal)) return SafeTrim(config.roomName);
+            return string.Empty;
+        }
+
+        //* این تابع خلاصه روم های هارت بیت را برای لاگ می سازد.
+        private string FormatHeartbeatRoomsForLog(DedicatedHeartbeatRoomDto[] rooms)
+        {
+            if (rooms == null || rooms.Length <= 0) return "none";
+
+            StringBuilder builder = new StringBuilder();
+
+            for (int i = 0; i < rooms.Length; i++)
+            {
+                DedicatedHeartbeatRoomDto room = rooms[i];
+                if (room == null) continue;
+
+                if (builder.Length > 0) builder.Append(",");
+                builder.Append(SafeTrim(room.roomId));
+                builder.Append(":");
+                builder.Append(Mathf.Max(0, room.currentPlayers));
+            }
+
+            return builder.Length <= 0 ? "none" : builder.ToString();
         }
 
         private string SafeTrim(string value)
@@ -878,7 +1030,7 @@ namespace Network_A.GameServer
         توضیح مکتوب فایل:
         این اسکریپت پل ارتباطی یونیتی ددیکیتد سرور با نود جی اس گیم سرور کنترل است.
         علاوه بر رجیستر و هارت بیت آنلاین، هنگام توقف ران تایم یک هارت بیت آفلاین می فرستد.
-        اگر روم آی دی هنوز مشخص نباشد، سرور با وضعیت آیدل رجیستر و هارت بیت می فرستد.
+        اگر روم آی دی هنوز مشخص نباشد، سرور با وضعیت وارم رجیستر و هارت بیت می فرستد.
         بعد از بایند روم یا وریفای تیکت، روم آی دی واقعی وارد همین مسیر می شود.
         سرویس توکن از کانفیگ ددیکیتد سرور خوانده می شود و نباید داخل کلاینت عمومی قرار بگیرد.
         */
@@ -920,6 +1072,26 @@ namespace Network_A.GameServer
         public float cpuPercent;
         public int pingMs;
         public int uptimeSeconds;
+        public DedicatedHeartbeatRoomDto[] rooms;
+        public DedicatedHeartbeatMetadataDto metadata;
+    }
+
+    [Serializable]
+    public class DedicatedHeartbeatRoomDto
+    {
+        public string roomId;
+        public string roomName;
+        public int currentPlayers;
+        public bool isPrimary;
+    }
+
+    [Serializable]
+    public class DedicatedHeartbeatMetadataDto
+    {
+        public string source;
+        public int activeRoomCount;
+        public int totalRoomPlayers;
+        public DedicatedHeartbeatRoomDto[] rooms;
     }
 
     [Serializable]
@@ -1006,3 +1178,4 @@ namespace Network_A.GameServer
         }
     }
 }
+

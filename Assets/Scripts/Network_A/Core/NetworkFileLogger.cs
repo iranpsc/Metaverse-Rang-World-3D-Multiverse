@@ -4,8 +4,13 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 namespace Network_A.Core
 {
+    [DefaultExecutionOrder(-11000)]
     public class NetworkFileLogger : MonoBehaviour
     {
         public static NetworkFileLogger Instance { get; private set; }
@@ -31,6 +36,7 @@ namespace Network_A.Core
         bool isInitialized;
         bool reportsGenerated;
         static bool isCreating;
+        static bool isQuitting;
 
         public static string CurrentLogFilePath => Instance != null ? Instance.logFilePath : string.Empty;
         public static string CurrentMarkdownFilePath => Instance != null ? Instance.markdownFilePath : string.Empty;
@@ -54,33 +60,79 @@ namespace Network_A.Core
             public List<LogEntry> Entries = new List<LogEntry>();
         }
 
-        //* Creates logger automatically before the first scene starts.
+        //* پیش از هر اجرای Play، وضعیت‌های static را حتی در حالت Domain Reload خاموش پاک می‌کند.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStaticState()
+        {
+            Instance = null;
+            isCreating = false;
+            isQuitting = false;
+
+#if UNITY_EDITOR
+            EditorApplication.playModeStateChanged -= HandleEditorPlayModeStateChanged;
+#endif
+        }
+
+        //* لاگر را پیش از بارگذاری اولین صحنه، فقط در زمان پلی به‌صورت خودکار ایجاد می‌کند.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void CreateLoggerOnLoad()
         {
+            if (!Application.isPlaying) return;
+
+#if UNITY_EDITOR
+            EditorApplication.playModeStateChanged -= HandleEditorPlayModeStateChanged;
+            EditorApplication.playModeStateChanged += HandleEditorPlayModeStateChanged;
+#endif
+
             EnsureInstance();
         }
 
-        //* Ensures that the logger exists in the scene.
+        //* یک نمونه خودکار لاگر را فقط هنگام Play ایجاد می‌کند.
+        //* فراخوانی این تابع در Edit Mode هیچ GameObject جدیدی داخل صحنه نمی‌سازد.
         public static NetworkFileLogger EnsureInstance()
         {
             if (Instance != null) return Instance;
-            if (isCreating) return null;
+            if (!Application.isPlaying || isQuitting || isCreating) return null;
+
+            NetworkFileLogger existing = UnityEngine.Object.FindFirstObjectByType<NetworkFileLogger>(
+                FindObjectsInactive.Include);
+
+            if (existing != null)
+            {
+                Instance = existing;
+                existing.InitializeLogger();
+                return existing;
+            }
 
             isCreating = true;
-            var go = new GameObject("Network_A_FileLogger");
-            DontDestroyOnLoad(go);
-            var logger = go.AddComponent<NetworkFileLogger>();
-            isCreating = false;
-            return logger;
+
+            try
+            {
+                GameObject go = new GameObject("Network_A_FileLogger");
+
+#if UNITY_EDITOR
+                //* از ذخیره‌شدن تصادفی شیء runtime داخل فایل صحنه جلوگیری می‌کند.
+                go.hideFlags = HideFlags.DontSaveInEditor;
+#endif
+
+                NetworkFileLogger logger = go.AddComponent<NetworkFileLogger>();
+                DontDestroyOnLoad(go);
+                return logger;
+            }
+            finally
+            {
+                isCreating = false;
+            }
         }
 
-        //* Initializes logger singleton and creates a new log file for the current Play session.
+        //* نمونه سراسری را آماده و برای همان اجرای Play فایل گزارش جدید ایجاد می‌کند.
         void Awake()
         {
+            if (!Application.isPlaying) return;
+
             if (Instance != null && Instance != this)
             {
-                Destroy(this);
+                Destroy(gameObject);
                 return;
             }
 
@@ -89,22 +141,60 @@ namespace Network_A.Core
             InitializeLogger();
         }
 
-        //* Releases logger resources when the object is destroyed.
+        //* منابع لاگر را آزاد و مرجع static را پاک می‌کند.
         void OnDestroy()
         {
-            if (Instance == this) ShutdownLogger();
+            if (Instance != this) return;
+
+            ShutdownLogger();
+            Instance = null;
+            isCreating = false;
         }
 
-        //* Releases logger resources when application quits.
+        //* هنگام خروج برنامه، ایجاد دوباره لاگر را متوقف و فایل‌ها را کامل می‌کند.
         void OnApplicationQuit()
         {
+            isQuitting = true;
             ShutdownLogger();
         }
+
+#if UNITY_EDITOR
+        //* هنگام Stop کردن Play، شیء runtime را فوراً حذف می‌کند تا داخل صحنه Edit Mode باقی نماند.
+        static void HandleEditorPlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state == PlayModeStateChange.ExitingPlayMode)
+            {
+                isQuitting = true;
+
+                NetworkFileLogger logger = Instance;
+                if (logger != null)
+                {
+                    logger.ShutdownLogger();
+                    Instance = null;
+                    UnityEngine.Object.DestroyImmediate(logger.gameObject);
+                }
+            }
+            else if (state == PlayModeStateChange.EnteredEditMode)
+            {
+                Instance = null;
+                isCreating = false;
+                isQuitting = false;
+                EditorApplication.playModeStateChanged -= HandleEditorPlayModeStateChanged;
+            }
+        }
+#endif
 
         //* Creates log directory, creates session log file and starts capturing Unity logs.
         public void InitializeLogger()
         {
-            if (isInitialized) return;
+            if (isInitialized || !Application.isPlaying || isQuitting) return;
+
+            lock (lockObject)
+            {
+                allEntries.Clear();
+                requestGroups.Clear();
+                nonRequestEntries.Clear();
+            }
 
             sessionId = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string logDirectory = Path.Combine(Application.persistentDataPath, folderName);
@@ -204,14 +294,20 @@ namespace Network_A.Core
         //* Writes a log entry to file and optionally to Unity console.
         static void Write(string level, string tag, string message)
         {
-            EnsureInstance();
-            if (Instance == null)
+            NetworkFileLogger logger = EnsureInstance();
+
+            if (logger == null)
             {
-                Debug.Log("[Network_A_FileLoggerMissing] [" + level + "] [" + tag + "] " + message);
+                //* خارج از Play چیزی ساخته نمی‌شود؛ در زمان خروج نیز از ایجاد مجدد جلوگیری می‌شود.
+                if (Application.isPlaying && !isQuitting)
+                {
+                    Debug.Log("[Network_A_FileLoggerMissing] [" + level + "] [" + tag + "] " + message);
+                }
+
                 return;
             }
 
-            Instance.WriteInternal(level, tag, message);
+            logger.WriteInternal(level, tag, message);
         }
 
         //* Writes one formatted line to the raw log file and stores it for grouped reports.

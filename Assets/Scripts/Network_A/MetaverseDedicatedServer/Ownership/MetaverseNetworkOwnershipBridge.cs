@@ -108,6 +108,7 @@ public class MetaverseNetworkOwnershipBridge : MonoBehaviour
             type = RealtimeMessageTypes.Ownership,
             netId = identity.NetId,
             prefabId = identity.PrefabId,
+            roomId = identity.RoomId,
             ownerConnectionId = SafeTrim(ownerConnectionId),
             ownerUserId = SafeTrim(ownerUserId),
             ownerPlayerId = SafeTrim(ownerPlayerId),
@@ -120,6 +121,7 @@ public class MetaverseNetworkOwnershipBridge : MonoBehaviour
             serverTimeUnixMs = NowUnixMs()
         };
 
+        if (!string.IsNullOrWhiteSpace(payload.roomId)) identity.SetRoomId(payload.roomId);
         identity.SetOwnerInfo(payload.ownerConnectionId, payload.ownerUserId, payload.ownerPlayerId, serverOwned);
 
         string json = MetaverseNetworkOwnershipMessageCodec.CreateOwnershipEnvelopeJson(payload);
@@ -239,6 +241,7 @@ public class MetaverseNetworkOwnershipBridge : MonoBehaviour
         if (TryGetClientIdentity(payload.netId, out MetaverseNetworkIdentity identity))
         {
             dict_lastAppliedOwnershipVersionByNetId[payload.netId] = payload.version;
+            if (!string.IsNullOrWhiteSpace(payload.roomId)) identity.SetRoomId(payload.roomId);
             identity.SetOwnerInfo(payload.ownerConnectionId, payload.ownerUserId, payload.ownerPlayerId, payload.serverOwned);
             if (logMessages)
             {

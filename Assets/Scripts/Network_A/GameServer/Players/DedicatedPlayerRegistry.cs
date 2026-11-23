@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Network_A.GameServer.Auth;
 using Network_A.GameServer.Protocol;
@@ -10,12 +10,19 @@ namespace Network_A.GameServer.Players
     public class DedicatedPlayerRegistry : MonoBehaviour
     {
         private readonly object syncLock = new object();
+        [Header("WebSocket Cleanup")]
+        [SerializeField] private DedicatedWebSocketServer webSocketServer;
 
         private readonly Dictionary<string, DedicatedPlayerSession> dict_playersByConnectionId =
             new Dictionary<string, DedicatedPlayerSession>();
 
         private readonly Dictionary<string, string> dict_connectionIdByUserId =
             new Dictionary<string, string>();
+
+        private readonly Dictionary<string, DedicatedRoomContext> dict_roomContextByRoomId =
+            new Dictionary<string, DedicatedRoomContext>();
+
+        private string activeRoomId = string.Empty;
 
         public int CurrentPlayerCount
         {
@@ -44,7 +51,11 @@ namespace Network_A.GameServer.Players
 
         public bool HasAnyAuthenticatedPlayer => CurrentPlayerCount > 0;
 
-
+        //* این تابع رفرنس وب سوکت سرور را در شروع آبجکت پیدا می کند.
+        private void Awake()
+        {
+            EnsureWebSocketServerReference();
+        }
         //* این تابع پلیر تأیید شده را داخل رجیستری ددیکیتد سرور ثبت می کند.
         public bool TryRegisterVerifiedPlayer(
             DedicatedWebSocketConnection connection,
@@ -69,60 +80,120 @@ namespace Network_A.GameServer.Players
             DedicatedVerifyTicketRequestDto request = verifyResult.Request;
             long now = NowUnixMs();
 
-            DedicatedPlayerSession newSession = new DedicatedPlayerSession
+            DedicatedPlayerSession verifiedSession = new DedicatedPlayerSession
             {
                 connectionId = connection.ConnectionId,
                 remoteEndPoint = connection.RemoteEndPoint,
-
                 userId = SafeTrim(request.userId),
                 playerId = SafeValue(request.playerId, request.userId),
                 userName = SafeValue(request.userName, request.userId),
-
                 roomId = SafeTrim(request.roomId),
                 serverId = SafeTrim(request.serverId),
                 sessionId = SafeTrim(request.sessionId),
-
                 joinedAtUnixMs = now,
                 lastSeenAtUnixMs = now,
-
                 isReady = true,
                 isAuthenticated = true
             };
 
-            if (!ValidateSession(newSession, out error))
-            {
-                return false;
-            }
+            if (!ValidateSession(verifiedSession, out error)) return false;
 
-            DedicatedPlayerSession removedDuplicate = null;
+            DedicatedPlayerSession duplicateSocketSession = null;
+            bool reconnectRebound = false;
+            string previousConnectionId = string.Empty;
 
             lock (syncLock)
             {
-                if (dict_connectionIdByUserId.TryGetValue(newSession.userId, out string oldConnectionId))
-                {
-                    if (dict_playersByConnectionId.TryGetValue(oldConnectionId, out removedDuplicate))
-                    {
-                        dict_playersByConnectionId.Remove(oldConnectionId);
-                    }
+                string requestedRoomId = SafeTrim(verifiedSession.roomId);
+                string roomUserKey = BuildRoomUserKey(requestedRoomId, verifiedSession.userId);
 
-                    dict_connectionIdByUserId.Remove(newSession.userId);
+                if (string.IsNullOrWhiteSpace(activeRoomId))
+                {
+                    activeRoomId = requestedRoomId;
+                    Debug.Log("[DedicatedPlayerRegistry] Warm server bound to room | roomId=" + activeRoomId);
                 }
 
-                dict_playersByConnectionId[newSession.connectionId] = newSession;
-                dict_connectionIdByUserId[newSession.userId] = newSession.connectionId;
+                if (dict_connectionIdByUserId.TryGetValue(roomUserKey, out string mappedConnectionId))
+                {
+                    previousConnectionId = SafeTrim(mappedConnectionId);
+
+                    if (dict_playersByConnectionId.TryGetValue(
+                            mappedConnectionId,
+                            out DedicatedPlayerSession existingSession) &&
+                        existingSession != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(previousConnectionId))
+                        {
+                            previousConnectionId = SafeTrim(existingSession.connectionId);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(previousConnectionId))
+                        {
+                            dict_playersByConnectionId.Remove(previousConnectionId);
+                            RemoveConnectionFromRoomContextUnsafe(existingSession.roomId, previousConnectionId);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(previousConnectionId) &&
+                            !string.Equals(
+                                previousConnectionId,
+                                SafeTrim(verifiedSession.connectionId),
+                                StringComparison.Ordinal))
+                        {
+                            duplicateSocketSession = new DedicatedPlayerSession
+                            {
+                                connectionId = previousConnectionId,
+                                userId = existingSession.userId,
+                                playerId = existingSession.playerId,
+                                roomId = existingSession.roomId
+                            };
+                        }
+
+                        existingSession.RebindVerifiedConnection(verifiedSession, now);
+                        session = existingSession;
+                        reconnectRebound = true;
+                    }
+                    else
+                    {
+                        RemoveConnectionFromRoomContextUnsafe(requestedRoomId, previousConnectionId);
+                    }
+
+                    dict_connectionIdByUserId.Remove(roomUserKey);
+                }
+
+                if (session == null) session = verifiedSession;
+
+                // Preserve the distinction between a fresh join and a websocket reconnect.
+                // Subscribers still receive PlayerRegistered so authority/object/state rebind paths keep working,
+                // but presence broadcasters can suppress a false player_joined event.
+                session.wasReconnectRebound = reconnectRebound;
+
+                dict_playersByConnectionId[session.connectionId] = session;
+                dict_connectionIdByUserId[roomUserKey] = session.connectionId;
+                AddSessionToRoomContextUnsafe(session);
             }
 
-            if (removedDuplicate != null)
+            if (duplicateSocketSession != null)
             {
-                PlayerRemoved?.Invoke(removedDuplicate, "duplicate_user_replaced");
-                Debug.LogWarning("[DedicatedPlayerRegistry] Duplicate user replaced | userId=" + removedDuplicate.userId);
+                CloseRemovedDuplicateConnection(duplicateSocketSession, "duplicate_user_replaced");
+
+                Debug.LogWarning(
+                    "[DedicatedPlayerRegistry] Existing session rebound | userId=" +
+                    session.userId +
+                    " | oldConnectionId=" + previousConnectionId +
+                    " | newConnectionId=" + session.connectionId +
+                    " | sameSessionReference=YES | playerRemovedEvent=NO"
+                );
             }
 
-            session = newSession;
-
-            Debug.Log("[DedicatedPlayerRegistry] Player registered | userId=" +
-                      session.userId + " | connectionId=" + session.connectionId +
-                      " | count=" + CurrentPlayerCount);
+            Debug.Log(
+                "[DedicatedPlayerRegistry] Player registered | userId=" +
+                session.userId +
+                " | connectionId=" + session.connectionId +
+                " | roomId=" + session.roomId +
+                " | activeRoomId=" + GetPrimaryRoomId() +
+                " | reconnectRebound=" + reconnectRebound +
+                " | count=" + CurrentPlayerCount
+            );
 
             PlayerRegistered?.Invoke(session);
 
@@ -145,11 +216,8 @@ namespace Network_A.GameServer.Players
                 }
 
                 dict_playersByConnectionId.Remove(connectionId);
-
-                if (!string.IsNullOrWhiteSpace(removed.userId))
-                {
-                    dict_connectionIdByUserId.Remove(removed.userId);
-                }
+                RemoveSessionIndexesUnsafe(removed);
+                RefreshPrimaryRoomIdUnsafe();
             }
 
             Debug.Log("[DedicatedPlayerRegistry] Player removed | userId=" +
@@ -196,6 +264,8 @@ namespace Network_A.GameServer.Players
         {
             lock (syncLock)
             {
+                if (!string.IsNullOrWhiteSpace(activeRoomId)) return activeRoomId.Trim();
+
                 foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
                 {
                     if (session == null) continue;
@@ -227,6 +297,14 @@ namespace Network_A.GameServer.Players
 
             lock (syncLock)
             {
+                string currentActiveRoomId = SafeTrim(activeRoomId);
+
+                if (!string.IsNullOrWhiteSpace(currentActiveRoomId) &&
+                    !string.Equals(currentActiveRoomId, safeRoomId, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
                 foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
                 {
                     if (session == null) continue;
@@ -271,6 +349,8 @@ namespace Network_A.GameServer.Players
                 removedPlayers = new List<DedicatedPlayerSession>(dict_playersByConnectionId.Values);
                 dict_playersByConnectionId.Clear();
                 dict_connectionIdByUserId.Clear();
+                dict_roomContextByRoomId.Clear();
+                activeRoomId = string.Empty;
             }
 
             for (int i = 0; i < removedPlayers.Count; i++)
@@ -281,6 +361,43 @@ namespace Network_A.GameServer.Players
             Debug.Log("[DedicatedPlayerRegistry] Cleared | reason=" + reason);
         }
 
+        //* این تابع کانکشن قدیمی یوزر تکراری را از وب سوکت سرور می بندد.
+        private void CloseRemovedDuplicateConnection(DedicatedPlayerSession removedDuplicate, string reason)
+        {
+            if (removedDuplicate == null) return;
+
+            string oldConnectionId = SafeTrim(removedDuplicate.connectionId);
+            if (string.IsNullOrWhiteSpace(oldConnectionId)) return;
+
+            EnsureWebSocketServerReference();
+
+            if (webSocketServer == null)
+            {
+                Debug.LogWarning("[DedicatedPlayerRegistry] Duplicate socket close skipped | reason=web_socket_server_missing | oldConnectionId=" +
+                                 oldConnectionId);
+                return;
+            }
+
+            bool closed = webSocketServer.CloseConnectionById(oldConnectionId, reason);
+
+            Debug.Log("[DedicatedPlayerRegistry] Duplicate socket close requested | oldConnectionId=" +
+                      oldConnectionId + " | closed=" + closed + " | reason=" + reason);
+        }
+
+        //* این تابع رفرنس وب سوکت سرور را از صحنه پیدا می کند.
+        private void EnsureWebSocketServerReference()
+        {
+            if (webSocketServer != null) return;
+
+            webSocketServer = GetComponent<DedicatedWebSocketServer>();
+            if (webSocketServer != null) return;
+
+#if UNITY_2023_1_OR_NEWER
+            webSocketServer = UnityEngine.Object.FindFirstObjectByType<DedicatedWebSocketServer>();
+#else
+            webSocketServer = UnityEngine.Object.FindObjectOfType<DedicatedWebSocketServer>();
+#endif
+        }
         //* این تابع مدل پلیر را قبل از ثبت اعتبارسنجی می کند.
         private bool ValidateSession(DedicatedPlayerSession session, out string error)
         {
@@ -367,7 +484,27 @@ namespace Network_A.GameServer.Players
 
             lock (syncLock)
             {
-                if (!dict_connectionIdByUserId.TryGetValue(safeUserId, out string connectionId)) return null;
+                foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
+                {
+                    if (session == null) continue;
+                    if (string.Equals(SafeTrim(session.userId), safeUserId, StringComparison.Ordinal)) return session;
+                }
+            }
+
+            return null;
+        }
+
+        //* این تابع سشن را با روم آی دی و یوزر آی دی برمی گرداند.
+        public DedicatedPlayerSession GetByUserIdInRoom(string roomId, string userId)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            string safeUserId = SafeTrim(userId);
+            if (string.IsNullOrWhiteSpace(safeRoomId) || string.IsNullOrWhiteSpace(safeUserId)) return null;
+
+            lock (syncLock)
+            {
+                string roomUserKey = BuildRoomUserKey(safeRoomId, safeUserId);
+                if (!dict_connectionIdByUserId.TryGetValue(roomUserKey, out string connectionId)) return null;
                 return dict_playersByConnectionId.TryGetValue(connectionId, out DedicatedPlayerSession session) ? session : null;
             }
         }
@@ -471,15 +608,19 @@ namespace Network_A.GameServer.Players
         public bool TryGetConnectionIdByUserId(string userId, out string connectionId)
         {
             connectionId = string.Empty;
-            string safeUserId = SafeTrim(userId);
-            if (string.IsNullOrWhiteSpace(safeUserId)) return false;
+            DedicatedPlayerSession session = GetByUserId(userId);
+            if (session == null) return false;
+            connectionId = SafeTrim(session.connectionId);
+            return !string.IsNullOrWhiteSpace(connectionId);
+        }
 
-            lock (syncLock)
-            {
-                if (!dict_connectionIdByUserId.TryGetValue(safeUserId, out connectionId)) return false;
-            }
-
-            connectionId = SafeTrim(connectionId);
+        //* این تابع کانکشن آی دی را با روم آی دی و یوزر آی دی پیدا می کند.
+        public bool TryGetConnectionIdByUserIdInRoom(string roomId, string userId, out string connectionId)
+        {
+            connectionId = string.Empty;
+            DedicatedPlayerSession session = GetByUserIdInRoom(roomId, userId);
+            if (session == null) return false;
+            connectionId = SafeTrim(session.connectionId);
             return !string.IsNullOrWhiteSpace(connectionId);
         }
 
@@ -503,6 +644,13 @@ namespace Network_A.GameServer.Players
         public bool RemoveByUserId(string userId, string reason)
         {
             if (!TryGetConnectionIdByUserId(userId, out string connectionId)) return false;
+            return RemoveByConnectionId(connectionId, reason);
+        }
+
+        //* این تابع پلیر را با روم آی دی و یوزر آی دی حذف می کند.
+        public bool RemoveByUserIdInRoom(string roomId, string userId, string reason)
+        {
+            if (!TryGetConnectionIdByUserIdInRoom(roomId, userId, out string connectionId)) return false;
             return RemoveByConnectionId(connectionId, reason);
         }
 
@@ -541,6 +689,142 @@ namespace Network_A.GameServer.Players
                    " | now=" + now;
         }
 
+
+        //* این تابع تعداد روم های فعال داخل ددیکیتد سرور را برمی گرداند.
+        public int GetActiveRoomCount()
+        {
+            lock (syncLock)
+            {
+                return dict_roomContextByRoomId.Count;
+            }
+        }
+
+        //* این تابع شناسه روم های فعال را برای هارت بیت مولتی روم برمی گرداند.
+        public List<string> CreateActiveRoomIdSnapshot()
+        {
+            List<string> result = new List<string>();
+
+            lock (syncLock)
+            {
+                foreach (string roomId in dict_roomContextByRoomId.Keys)
+                {
+                    string safeRoomId = SafeTrim(roomId);
+                    if (!string.IsNullOrWhiteSpace(safeRoomId)) result.Add(safeRoomId);
+                }
+            }
+
+            return result;
+        }
+
+        //* این تابع تعداد پلیرهای فعلی یک روم را برای گزارش هارت بیت برمی گرداند.
+        public int GetCurrentPlayerCountInRoom(string roomId)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            if (string.IsNullOrWhiteSpace(safeRoomId)) return 0;
+
+            int count = 0;
+
+            lock (syncLock)
+            {
+                foreach (DedicatedPlayerSession session in dict_playersByConnectionId.Values)
+                {
+                    if (session == null) continue;
+                    if (string.Equals(SafeTrim(session.roomId), safeRoomId, StringComparison.Ordinal)) count++;
+                }
+            }
+
+            return count;
+        }
+
+        //* این تابع کلید داخلی یوزر داخل روم را می سازد.
+        private string BuildRoomUserKey(string roomId, string userId)
+        {
+            return SafeTrim(roomId) + "::" + SafeTrim(userId);
+        }
+
+        //* این تابع ایندکس های داخلی یک سشن را پاک می کند.
+        private void RemoveSessionIndexesUnsafe(DedicatedPlayerSession session)
+        {
+            if (session == null) return;
+
+            string roomUserKey = BuildRoomUserKey(session.roomId, session.userId);
+            if (!string.IsNullOrWhiteSpace(roomUserKey)) dict_connectionIdByUserId.Remove(roomUserKey);
+
+            string safeRoomId = SafeTrim(session.roomId);
+            if (!dict_roomContextByRoomId.TryGetValue(safeRoomId, out DedicatedRoomContext roomContext) || roomContext == null) return;
+
+            roomContext.connectionIds.Remove(SafeTrim(session.connectionId));
+            roomContext.userIds.Remove(SafeTrim(session.userId));
+            roomContext.playerIds.Remove(SafeTrim(session.playerId));
+            roomContext.lastUpdatedUnixMs = NowUnixMs();
+
+            if (roomContext.connectionIds.Count <= 0)
+            {
+                dict_roomContextByRoomId.Remove(safeRoomId);
+            }
+        }
+        //* این تابع فقط کانکشن قدیمی را هنگام ریبایند از کانتکست روم حذف می کند.
+        private void RemoveConnectionFromRoomContextUnsafe(string roomId, string connectionId)
+        {
+            string safeRoomId = SafeTrim(roomId);
+            string safeConnectionId = SafeTrim(connectionId);
+
+            if (string.IsNullOrWhiteSpace(safeRoomId) ||
+                string.IsNullOrWhiteSpace(safeConnectionId))
+            {
+                return;
+            }
+
+            if (!dict_roomContextByRoomId.TryGetValue(
+                    safeRoomId,
+                    out DedicatedRoomContext roomContext) ||
+                roomContext == null)
+            {
+                return;
+            }
+
+            roomContext.connectionIds.Remove(safeConnectionId);
+            roomContext.lastUpdatedUnixMs = NowUnixMs();
+        }
+        //* این تابع سشن را به کانتکست روم خودش اضافه می کند.
+        private void AddSessionToRoomContextUnsafe(DedicatedPlayerSession session)
+        {
+            if (session == null) return;
+
+            string safeRoomId = SafeTrim(session.roomId);
+            if (string.IsNullOrWhiteSpace(safeRoomId)) return;
+
+            if (!dict_roomContextByRoomId.TryGetValue(safeRoomId, out DedicatedRoomContext roomContext) || roomContext == null)
+            {
+                long now = NowUnixMs();
+                roomContext = new DedicatedRoomContext
+                {
+                    roomId = safeRoomId,
+                    createdAtUnixMs = now,
+                    lastUpdatedUnixMs = now
+                };
+                dict_roomContextByRoomId[safeRoomId] = roomContext;
+            }
+
+            roomContext.connectionIds.Add(SafeTrim(session.connectionId));
+            roomContext.userIds.Add(SafeTrim(session.userId));
+            roomContext.playerIds.Add(SafeTrim(session.playerId));
+            roomContext.lastUpdatedUnixMs = NowUnixMs();
+        }
+
+        //* این تابع روم اصلی را بعد از حذف پلیرها دوباره انتخاب می کند.
+        private void RefreshPrimaryRoomIdUnsafe()
+        {
+            if (!string.IsNullOrWhiteSpace(activeRoomId) && dict_roomContextByRoomId.ContainsKey(activeRoomId)) return;
+
+            activeRoomId = string.Empty;
+            foreach (string roomId in dict_roomContextByRoomId.Keys)
+            {
+                activeRoomId = SafeTrim(roomId);
+                return;
+            }
+        }
+
         //* این تابع هنگام حذف آبجکت، رجیستری پلیرها را پاک می کند.
         private void OnDestroy()
         {
@@ -556,4 +840,16 @@ namespace Network_A.GameServer.Players
         در فازهای بعدی سیستم اسپاون و سینک حرکت از همین رجیستری استفاده خواهد کرد.
         */
     }
+
+    [Serializable]
+    public class DedicatedRoomContext
+    {
+        public string roomId;
+        public long createdAtUnixMs;
+        public long lastUpdatedUnixMs;
+        public readonly HashSet<string> connectionIds = new HashSet<string>();
+        public readonly HashSet<string> userIds = new HashSet<string>();
+        public readonly HashSet<string> playerIds = new HashSet<string>();
+    }
+
 }
