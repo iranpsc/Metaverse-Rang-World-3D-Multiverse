@@ -1,0 +1,19 @@
+{
+  "name": "meta-environment-json-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Phase 1 local/file-backed settings service for Metaverse environment data (minimap per-citizen + daynight per-environment). JSON files on disk, no database.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test:e2e": "powershell -NoProfile -ExecutionPolicy Bypass -File e2e-smoke.ps1"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}

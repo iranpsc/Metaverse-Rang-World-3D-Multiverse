@@ -1,0 +1,201 @@
+﻿META THREE MODULES - COMPLETE PACKAGE MANIFEST
+=================================================
+Generated : 2026-11-22 22:36:47
+Unity     : 6000.2.6f2
+Package   : Assets/Script/Extentions/Modules/Export/Meta_ThreeModules_Complete.unitypackage
+Size      : 16503325 bytes
+Assets    : 68 project assets (filtered explicit + dependency closure)
+Scripts OK: yes - no compilation errors
+
+HIGHLIGHTS
+----------
+- Dropdown/rig prefab: Assets/Script/Extentions/Modules/Meta_Modules.prefab
+  Root children: Meta_Modules_DropdownHUD, Modules (Meta_MiniMap_Rig, Meta_MiniMap_HUD,
+  Meta_DayNight_Rig, Meta_CameraForce_Rig), the three ControlHUDs, and EventSystem.
+- Module roots:
+  - Assets/Script/Extentions/Modules
+  - Assets/Script/Extentions/Mini Map
+  - Assets/Script/Extentions/Day Night Cycle
+  - Assets/Script/Extentions/Meta_Modules_RuntimeTest
+- Sky materials:
+  - Sky_Anime_01_Day_a  (Assets/Before/BeautifulSky/CubeMap/Materials/Sky_Anime_01_Day_a.mat)
+  - Sky_Anime_01_dusk_b  (Assets/Before/BeautifulSky/CubeMap/Materials/Sky_Anime_01_dusk_b.mat)
+  - Sky_Anime_01_Night_c  (Assets/Before/BeautifulSky/CubeMap/Materials/Sky_Anime_01_Night_c.mat)
+- MiniMap RenderTexture: Assets/Script/Extentions/Mini Map/Mini Map.renderTexture
+- Editor tools:
+  - Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_ControlPanel_Setup.cs
+  - Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_PlayVerifier.cs
+  - Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_SceneRepair.cs
+  - Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_StoreMaintenance.cs
+  - Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_TestRigCreator.cs
+  - Assets/Script/Extentions/Mini Map/Tools/Editor/CameraForceRender_TestRigCreator.cs
+  - Assets/Script/Extentions/Mini Map/Tools/Editor/CameraForce_ControlPanel_Setup.cs
+  - Assets/Script/Extentions/Mini Map/Tools/Editor/Meta_HudStyle.cs
+  - Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_ControlPanel_Setup.cs
+  - Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_PlayDiagnose.cs
+  - Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_StoreMaintenance.cs
+  - Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_TestRigCreator.cs
+- Server stubs:
+  - Assets/Script/Extentions/Day Night Cycle/Server/e2e-smoke.ps1
+  - Assets/Script/Extentions/Day Night Cycle/Server/package-lock.json
+  - Assets/Script/Extentions/Day Night Cycle/Server/package.json
+  - Assets/Script/Extentions/Day Night Cycle/Server/README.md
+  - Assets/Script/Extentions/Day Night Cycle/Server/server.js
+  - Assets/Script/Extentions/Mini Map/Server/e2e-smoke.ps1
+  - Assets/Script/Extentions/Mini Map/Server/package-lock.json
+  - Assets/Script/Extentions/Mini Map/Server/package.json
+  - Assets/Script/Extentions/Mini Map/Server/README.md
+  - Assets/Script/Extentions/Mini Map/Server/server.js
+- asmdef: none under the module roots
+
+FULL INCLUDE LIST (68)
+---------------------------------
+
+[Documentation]
+Assets/Script/Extentions/Day Night Cycle/README.md
+Assets/Script/Extentions/Day Night Cycle/README_Meta_DayNightCycle.md
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/README_HTTP_Persistence.md
+Assets/Script/Extentions/Mini Map/README.md
+Assets/Script/Extentions/Mini Map/README_CameraForceRender.md
+Assets/Script/Extentions/Mini Map/README_Meta_MiniMap.md
+Assets/Script/Extentions/Mini Map/Tools/README_Meta_EditorTools.md
+Assets/Script/Extentions/Modules/Export/README_INSTALL.md
+
+[Materials]
+Assets/Before/BeautifulSky/CubeMap/Materials/Sky_Anime_01_Day_a.mat
+Assets/Before/BeautifulSky/CubeMap/Materials/Sky_Anime_01_dusk_b.mat
+Assets/Before/BeautifulSky/CubeMap/Materials/Sky_Anime_01_Night_c.mat
+
+[Prefabs]
+Assets/Script/Extentions/Modules/Meta_Modules.prefab
+
+[RenderTextures]
+Assets/Script/Extentions/Mini Map/Mini Map.renderTexture
+
+[Scripts]
+Assets/Script/Extentions/Day Night Cycle/EnvironmentDayNightHttpStore.cs
+Assets/Script/Extentions/Day Night Cycle/EnvironmentDayNightPlayerPrefsStore.cs
+Assets/Script/Extentions/Day Night Cycle/EnvironmentDayNightState.cs
+Assets/Script/Extentions/Day Night Cycle/IEnvironmentDayNightStore.cs
+Assets/Script/Extentions/Day Night Cycle/Meta_DayNightCycle.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_ControlPanel_Setup.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_PlayVerifier.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_SceneRepair.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_StoreMaintenance.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Editor/DayNight_TestRigCreator.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Runtime/DayNight_ControlPanel.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Runtime/DayNight_PlayVerifierProbe.cs
+Assets/Script/Extentions/Day Night Cycle/Tools/Runtime/DayNight_SceneTool.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Editor/MetaEnvironmentServerLauncher.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Editor/MetaModulesDropdown_Setup.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Editor/MetaModules_RuntimeTest_Setup.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Editor/MetaModuleTestUI_Menus.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Runtime/MetaE2ERuntimeProbe.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Runtime/MetaModulesPanelSwitcher.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Runtime/MetaModules_RuntimeTester.cs
+Assets/Script/Extentions/Meta_Modules_RuntimeTest/Runtime/Meta_ModuleTestSwitcher.cs
+Assets/Script/Extentions/Mini Map/CameraForceRenderByIndex.cs
+Assets/Script/Extentions/Mini Map/HttpMiniMapStore.cs
+Assets/Script/Extentions/Mini Map/IMiniMapCitizenStore.cs
+Assets/Script/Extentions/Mini Map/Meta_MiniMap.cs
+Assets/Script/Extentions/Mini Map/MiniMapCitizenSettings.cs
+Assets/Script/Extentions/Mini Map/PlayerPrefsMiniMapStore.cs
+Assets/Script/Extentions/Mini Map/Tools/Editor/CameraForceRender_TestRigCreator.cs
+Assets/Script/Extentions/Mini Map/Tools/Editor/CameraForce_ControlPanel_Setup.cs
+Assets/Script/Extentions/Mini Map/Tools/Editor/Meta_HudStyle.cs
+Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_ControlPanel_Setup.cs
+Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_PlayDiagnose.cs
+Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_StoreMaintenance.cs
+Assets/Script/Extentions/Mini Map/Tools/Editor/MiniMap_TestRigCreator.cs
+Assets/Script/Extentions/Mini Map/Tools/Runtime/CameraForceRender_SceneTool.cs
+Assets/Script/Extentions/Mini Map/Tools/Runtime/CameraForce_ControlPanel.cs
+Assets/Script/Extentions/Mini Map/Tools/Runtime/Meta_HudTooltip.cs
+Assets/Script/Extentions/Mini Map/Tools/Runtime/MiniMap_ControlPanel.cs
+Assets/Script/Extentions/Mini Map/Tools/Runtime/MiniMap_SceneTool.cs
+
+[Server]
+Assets/Script/Extentions/Day Night Cycle/Server/e2e-smoke.ps1
+Assets/Script/Extentions/Day Night Cycle/Server/package-lock.json
+Assets/Script/Extentions/Day Night Cycle/Server/package.json
+Assets/Script/Extentions/Day Night Cycle/Server/README.md
+Assets/Script/Extentions/Day Night Cycle/Server/server.js
+Assets/Script/Extentions/Mini Map/Server/e2e-smoke.ps1
+Assets/Script/Extentions/Mini Map/Server/package-lock.json
+Assets/Script/Extentions/Mini Map/Server/package.json
+Assets/Script/Extentions/Mini Map/Server/README.md
+Assets/Script/Extentions/Mini Map/Server/server.js
+
+[Textures]
+Assets/Before/BeautifulSky/CubeMap/Textures/Sky_Anime_01_Day_a.png
+Assets/Before/BeautifulSky/CubeMap/Textures/Sky_Anime_01_dusk_b.png
+Assets/Before/BeautifulSky/CubeMap/Textures/Sky_Anime_01_Night_c.png
+Assets/Before/BeautifulSky/Panoramic/Textures/Sky_Anime_01_Day_a.png
+Assets/Before/BeautifulSky/Panoramic/Textures/Sky_Anime_01_dusk_b.png
+Assets/Before/BeautifulSky/Panoramic/Textures/Sky_Anime_01_Night_c.png
+
+DEPENDENCY CLOSURE
+------------------
+- AssetDatabase.GetDependencies(path, true) was run for every included asset.
+- Project asset dependencies were kept only when they are module-specific or belong to the
+  BeautifulSky CubeMap/Panoramic set used by the three phase sky materials.
+- Package/built-in dependencies (URP, Input System, uGUI, Mirror, Unity modules) are not
+  exported; install them in the target project.
+- Export used ExportPackage(..., Recurse) with the already-filtered closure. Passing
+  IncludeDependencies would have re-added read-only Packages/ internals (URP shader
+  library, Input System module, uGUI core), which the filter intentionally excludes.
+- The three sky materials are built-in Skybox/Cubemap materials; their referenced cubemaps
+  and panoramic source textures are included by the dependency closure.
+
+SKIPPED / EXCLUDED (32)
+---------------------------------
+- Assets/Script/Extentions/Modules/Export/Meta_ThreeModules_Complete.unitypackage :: excluded by export filter (export housekeeping (manifest/package))
+- Assets/Script/Extentions/Modules/Export/Meta_ThreeModules_Complete_Manifest.txt :: excluded by export filter (export housekeeping (manifest/package))
+- Assets/Script/Extentions/Modules/Meta_CameraForce_ControlHUD.prefab :: not present; covered by Meta_Modules.prefab child hierarchy
+- Assets/Script/Extentions/Modules/Meta_CameraForce_Rig.prefab :: not present; covered by Meta_Modules.prefab child hierarchy
+- Assets/Script/Extentions/Modules/Meta_DayNight_ControlHUD.prefab :: not present; covered by Meta_Modules.prefab child hierarchy
+- Assets/Script/Extentions/Modules/Meta_DayNight_Rig.prefab :: not present; covered by Meta_Modules.prefab child hierarchy
+- Assets/Script/Extentions/Modules/Meta_MiniMap_ControlHUD.prefab :: not present; covered by Meta_Modules.prefab child hierarchy
+- Assets/Script/Extentions/Modules/Meta_MiniMap_Rig.prefab :: not present; covered by Meta_Modules.prefab child hierarchy
+- Assets/Script/Extentions/Modules/Meta_Modules_DropdownHUD.prefab :: not present; covered by Meta_Modules.prefab child hierarchy
+- Packages/com.unity.inputsystem/InputSystem/Actions/InputActionAsset.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.inputsystem/InputSystem/Actions/InputActionReference.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.inputsystem/InputSystem/Editor/AssetImporter/InputActionImporter.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.inputsystem/InputSystem/Editor/Icons/InputSystemUIInputModule@64.png :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.inputsystem/InputSystem/Plugins/PlayerInput/DefaultInputActions.inputactions :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.inputsystem/InputSystem/Plugins/UI/InputSystemUIInputModule.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.render-pipelines.universal/Editor/AssetVersion.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.render-pipelines.universal/Runtime/Materials/Lit.mat :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.render-pipelines.universal/Runtime/UniversalAdditionalCameraData.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.render-pipelines.universal/Shaders/Lit.shader :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/EventSystem/EventSystem.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/EventSystem/EventTrigger.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Button.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/GraphicRaycaster.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Image.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Layout/CanvasScaler.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Layout/HorizontalLayoutGroup.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Layout/LayoutElement.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Layout/VerticalLayoutGroup.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/RawImage.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/RectMask2D.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/Text.cs :: dependency filtered (package or built-in dependency (install package in target project))
+- Packages/com.unity.ugui/Runtime/UGUI/UI/Core/VertexModifiers/Outline.cs :: dependency filtered (package or built-in dependency (install package in target project))
+
+- Assets/Scenes/Lobby.unity :: project Lobby scene, intentionally excluded.
+- Assets/Scenes/Grpc/Lobby 1 WebGL.unity :: project Lobby scene, intentionally excluded.
+- Assets/Scenes/** :: all project scenes excluded (no small sample scene was present).
+- Assets/Mirror/** :: Mirror core is a dependency, not package content.
+- Assets/Network_A/**, Assets/Voice/** :: outside the three modules.
+- Assets/Before/** :: unrelated third-party content, except the BeautifulSky sky set above.
+- Library/, Temp/, Logs/, Packages/ :: project noise, never exported.
+- The standalone Meta_Modules_DropdownHUD / rig / ControlHUD prefab names were not
+  present as separate files; their complete hierarchy is inside Meta_Modules.prefab.
+
+VERIFICATION
+------------
+- Package exists: yes
+- Package size > 0: yes
+- Lobby scene path inside package: no (filtered before export)
+- Package/... internals inside package: no (filtered before export)
+- Compile errors: no
+
